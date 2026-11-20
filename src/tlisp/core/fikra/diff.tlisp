@@ -475,20 +475,51 @@ ambiguity)."
 ;; turn-begin baseline signature (turn-CREATED). An untracked file that
 ;; existed BEFORE the turn is PREEXISTING — untouched (the issue's
 ;; normative edge; file-kind alone could not distinguish them).
+;; #305 (gate r1): restore ONE path with verified semantics. The
+;; classification is BASELINE MEMBERSHIP, not the git index — a
+;; turn-created file that was `git add`ed reads "tracked" to ls-files
+;; but is ABSENT from the baseline tree; the old checkout silently
+;; failed under 2>/dev/null and the file survived revert.
+;; Preexisting = in the baseline SIGNATURE (untracked at turn-begin)
+;; OR a path the BASELINE TREE carries (tracked at turn-begin — the
+;; signature map only covers untracked files; gate r1 regression).
+(defun fikra-diff-tree-contains (dir tree p)
+  (> (length (string-trim (shell-command
+         (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                 " cat-file -e " tree ":" (fikra/thread/fikra-thread-shq p)
+                 " 2>/dev/null && echo yes || echo no")))) 2))
+
+(defun fikra-diff-restore-one (dir tree baseline p)
+  (let ((in-baseline (or (and baseline (hashmap-get baseline p))
+                         (fikra-diff-tree-contains dir tree p))))
+    (cond
+      ;; In the baseline SIGNATURE → existed pre-turn → restore its
+      ;; pre-turn state: tracked-in-tree → checkout + unstage (the
+      ;; checkout writes the index; `git restore --staged` unwinds a
+      ;; pre-turn-unstaged file's staged shape — gate r1 catch 3).
+      (in-baseline
+        (progn
+          (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                                 " checkout " tree " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
+          (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                                 " restore --staged " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))))
+      ;; ABSENT from the baseline (or the baseline is nil/errored —
+      ;; conservative: the ± emission's nil→emit-nothing mirror, NOT
+      ;; rm-everything) AND the file exists → turn-created → remove.
+      ((file-exists-p (concat dir "/" p))
+        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p)))))
+      (t nil))))
+
 (defun fikra-diff-restore-turn (paths)
   (let ((dir (fikra/thread/fikra-thread-working-dir))
         (tree (fikra-baseline-tree))
         (baseline (condition-case nil (fikra/thread/fikra-thread-field "change-baseline") (error () nil))))
-    (dolist (p paths)
-      (if (string= (fikra-file-kind dir p) "tracked")
-        ;; Tracked (incl. tracked-dirty): restore the BASELINE TREE's
-        ;; content — the pre-turn state, byte-exact (NOT HEAD).
-        (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " checkout " tree " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
-        ;; Untracked: in the baseline signature → preexisting, UNTOUCHED;
-        ;; absent → turn-created, removed.
-        (if (and baseline (hashmap-get baseline p))
-          nil
-          (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p)))))))))
+    ;; nil baseline → restore NOTHING (conservative — the exported fn
+    ;; must not rm on a missing baseline; gate r1 catch 2).
+    (if (null baseline)
+      nil
+      (dolist (p paths)
+        (fikra-diff-restore-one dir tree baseline p)))))
 
 ;; Paths changed since the stored baseline — the DRY computation shared
 ;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).

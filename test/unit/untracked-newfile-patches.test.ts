@@ -148,5 +148,24 @@ describe("#305 B — the revert affordance (r semantics)", () => {
     expect(existsSync(join(dir, "made-by-turn.txt"))).toBe(false);
     // Untracked-PREEXISTING: untouched (content intact).
     expect(readFileSync(join(dir, "kept-untracked.txt"), "utf8")).toBe("preexisting\n");
+    // The dirty file's pre-turn UNSTAGED shape is restored too (the
+    // checkout writes the index; --staged unwinds it — gate r1 catch 3).
+    const staged = String(execFileSync("git", ["status", "--porcelain", "dirty.txt"], { cwd: dir }));
+    expect(staged.trim()).toBe("M dirty.txt"); // worktree-only (unstaged) modification
+
+    // STAGED-NEW-FILE escape (gate r1 catch 1): a turn-created file that
+    // was `git add`ed reads "tracked" to ls-files but is ABSENT from the
+    // baseline → removed by restore (the old checkout silently failed).
+    writeFileSync(join(dir, "staged-new.txt"), "added mid-turn\n");
+    execFileSync("git", ["add", "staged-new.txt"], { cwd: dir });
+    e(editor, '(fikra/diff/fikra-diff-restore-turn (list "staged-new.txt"))');
+    expect(existsSync(join(dir, "staged-new.txt"))).toBe(false);
+
+    // NIL baseline → conservative no-op (the exported fn must not rm on
+    // a missing baseline — gate r1 catch 2).
+    e(editor, '(fikra/thread/fikra-thread-set-field "change-baseline" nil)');
+    writeFileSync(join(dir, "nilbase.txt"), "x\n");
+    e(editor, '(fikra/diff/fikra-diff-restore-turn (list "nilbase.txt"))');
+    expect(existsSync(join(dir, "nilbase.txt"))).toBe(true);
   });
 });
