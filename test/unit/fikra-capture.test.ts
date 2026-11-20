@@ -144,4 +144,25 @@ describe("#8.2 capture frame", () => {
     const body = String(e(ed, "(fikra/capture/fikra-capture-body)").value);
     expect(body).toBe("first message"); // NOT "first messagedraft two"
   });
+
+  test("cancel discards a MULTI-LINE draft completely (the reopen leak, r55)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/mode)");
+    e(ed, "(fikra-start)");
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, "(require-module fikra/capture)");
+    e(ed, "(require-module fikra/thread)");
+    e(ed, '(fikra-thread-set-field "root" "/tmp")');
+    e(ed, "(require-module fikra/chat)");
+    e(ed, "(fikra/chat/fikra-chat-open)");
+    e(ed, "(fikra/capture/fikra-capture)");
+    e(ed, '(fikra/capture/fikra-capture-set-body "draft one\ndraft two")');
+    e(ed, "(fikra/capture/fikra-capture-cancel)");
+    e(ed, "(fikra/capture/fikra-capture)");
+    const body = String(e(ed, "(fikra/capture/fikra-capture-body)").value);
+    expect(body).toBe("");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).not.toContain("draft two");
+    expect(text).not.toContain("draft one");
+  });
 });

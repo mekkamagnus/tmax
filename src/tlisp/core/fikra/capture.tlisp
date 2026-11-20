@@ -1,7 +1,7 @@
 (defmodule fikra/capture
   (export fikra-capture fikra-capture-submit fikra-capture-cancel
           fikra-history-prev fikra-history-next
-          fikra-capture-body fikra-capture-to-line fikra-capture-set-body fikra-capture-hint)
+          fikra-capture-body fikra-capture-to-line fikra-capture-set-body fikra-capture-hint fikra-buffer-clear-all)
 
 ;; Capture buffer — org-capture inspired popup for composing messages
 
@@ -59,6 +59,18 @@ body. (Mode must be active — the SPC a i binding implies it.)"
   (editor-set-mode "insert")
   (setq fikra-history-index -1)
   (fikra-capture-hint))
+
+;; Clear the WHOLE buffer, two in-bounds steps (the proven body-replace
+;; shape): (0,0)..(count-1,0) consumes every newline but the last; then
+;; the leftover last line's text. Zero-length skips its delete.
+(defun fikra-buffer-clear-all ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (progn
+        (buffer-delete-range 0 0 (- count 1) 0)
+        (let ((l (buffer-line 0)))
+          (if (> (length l) 0)
+            (buffer-delete-range 0 0 0 (length l))))))))
 
 ;; The compose BODY: everything below the two header lines.
 (defun fikra-capture-body ()
@@ -131,10 +143,9 @@ body. (Mode must be active — the SPC a i binding implies it.)"
       (progn
         ;; Save to history
         (setq fikra-input-history (cons text fikra-input-history))
-        ;; Clear capture buffer
+        ;; Clear capture buffer (the shared two-step shape)
         (buffer-set-read-only nil)
-        (let ((count (buffer-line-count)))
-          (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+        (fikra-buffer-clear-all)
         ;; Close capture window, return to chat
         (delete-window)
         (buffer-switch (fikra/thread/fikra-thread-buffer-name))
@@ -147,17 +158,7 @@ body. (Mode must be active — the SPC a i binding implies it.)"
   ;; Clear capture buffer
   (buffer-switch fikra-capture-buffer-name)
   (buffer-set-read-only nil)
-  (let ((count (buffer-line-count)))
-    (if (> count 1)
-      (let ((second-last (buffer-line (- count 2))))
-        (if (> count 2)
-          (progn
-            (buffer-delete-range 0 0 (- count 2) (length second-last))
-            (let ((l (buffer-line 0)))
-              (buffer-delete-range 0 0 0 (length l))))
-          (let ((l (buffer-line 0)))
-            (if (> (length l) 0)
-              (buffer-delete-range 0 0 0 (length l))))))))
+  (fikra-buffer-clear-all)
   ;; Close window, return to chat
   (delete-window)
   (buffer-switch (fikra/thread/fikra-thread-buffer-name))
