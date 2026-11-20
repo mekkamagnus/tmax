@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -76,12 +76,40 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     ref("nav", 2, "completion", "line1\nfeature-a\nfeature-b\n");
     e(ed, '(require-module "fikra/diff")');
     e(ed, "(fikra/diff/fikra-diff-turn-step -1)"); // view turn 1
+    // r49: the confirm gate arms; the ACCEPT owns the work (the
+    // modes-test pattern — the picker itself needs a live minibuffer).
     e(ed, "(fikra/diff/fikra-diff-revert-turn)");
+    e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
     // Turn 1's changes restored to ITS baseline: feature-a gone...
     expect(readFileSync(join(repoDir, "app.txt"), "utf8")).not.toContain("feature-a");
     // ...while turn 2's content (still on disk via ref checkout) may remain —
     // the ASSERTION is the viewed-turn targeting: reverting from the turn-1
     // view must checkout refs/fikra/nav/1-baseline's app.txt ("line1\n").
+    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\n");
+    // The cancel path leaves everything untouched.
+    e(ed, "(fikra/diff/fikra-diff-revert-completed 2)");
+    e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "cancel")');
+    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\n");
+  });
+
+  test("reverting a turn that ADDED a file removes it (no baseline version)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    ref("nav", 1, "baseline", "line1\n");
+    // Turn 1 ADDS new-file.txt (absent from the baseline).
+    writeFileSync(join(repoDir, "new-file.txt"), "added\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    const tree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "t1"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1", commit], { cwd: repoDir });
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-diff-revert-completed 1)");
+    e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
+    expect(existsSync(join(repoDir, "new-file.txt"))).toBe(false);
     expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\n");
   });
 });

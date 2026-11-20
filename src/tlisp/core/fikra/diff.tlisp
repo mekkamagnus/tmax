@@ -2,7 +2,8 @@
   (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn
           fikra-diff-restore-turn fikra-changed-paths-since-baseline
           fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
-          fikra-revert-confirm-table fikra-revert-confirm-accept)
+          fikra-revert-confirm-table fikra-revert-confirm-accept
+          fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -81,7 +82,8 @@
 (defun fikra-diff-turn-scan (from delta count target)
   (if (or (< target 1) (> target count)
           (and (= target from) (not (= from (if fikra-diff-view-turn fikra-diff-view-turn count)))))
-    (editor-set-status (concat "Fikra: turn 1.." (number-to-string count)))
+    (editor-set-status (concat "Fikra: no further turns with captured diffs (1.."
+                               (number-to-string count) ")"))
     (if (= target from)
       (editor-set-status "Fikra: no further turns with captured diffs")
       (if (> (length (string-trim (fikra-diff-turn-patch target))) 0)
@@ -215,20 +217,77 @@ ambiguity)."
 ;; Revert completed turn N: restore the BASELINE ref's version of every
 ;; path the turn changed (paths from the turn's own numstat), then
 ;; refresh the view.
+;; r49: CONFIRMED first (the live revert's contract — the r48 direct
+;; dispatch skipped confirmation). The pending turn rides a defvar; the
+;; ACCEPT owns the work (completing-read never returns the choice).
+(defvar fikra-diff-pending-revert-turn nil
+  "The history turn awaiting revert confirmation.")
+
 (defun fikra-diff-revert-completed (n)
+  (setq fikra-diff-pending-revert-turn n)
+  (condition-case nil
+    (completing-read (concat "Revert turn " (number-to-string n) "'s changes? ")
+                     "fikra/diff/fikra-revert-confirm-table"
+                     nil t ""
+                     "fikra-revert-confirm-history"
+                     "fikra/diff/fikra-diff-revert-completed-accept")
+    (error () nil)))
+
+(defun fikra-diff-revert-completed-accept (choice)
+  (if (not (string= choice "revert"))
+    (editor-set-status "Fikra: revert cancelled")
+    (let ((n (if fikra-diff-pending-revert-turn fikra-diff-pending-revert-turn 0)))
+      (setq fikra-diff-pending-revert-turn nil)
+      (if (< n 1)
+        (editor-set-status "Fikra: no turn selected")
+        (fikra-diff-revert-completed-exec n)))))
+
+;; r49: verified per-path restore — checkout when the baseline HAS the
+;; path, REMOVE when the turn ADDED it (no baseline version exists); a
+;; failed step reports, never `|| true` success.
+(defun fikra-diff-revert-completed-exec (n)
   (let* ((id (fikra/thread/fikra-thread-current))
          (root (fikra/thread/fikra-thread-working-dir))
          (base (concat "refs/fikra/" id "/" (number-to-string n) "-baseline"))
-         (paths (fikra-diff-completed-paths root id n)))
+         (paths (fikra-diff-completed-paths root id n))
+         (failures (list)))
     (if (or (null paths) (= (length paths) 0))
       (editor-set-status (concat "Fikra: turn " (number-to-string n) " has no captured changes"))
       (progn
         (dolist (p paths)
-          (shell-command
-            (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                    " checkout " base " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null || true")))
-        (editor-set-status (concat "Fikra: reverted turn " (number-to-string n) " (baseline restored)"))
-        (fikra-turn-diff-for n)))))
+          (let ((step (fikra-diff-restore-one root base p)))
+            (if (not (string= step "ok"))
+              (setq failures (cons p failures)))))
+        (if (> (length failures) 0)
+          (editor-set-status (concat "Fikra: revert FAILED for: "
+                                     (fikra-diff-join-names (reverse failures) "")))
+          (editor-set-status (concat "Fikra: reverted turn " (number-to-string n)
+                                     " (baseline restored) — SPC a d refreshes")))))))
+
+;; One path: "ok" or the failing path.
+(defun fikra-diff-restore-one (root base p)
+  (let ((in-base (string= (string-trim (shell-command
+               (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                       " cat-file -e " base ":" (fikra/thread/fikra-thread-shq p)
+                       " 2>/dev/null && echo yes || echo no"))) "yes")))
+    (if in-base
+      (if (string-match "RESTORE-OK"
+            (string-trim (shell-command
+              (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                      " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
+                      " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
+        "ok" p)
+      (if (string-match "REMOVE-OK"
+            (string-trim (shell-command
+              (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p))
+                      " 2>&1 && echo REMOVE-OK || echo REMOVE-FAIL"))))
+        "ok" p))))
+
+(defun fikra-diff-join-names (items acc)
+  (if (null items)
+    acc
+    (fikra-diff-join-names (cdr items)
+      (concat acc (if (> (length acc) 0) " ") (car items)))))
 
 ;; The turn's changed paths from ITS OWN numstat (not the live baseline).
 (defun fikra-diff-completed-paths (root id n)
