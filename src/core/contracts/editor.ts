@@ -228,6 +228,8 @@ export interface EditorState {
   terminalLines?: string[];
   terminalCursor?: { row: number; col: number };
   statusMessage: string;
+  /** #318: the viewed thread transient spinner segment (render-only). */
+  transientSegment?: string;
   viewportTop: number;
   viewportLeft?: number;
   config: EditorConfig;

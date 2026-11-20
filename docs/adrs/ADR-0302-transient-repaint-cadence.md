@@ -29,6 +29,8 @@ focused-thread rule: the segment renders per viewed-thread id.
 - The event log stays purely event-driven (byte-identical across
   ticks — asserted); the "no timers" contract holds for the LOG layer,
   with the display-layer exception named here.
-- The serialize path gains `withTransientRevision` (a tiny T-Lisp eval
-  stamp) on the keypress + render-state handlers only.
+- The serialize path gains the exported `withTransientRevision` (the
+  Either-aware T-Lisp stamp — revision + the viewed thread's segment) on
+  the keypress + render-state handlers; the segment rides as
+  `transientSegment` and the TUI renders it on the status row.
 - The API baselines refreeze 430→432 (the two timer shell primitives).

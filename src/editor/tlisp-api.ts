@@ -154,7 +154,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         // — the logic lives in T-Lisp, the timing in TS). 200ms cadence.
         ops.set("editor-transient-timer-start", (): Either<AppError, TLispValue> => {
           const tickExpr = "(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-tick)) (error () nil))";
-          ctx.evalTlisp?.(tickExpr); // prime the module in THIS session
+          // Prime the MODULE (require only — NOT a tick; the gate caught
+          // the start bumping the revision once).
+          ctx.evalTlisp?.("(condition-case nil (require-module fikra/transient) (error () nil))");
           if (transientTimer) return Either.right(createNil()); // already running
           transientTimer = setInterval(() => { ctx.evalTlisp?.(tickExpr); }, 200);
           return Either.right(createNil());

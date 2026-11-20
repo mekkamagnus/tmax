@@ -90,6 +90,34 @@ function deserializeTab(raw: unknown): Tab | null {
  * `bufferRevision` is a per-response counter (Date.now()) the client diffs to
  * detect change in O(1) instead of `JSON.stringify`-ing the whole state.
  */
+// #318: stamp the transient-layer revision + the VIEWED thread's spinner
+// segment onto the frame state (the client's SECOND comparison + the
+// display row). INTERP executes against the serving editor's interpreter
+// (gate r1: interpreter.execute returns Either {_tag:'Right', right:{value}}
+// — unwrap BOTH layers). Exported — the keypress and render-state handlers
+// call this ONE helper (the gate caught duplicated dead copies).
+export function withTransientRevision<T extends object>(
+  state: T,
+  interp?: { execute: (expr: string) => unknown },
+): T {
+  if (!interp) return state;
+  const readTransient = (expr: string): unknown => {
+    try {
+      const r = interp.execute(expr) as { _tag?: string; right?: { value?: unknown }; value?: unknown };
+      if (r && typeof r === "object" && r._tag === "Right" && r.right && typeof r.right === "object" && "value" in r.right) {
+        return (r.right as { value: unknown }).value;
+      }
+      if (r && typeof r === "object" && "value" in r) return r.value;
+      return undefined;
+    } catch { return undefined; }
+  };
+  const rev = readTransient("(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-revision)) (error () 0))");
+  if (typeof rev === "number") (state as { transientRevision?: number }).transientRevision = rev;
+  const seg = readTransient("(condition-case nil (progn (require-module fikra/transient) (fikra-transient-viewed-segment)) (error () nil))");
+  if (typeof seg === "string" && seg.length > 0) (state as { transientSegment?: string }).transientSegment = seg;
+  return state;
+}
+
 export function editorStateToJson(
   state: EditorState,
   renderHeight: number = DEFAULT_RENDER_HEIGHT,
@@ -173,6 +201,7 @@ export function editorStateToJson(
     // client compares BOTH counters independently (render on EITHER
     // change; transient 5→6 renders while buffer-rev stays 100).
     transientRevision: (state as unknown as { transientRevision?: number }).transientRevision,
+    transientSegment: (state as unknown as { transientSegment?: string }).transientSegment,
     // #201 (BUG-84): shell-mode's PTY screen + cursor ride the wire so the
     // TUI renders terminal mode from the daemon's TerminalManager.
     terminalLines: (state as unknown as { terminalLines?: string[] }).terminalLines,

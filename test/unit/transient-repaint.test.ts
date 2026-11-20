@@ -85,16 +85,24 @@ describe("#318 — frame changes with the log byte-identical", () => {
     expect(readFileSync(logPath, "utf8")).toBe(before);
   });
 
-  test("the transient revision rides the poll response (serialize stamp)", () => {
+  test("the REAL stamp: withTransientRevision through the interpreter rides the wire (revision + segment)", async () => {
+    const { withTransientRevision } = await import("../../src/server/serialize.ts");
     e(editor, "(fikra/transient/fikra-transient-note-running \"main\")");
     e(editor, "(fikra/transient/fikra-transient-tick)");
-    // The serialize side reads the T-Lisp counter — simulate the stamp.
-    const state = editor.getEditorState();
-    const r = e(editor, "(fikra/transient/fikra-transient-revision)");
-    (state as { transientRevision?: number }).transientRevision = Number(String((r as { value: unknown }).value));
-    const wire = editorStateToJson(state, 22, 100) as { transientRevision?: number };
+    // The HANDLER path: the real helper against the real interpreter
+    // (gate r1: the hand-stamped test verified nothing).
+    const interp = (editor as unknown as { interpreter: { execute: (x: string) => unknown } }).interpreter;
+    const state = withTransientRevision(editor.getEditorState(), interp);
+    const wire = editorStateToJson(state, 22, 100) as { transientRevision?: number; transientSegment?: string };
     expect(typeof wire.transientRevision).toBe("number");
     expect(wire.transientRevision!).toBeGreaterThan(0);
+    // The VIEWED thread's spinner segment rides too.
+    expect(wire.transientSegment).toContain("working");
+    // Idle viewed thread → NO segment on the wire (the focused rule).
+    e(editor, "(fikra/transient/fikra-transient-note-terminal \"main\")");
+    const state2 = withTransientRevision(editor.getEditorState(), interp);
+    const wire2 = editorStateToJson(state2, 22, 100) as { transientSegment?: string };
+    expect(wire2.transientSegment).toBeUndefined();
   });
 
   test("the spinner segment: running thread gets a rotating row; idle thread nil (focused-thread rule)", () => {

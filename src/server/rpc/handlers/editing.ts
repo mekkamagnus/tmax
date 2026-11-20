@@ -26,7 +26,7 @@ import type {
   KeypressParams, KeypressResult,
   SaveFileParams, SaveFileResult,
 } from "../types.ts";
-import { editorStateToJson, renderHeightForTerminalSize } from "../../serialize.ts";
+import { editorStateToJson, renderHeightForTerminalSize, withTransientRevision } from "../../serialize.ts";
 import { Either } from "../../../utils/task-either.ts";
 /** Build the editing-domain handlers bound to a `ServerContext`. */
 export function createEditingHandlers(ctx: ServerContext): {
@@ -217,19 +217,7 @@ export function createEditingHandlers(ctx: ServerContext): {
     });
   };
 
-  // #318: stamp the T-Lisp transient-layer revision onto the frame state
-// (the client's SECOND comparison — render on either counter change).
-function withTransientRevision<T extends object>(state: T): T {
-  try {
-    const r = (ctx.editor as unknown as { interpreter?: { execute: (s: string) => { _tag?: string; value?: unknown } | { value?: unknown } } }).interpreter
-      ?.execute("(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-revision)) (error () 0))");
-    const v = r && typeof r === "object" && "value" in (r as object) ? (r as { value: unknown }).value : r;
-    if (typeof v === "number") (state as { transientRevision?: number }).transientRevision = v;
-  } catch { /* transient layer absent — no revision */ }
-  return state;
-}
-
-// ── keypress ────────────────────────────────────────────────────────────
+  // ── keypress ────────────────────────────────────────────────────────────
   const keypress = async (params: KeypressParams): Promise<KeypressResult> => {
     const key = params.key;
     if (!key) {
@@ -259,10 +247,10 @@ function withTransientRevision<T extends object>(state: T): T {
           const renderHeight = renderHeightForTerminalSize(frameTermSize);
           if (workspaceOverride) {
             ctx.syncEditorToAllFrames();
-            return editorStateToJson(withTransientRevision(ctx.editor.getEditorState()), renderHeight, frameTermSize?.width);
+            return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter), renderHeight, frameTermSize?.width);
           }
           ctx.syncEditorToFrame(frame);
-          return editorStateToJson(withTransientRevision(ctx.frameToEditorState(frame)), renderHeight, frameTermSize?.width);
+          return editorStateToJson(withTransientRevision(ctx.frameToEditorState(frame), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter), renderHeight, frameTermSize?.width);
         } finally {
           await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
         }

@@ -4,7 +4,8 @@
           fikra-transient-revision fikra-transient-segment
           fikra-transient-active-p fikra-transient-count
           fikra-transient-note-running fikra-transient-note-terminal
-          fikra-any-thread-running-p fikra-thread-is-running-p)
+          fikra-any-thread-running-p fikra-thread-is-running-p
+          fikra-transient-viewed-segment)
 
 ;; #318 — the DISPLAY-LAYER REPAINT CADENCE. Fikra is event-driven
 ;; end-to-end; the animation layer is DAEMON-SIDE TRANSIENT STATE, kept
@@ -141,5 +142,10 @@ idle/viewed-other thread (the focused-thread rule)."
     (if (string= (car (car lst)) id)
       (car (cdr (car lst)))
       (fikra-transient-flag-of (cdr lst) id))))
+
+;; The VIEWED thread's segment (the daemon frame builder's display row):
+;; the FOCUSED thread when it runs, else nil (the focused-thread rule).
+(defun fikra-transient-viewed-segment ()
+  (fikra-transient-segment (fikra/thread/fikra-thread-current)))
 
 (provide "fikra-transient"))

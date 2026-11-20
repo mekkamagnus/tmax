@@ -26,6 +26,9 @@ export class RemoteEditor {
    *  caller compares BOTH counters independently; a render fires when
    *  EITHER changes. */
   private _lastTransientRevision = -1;
+  /** #318: the viewed thread's transient spinner segment (undefined when
+   *  the viewed thread is idle — the focused-thread rule). */
+  private _transientSegment: string | undefined;
   private _frameId: string | null = null;
   private _clientId: string | null = null;
   private workspaceId?: string;
@@ -44,6 +47,11 @@ export class RemoteEditor {
   /** #318: the transient (display-layer) revision — O(1) pair member. */
   get lastTransientRevision(): number {
     return this._lastTransientRevision;
+  }
+
+  /** #318: the viewed thread's transient segment (the spinner row). */
+  get transientSegment(): string | undefined {
+    return this._transientSegment;
   }
 
   async start(): Promise<void> {
@@ -118,6 +126,8 @@ export class RemoteEditor {
     this._lastBufferRevision = typeof rev === "number" ? rev : this._lastBufferRevision;
     const trev = (stateJson as { transientRevision?: unknown }).transientRevision;
     this._lastTransientRevision = typeof trev === "number" ? trev : this._lastTransientRevision;
+    const tseg = (stateJson as { transientSegment?: unknown }).transientSegment;
+    this._transientSegment = typeof tseg === "string" ? tseg : undefined;
   }
 
   updateTerminalSize(_width: number, _height: number): void {

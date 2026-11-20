@@ -224,6 +224,8 @@ export interface SerializedEditorState {
   /** #318: the transient (display-layer) revision — the client's second
    *  comparison (render on EITHER counter change). */
   transientRevision?: number;
+  /** #318: the VIEWED thread's transient spinner segment. */
+  transientSegment?: string;
   /** #201 (BUG-84): shell-mode PTY screen rows + cursor (terminal mode only). */
   terminalLines?: string[];
   terminalCursor?: { row: number; col: number };
