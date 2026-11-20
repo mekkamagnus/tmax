@@ -6,7 +6,7 @@ Execute #299's triage protocol (hypotheses: stale binary | module-load
 failure | keymap shadowing) and close with a named root cause + a
 behavioral regression.
 
-## Triage evidence (recorded 2026-11-21)
+## Triage evidence (recorded 2026-11-20)
 
 | Check | Live binary (main dist/tmax, 17:25, sha 0169cbc7…) | Clean worktree binary (isolated build, sha 1dc64244…) |
 |---|---|---|

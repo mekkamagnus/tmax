@@ -14,16 +14,30 @@ import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts"
  * runs can poison the binary). This canary pins the BEHAVIOR across every
  * shipped major mode so both failure classes — keymap shadowing AND the
  * loadCoreBindings swallow (a module that fails to load leaves commands
- * undefined while the daemon starts normally) — turn tests red.
+ * undefined while the daemon starts normally) — turn tests red. The MODES
+ * table below is a representative spread of the registered file-backed
+ * major modes, not an exhaustive enumeration.
  */
 
 type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 
+// A representative spread of the registered file-backed major modes
+// (typescript/markdown/lisp/fundamental + go/python/json/yaml/rust/html/
+// css/sql/shell); not an exhaustive enumeration of all 22+ registrations.
 const MODES: { file: string; content: string; expectMode: RegExp }[] = [
   { file: "a.ts", content: "const x: number = 1;\n", expectMode: /typescript/ },
   { file: "a.md", content: "# Title\n\nbody\n", expectMode: /markdown/ },
   { file: "a.lisp", content: "(defun f () 1)\n", expectMode: /lisp/ },
   { file: "a.txt", content: "plain text\n", expectMode: /fundamental|text/ },
+  { file: "a.go", content: "package main\n", expectMode: /go/ },
+  { file: "a.py", content: "x = 1\n", expectMode: /python/ },
+  { file: "a.json", content: "{\"k\": 1}\n", expectMode: /json/ },
+  { file: "a.yaml", content: "k: 1\n", expectMode: /yaml/ },
+  { file: "a.rs", content: "fn main() {}\n", expectMode: /rust/ },
+  { file: "a.html", content: "<html></html>\n", expectMode: /html/ },
+  { file: "a.css", content: "a { color: red; }\n", expectMode: /css/ },
+  { file: "a.sql", content: "SELECT 1;\n", expectMode: /sql/ },
+  { file: "a.sh", content: "echo hi\n", expectMode: /shell|bash/ },
 ];
 
 const status = (editor: Editor): string => editor.getEditorState().statusMessage ?? "";
@@ -70,11 +84,11 @@ describe("#299 mode-leader canary (stale-binary closure regression)", () => {
       expect(status(editor)).not.toContain("Unbound key");
 
       // 4. The dispatch SYMBOL itself resolves in this session's module
-      //    chain (the loadCoreBindings-swallow canary).
-      const probe = executeTlisp(editor, '(condition-case nil (progn (editor-dispatch-command-line "1") "ok") (error (e) (concat "ERR:" (error-message e))))');
-      const probeText = String(probe.value ?? "");
-      expect(probeText).not.toContain("ERR");
-      expect(probeText).not.toBe("");
+      //    chain (the loadCoreBindings-swallow canary): executeTlisp throws
+      //    on a Left (undefined symbol), so a clean "ok" return is the
+      //    resolution proof.
+      const probeText = String(executeTlisp(editor, '(progn (editor-dispatch-command-line "1") "ok")').value ?? "");
+      expect(probeText).toBe("ok");
     });
   }
 });

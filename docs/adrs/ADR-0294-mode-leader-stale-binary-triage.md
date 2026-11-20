@@ -1,7 +1,7 @@
 # ADR-0294 — #299 triage: the [typescript] leader death was a stale binary (#299)
 
 - **Status**: Accepted
-- **Date**: 2026-11-21
+- **Date**: 2026-11-20
 - **Issue**: #299
 - **Spec**: SPEC-268
 
