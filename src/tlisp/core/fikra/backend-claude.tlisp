@@ -206,12 +206,23 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
       (shell-command (concat "chmod 600 " (fikra-claude-shq path)))
       token)))
 
-;; #298 (codex r2): shell-quoting for interpolated paths — a project path
-;; containing spaces/metachars must not split the mkdir/chmod commands.
-;; Single-quote wrap (the fikra-shq convention; project roots never carry
-;; single quotes in practice).
+;; #298 (codex r2/r3): shell-quoting for interpolated paths — a project
+;; path containing spaces/metachars must not split the mkdir/chmod
+;; commands, and embedded apostrophes must not break out (single-quote
+;; with the close/escape/reopen join; the joiner is hex-built — backslash
+;; literals are reader-hostile, the round-22 class).
+(defun fikra-claude-sq-join ()
+  (concat "'" (hex-decode "5c") "''"))
+
 (defun fikra-claude-shq (s)
-  (concat "'" s "'"))
+  (fikra-claude-shq-scan (string-split s "'") "" t))
+
+(defun fikra-claude-shq-scan (parts acc first)
+  (if (null parts)
+    (concat "'" acc "'")
+    (fikra-claude-shq-scan (cdr parts)
+      (concat acc (if first "" (fikra-claude-sq-join)) (car parts))
+      nil)))
 
 ;; The thread-root .tmax/fikra/mcp dir, shell-quoted (spaces-safe).
 (defun fikra-claude-mcp-ensure-dir ()

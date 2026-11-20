@@ -74,19 +74,37 @@ thread's persisted root (root-shell cwd), never the daemon cwd."
 ;; The exact capture command sequence as ONE shell line (shell-command is
 ;; sync; the RFC's per-step argv contract is preserved inside it). The
 ;; final echo delimits the ref for parsing.
+;; #298 (codex r3): every interpolated PATH is shell-quoted — project and
+;; worktree roots containing spaces/metachars must not split the command.
+;; Shell single-quoting with apostrophe escaping: split on ', join with
+;; the close/escape/reopen sequence. The joiner is built via hex-decode —
+;; backslash string literals are reader-hostile (the round-22 class).
+(defvar fikra-checkpoint-sq-join (concat "'" (hex-decode "5c") "''")
+  "The shell apostrophe escape: close-quote, backslash-quote, reopen.")
+
+(defun fikra-checkpoint-shq (s)
+  (fikra-checkpoint-shq-scan (string-split s "'") "" t))
+
+(defun fikra-checkpoint-shq-scan (parts acc first)
+  (if (null parts)
+    (concat "'" acc "'")
+    (fikra-checkpoint-shq-scan (cdr parts)
+      (concat acc (if first "" fikra-checkpoint-sq-join) (car parts))
+      nil)))
+
 (defun fikra-checkpoint-command (tmp-index kind)
   "Build the capture command for KIND ('baseline'|'completion')."
   (concat
     ;; #221: capture runs INSIDE the thread's working dir (worktree-aware —
     ;; fikra-thread-working-dir); the tmp index stays in the LOCAL root.
-    "cd " (fikra/thread/fikra-thread-working-dir) " && "
-    "export GIT_INDEX_FILE=" tmp-index " ; "
-    "rm -f " tmp-index " ; "
+    "cd " (fikra-checkpoint-shq (fikra/thread/fikra-thread-working-dir)) " && "
+    "export GIT_INDEX_FILE=" (fikra-checkpoint-shq tmp-index) " ; "
+    "rm -f " (fikra-checkpoint-shq tmp-index) " ; "
     "git add -A -- . >/dev/null 2>&1 && "
     "tree=$(git write-tree) && "
     "commit=$(git commit-tree $tree -p HEAD -m \"fikra checkpoint " kind "\") && "
     "git update-ref " (fikra-checkpoint-ref kind) " $commit && "
-    "rm -f " tmp-index " && "
+    "rm -f " (fikra-checkpoint-shq tmp-index) " && "
     "echo REF:$commit || echo CAPTURE-FAILED"))
 
 (defun fikra-checkpoint-ref (kind)

@@ -269,10 +269,12 @@ describe("#298 client-context thread roots", () => {
     const b = mkdtempSync(join(tmpdir(), "fikra ctx spaced "));
     dirs.push(b);
     execFileSync("git", ["init", "-q"], { cwd: b });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: b });
     process.chdir(a);
     const editor = await createStartedEditor("");
     e(editor, "(require-module fikra/thread)");
     e(editor, "(require-module fikra/backend-claude)");
+    e(editor, "(require-module fikra/checkpoint)");
     editor.setClientLaunchDir(b);
     e(editor, "(fikra/thread/fikra-thread-init)");
     // The config path targets the spaced root...
@@ -284,6 +286,28 @@ describe("#298 client-context thread roots", () => {
     expect(existsSync(join(a, ".tmax"))).toBe(false);
     // No stray split dir like "<tmp>/fikra ctx spaced" sibling artifacts:
     expect(existsSync(join(realpathSync(b), "ctx"))).toBe(false);
+    // codex r3 fix 1: checkpoint capture (cd + tmp-index, quoted) creates
+    // refs under the SPACED root (requires a first commit).
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    const sha = e(editor, '(fikra/checkpoint/fikra-checkpoint-capture "completion")');
+    expect(sha.type).toBe("string");
+    const refs = String(e(editor, `(shell-command "git for-each-ref refs/fikra/" "${realpathSync(b)}")`).value).trim();
+    expect(refs).toContain("refs/fikra/main/1");
+    // An APOSTROPHE in the project path survives the quoting too (the
+    // hex-built close/escape/reopen join).
+    const q = mkdtempSync(join(tmpdir(), "fikra ctx 'quoted' "));
+    dirs.push(q);
+    execFileSync("git", ["init", "-q"], { cwd: q });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: q });
+    editor.setClientLaunchDir(q);
+    e(editor, '(fikra/thread/fikra-thread-focus "main")');
+    // Re-init discovers via the NEW context (record found under q).
+    e(editor, "(fikra/thread/fikra-thread-init)");
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    const shaQ = e(editor, '(fikra/checkpoint/fikra-checkpoint-capture "completion")');
+    expect(shaQ.type).toBe("string");
+    const refsQ = String(e(editor, `(shell-command "git for-each-ref refs/fikra/" "${realpathSync(q)}")`).value).trim();
+    expect(refsQ).toContain("refs/fikra/main/1");
   });
 });
 
