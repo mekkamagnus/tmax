@@ -636,3 +636,25 @@ The new approval panel materially improves the hierarchy and supplies the key de
 3. **Capture a timed streaming sequence.** The render path is in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:320) and client polling in [tui-client.ts](/Users/mekael/Documents/programming/typescript/tmax/src/client/tui-client.ts:233). Successive timestamped frames would establish incremental display and responsiveness. The supplied frame visibly ends during sentence five; the claimed complete six-sentence buffer is not wholly visible in that viewport.
 
 Fikra now looks substantially closer to the existing chat and review surfaces in the mockups, and the new capture resolves the concern that the client cannot wrap the streamed reply. The strongest remaining functional gap is live approval mediation; the clearest visual gap is the inline rather than overlaid gate. Section 8 also depicts a proposed native agent loop, so its per-action tool and checkpoint details should not be treated as already demonstrated by the wrapped-CLI captures.
+
+---
+
+# Round 20 (THE LIVE CLI-MEDIATED APPROVAL) — 2026-11-20
+
+| Area | Score | Justification |
+|---|---:|---|
+| Chat and live stream | **8/10** | The prior live-stream capture stands at 8; this capture also shows a real Write call with an inline change preview. |
+| Approval | **7.5/10** | The live gate pauses a real Write and shows the action, choices, and checkpoint, but the narrow capture wraps the fixed-width box across gutter rows and truncates the action detail. |
+| Diff and revert | **8/10** | The prior viewer and revert evidence stands; the approval panel also identifies the checkpoint and points to revert in the diff view. |
+| Navigation | **8.5/10** | The prior viewer and navigation evidence stands; it was not independently replayed for this review. |
+| Modeline | **8/10** | The capture shows backend, approval mode, turn, tool count, and thread, but the dense lighter wraps across terminal rows. |
+| Capture composer, threads, worktree handoff | **Not graded** | The supplied artifacts do not establish their current appearance and behavior against §§8.2, 8.5, and 8.6. |
+
+**Top remaining fixes**
+
+1. Make the approval panel responsive to the available buffer width in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:117). In the supplied capture, its fixed 62-column border wraps into continuation rows; the bottom border and some panel content are outside the captured viewport.
+2. Preserve the full action target and correlation token in the visible gate. [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:138) truncates long rows, and the captured Write target ends at `gate44.t…`; use width-aware continuation rows so the information remains reviewable.
+3. Bring the provenance presentation closer to §8.3. [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:115) supplies a resolver class and checkpoint, while the mockup calls for visible thread, turn, frame, and verified origin context. Show only provenance the runtime can substantiate.
+4. Make the modeline more legible at narrow widths in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:94), retaining the important state while avoiding the wrapped, compressed segment string.
+
+The approval evidence is a substantial improvement: the supplied capture shows the mid-turn Write preview and approval panel, and I verified that `/tmp/fikra-demo/gate44.txt` exists with `LIVE-44`. The capture itself ends while the panel is displayed, so it does not independently show the `y` keypress or recorded allow response; I accept those as the supplied session account rather than a fresh replay. Against the mockup, the main remaining gap is presentation at the captured terminal width and explicit, readable provenance—not the absence of a live approval gate.
