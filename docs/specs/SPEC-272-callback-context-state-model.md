@@ -10,12 +10,16 @@ locations; guard it as a permanent regression.
 
 The incident hypothesis (setq invisible to callbacks, mutations shared)
 was DISPROVED in its setq half by the fixture: **within one editor
-session, the callback context shares the FULL environment** — the filter
-sees the main session's setq and the hashmap mutations. The incident's
-actual mechanism was the daemon's separate-editor-session split (the
-round-27/28 root cause): a callback's evalTlips binds to its SPAWNING
-session, so other sessions' setqs are invisible while shared object
-state crosses. Safe patterns: mutation-shared carriers, thread-record
+session, the callback context shares the environment as the fixture
+exercises it** — module-variable setq reads and hashmap mutations made
+via keymap-mutable-set! are both visible to the filter and the sentinel.
+The fixture verifies these specific behaviors; no broader "full
+environment" claim is made. The incident's actual mechanism was the
+daemon's separate-editor-session split (the round-27/28 root cause): a
+callback's evalTlisp binds to its SPAWNING session, so other sessions'
+setqs are invisible there; whether hashmap mutations ALWAYS cross
+sessions is incident-inferred, not fixture-proven. Safe patterns:
+mutation-shared carriers (with same-session fallbacks), thread-record
 fields, explicit-path emitters (the incident fix).
 
 ## Completion criteria
