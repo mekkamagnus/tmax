@@ -170,3 +170,11 @@ Three rounds hunted a "streaming render" failure (243 deltas logged, buffer froz
 ## Streaming render — narrowed to the first-batch-only pattern (round 26)
 
 With the module-load repair live: the FIRST streamed batch renders ("AI: 1. Terminal editors are text-editing" appears in the daemon-side *Fikra*), then later batches stop landing while all 138 deltas reach the log. Daemon-side *Fikra* has 6 lines at turn end; buffer-current in the eval context reads *Fikra* throughout. So the `(string= (buffer-current) target-buffer)` gate passes but only early appends land — suspect the RENDER TEXT is empty for later batches (the text-run state machine: `fikra-text-open` threading in emit-batch-for's per-chunk batches — deltas 2..N join an OPEN run and render "" when open... check `fikra-event-render-batch`: with `fikra-text-open`=t, subsequent delta-only batches render the text but NO prefix — text should still flow. Next: instrument render-batch's returned length per batch in the filter.
+
+## Streaming render — root cause FOUND: the filter's evalTlisp owns a separate editor session (round 27-28)
+
+The make-process :filter/:sentinel callbacks' ctx.evalTlisp run in their OWN editor session (own buffers, own buffer-current) — NOT the spawning TUI editor's. Proven by probe: a switch-around append landed 46 lines of streamed text in the filter-side *Fikra* while the TUI's buffer kept exactly one batch (the turn-send/turn-begin events, which emit from the editor context). buffer-append-to's "instance mismatch" was this same fact.
+
+**The correct fix (next session, one seam):** wire the process callbacks' ctx.evalTlisp to the SPAWNING editor's session — the make-process primitive captures ctx at spawn; the ctx that reaches ops.set('make-process') must be the spawning editor's EditorAPIContext (check how ctx is threaded in tlisp-api.ts buildEditorAPIContributions vs which editor instance the daemon evaluates against). Once the filter evaluates in the TUI's session, the existing current-buffer gate renders streaming correctly — no render-path changes needed.
+
+**Do not:** add switch-arounds or by-name appends in the render path (they land in the wrong session — reverted in 069cd60's successor; the safe gated form + this note shipped instead).
