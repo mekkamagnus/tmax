@@ -190,9 +190,14 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     const doneFrame = strip(bufferText(editor));
     expect(doneFrame).toContain("allowed continuation");
     expect(doneFrame).toContain("── completed ──");
+    // The DECISION renders in the resumed frame of THIS sequence (codex
+    // r1: the graded capture itself must show the decision text, not
+    // only the separate render tests).
+    expect(doneFrame).toContain("= allowed this request");
     // The transcript is append-only: the ANSWERED popup row remains as
-    // history — the resume proof is the GAINED content (the continuation
-    // + the completion marker absent from the pause frame).
+    // history — the resume proof is the GAINED content (the decision row
+    // + continuation + completion, all absent from the pause frame).
+    expect(pauseFrame).not.toContain("= allowed");
     expect(pauseFrame).not.toContain("allowed continuation");
     expect(pauseFrame).not.toContain("── completed ──");
   });
