@@ -1,6 +1,7 @@
 (defmodule fikra/diff
   (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn
           fikra-diff-restore-turn fikra-changed-paths-since-baseline
+          fikra-diff-turn-next fikra-diff-turn-prev
           fikra-revert-confirm-table fikra-revert-confirm-accept)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
@@ -26,23 +27,68 @@
     (if (not (stringp dir))
       (editor-set-status "Fikra: no working dir for this thread")
       (if (or (null paths) (= (length paths) 0))
-        (editor-set-status "Fikra: no changes in this turn")
+        ;; Empty live view but completed turns exist: open the LATEST
+        ;; completed turn directly — turn navigation must be reachable
+        ;; without a dirty working tree (codex r24 fix 4, live catch).
+        (if (> (fikra/thread/fikra-thread-turn-count) 0)
+          (fikra-turn-diff-for (fikra/thread/fikra-thread-turn-count))
+          (editor-set-status "Fikra: no changes in this turn"))
         (let ((patch (fikra-diff-for-paths dir paths (fikra-baseline-tree))))
           (if (or (null patch) (string= patch ""))
             (editor-set-status "Fikra: no changes in this turn")
             (progn
+              (setq fikra-diff-view-turn nil)
               (fikra-diff-render
                 (concat (fikra-diff-summary state rows) "\n" patch)))))))))
 
 ;; Summary table (mockup 8.4: file summary + totals) — colored header,
 ;; magenta ± rows with per-file counts, totals line.
+;; ── completed-turn navigation (codex r24 fix 4: turn-to-turn nav) ────
+;; The live view shows the CURRENT turn's working changes; ] and [ walk
+;; COMPLETED turns via their checkpoint refs (refs/fikra/<id>/<n>-baseline
+;; vs refs/fikra/<id>/<n>).
+(defvar fikra-diff-view-turn nil
+  "The completed turn being viewed (nil = the live current-turn view).")
+
+(defun fikra-diff-turn-patch (n)
+  "The completed turn N's patch: baseline-ref vs completion-ref."
+  (let ((id (fikra/thread/fikra-thread-current)))
+    (shell-command
+      (concat "git -C "
+              (fikra/thread/fikra-thread-shq (fikra/thread/fikra-thread-working-dir))
+              " diff --color=always refs/fikra/" id "/" (number-to-string n) "-baseline"
+              " refs/fikra/" id "/" (number-to-string n) " 2>/dev/null"))))
+
+(defun fikra-turn-diff-for (n)
+  "Render completed turn N's diff in the viewer."
+  (let ((patch (fikra-diff-turn-patch n)))
+    (if (or (null patch) (string= (string-trim patch) ""))
+      (editor-set-status (concat "Fikra: no captured diff for turn " (number-to-string n)))
+      (progn
+        (setq fikra-diff-view-turn n)
+        (fikra-diff-render
+          (concat "\e[1;36m── turn " (number-to-string n)
+                  " (completed) · ]/[ next/prev turn · n/N file · SPC a d returns live ──\e[0m\n\n"
+                  patch))))))
+
+(defun fikra-diff-turn-step (delta)
+  (let* ((count (fikra/thread/fikra-thread-turn-count))
+         (from (if fikra-diff-view-turn fikra-diff-view-turn count))
+         (target (+ from delta)))
+    (if (or (< target 1) (> target count))
+      (editor-set-status (concat "Fikra: turn 1.." (number-to-string count)))
+      (fikra-turn-diff-for target))))
+
+(defun fikra-diff-turn-next () (fikra-diff-turn-step 1))
+(defun fikra-diff-turn-prev () (fikra-diff-turn-step -1))
+
 (defun fikra-diff-summary (turn rows)
   (concat "\e[1;36m── turn " (if (numberp turn) (number-to-string turn) "?")
           " changes · " (number-to-string (length rows)) " file(s) · +"
           (number-to-string (fikra-diff-total rows 1)) " -"
           (number-to-string (fikra-diff-total rows 2)) " ──\e[0m\n\n"
           (fikra-diff-rows rows)
-          "\n n/N: next/prev file · r revert turn · SPC a d refreshes \n\n"))
+          "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn · SPC a d returns live \n\n"))
 
 ;; ROWS are ((path adds dels) ...); IDX 1 = adds column, 2 = dels.
 (defun fikra-diff-total (rows idx)
@@ -88,6 +134,8 @@
         (editor/keymaps/keymap-set-key kmap "n" "(fikra/diff/fikra-diff-next)")
         (editor/keymaps/keymap-set-key kmap "N" "(fikra/diff/fikra-diff-prev)")
         (editor/keymaps/keymap-set-key kmap "r" "(fikra/diff/fikra-diff-revert-turn)")
+        (editor/keymaps/keymap-set-key kmap "]" "(fikra/diff/fikra-diff-turn-next)")
+        (editor/keymaps/keymap-set-key kmap "[" "(fikra/diff/fikra-diff-turn-prev)")
         (editor/keymaps/buffer-set-keymap fikra-diff-buffer-name kmap))))
   t)
 
