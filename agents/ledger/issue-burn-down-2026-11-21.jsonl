@@ -27,3 +27,4 @@
 {"event":"gate","ts":"2026-11-20T18:26:55Z","kind":"codex-grade","verdict":"9/10","rounds":2,"reviewed-sha":"9909803","findings-count":1}
 {"event":"landing","ts":"2026-11-20T18:28:13Z","unit":"#306","shas":["0b00039"],"files-staged-count":8,"tests-run":[{"name":"bun run test:unit","output":"3869 pass\n6 fail (pre-existing load-only workflows flake, solo-green; clean main fails 8)"},{"name":"bun test test/unit/zz-callback-context-state.test.ts","output":"1 pass\n0 fail"}],"adr-spec":["docs/adrs/ADR-0298-callback-context-state-model.md","docs/specs/SPEC-272-callback-context-state-model.md"]}
 {"event":"unit-start","ts":"2026-11-20T19:47:00Z","unit":"#303"}
+{"event":"gate","ts":"2026-11-20T20:07:20Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"6a428d2","findings-count":4}
