@@ -78,6 +78,10 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     expect(log2).toContain("permission-allowed");
     expect(log2).toContain("allowed continuation");
     expect(log2).not.toContain("action rejected");
+    // The DECISION renders in the frame (gate r1: the kinds used to fall
+    // to the renderer's empty default — log-only decisions).
+    e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(strip(bufferText(editor))).toContain("= allowed this request");
   });
 
   test("n rejects: the denial branch renders, the turn ends cleanly", async () => {
@@ -90,6 +94,8 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     expect(log).toContain("action rejected");
     expect(log).not.toContain("allowed continuation");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(strip(bufferText(editor))).toContain("= denied");
   });
 
   test("a persists per-thread: the NEXT matching (tool, scope) skips the pause; a non-matching pair still pauses (across save/reload)", async () => {
@@ -132,6 +138,34 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     const start3 = e(editor2, '(fikra/adapter/fikra-backend-start-turn "third")');
     expect(String(start3.value)).toBe("paused");
     expect(String(e(editor2, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+  });
+
+  test("a TOOL-differing pair still pauses (the symmetric non-match); the allow-list is thread-scoped", async () => {
+    const { editor, dir } = await started(SCRIPT);
+    e(editor, '(fikra/adapter/fikra-backend-start-turn "seed")');
+    e(editor, '(fikra/backend-pausing/fikra-pausing-decide "a")');
+    e(editor, "(fikra/backend-pausing/fikra-pausing-pump)");
+    // A different TOOL (same scope) does not match the (Edit, src/**) pair.
+    writeFileSync(join(dir, "fixture3.jsonl"), [
+      '{"type":"assistant","text":"x"}',
+      '{"type":"permission","tool":"Bash","scope":"src/**"}',
+      '{"type":"assistant","text":"bash continuation"}',
+      '{"type":"end"}',
+    ].join("\n") + "\n");
+    e(editor, `(fikra/backend-pausing/fikra-backend-pausing-load "${join(dir, "fixture3.jsonl")}")`);
+    const st = e(editor, '(fikra/adapter/fikra-backend-start-turn "other-tool")');
+    expect(String(st.value)).toBe("paused");
+    e(editor, '(fikra/backend-pausing/fikra-pausing-decide "n")');
+    e(editor, "(fikra/backend-pausing/fikra-pausing-pump)");
+    // THREAD-SCOPED: a sibling thread has NO allow-list (its own
+    // state.json) — the same pair pauses there.
+    e(editor, '(fikra/thread/fikra-thread-new)');
+    const child = String(e(editor, "(fikra/thread/fikra-thread-current)").value);
+    expect(child).toBe("fix-1");
+    // Fresh script for the child turn (the parent's consumed its own).
+    e(editor, `(fikra/backend-pausing/fikra-backend-pausing-load "${join(dir, "fixture3.jsonl")}")`);
+    const st2 = e(editor, '(fikra/adapter/fikra-backend-start-turn "child")');
+    expect(String(st2.value)).toBe("paused");
   });
 
   test("the GRADED CAPTURE: the pause→decide→resume frame sequence renders in *Fikra*", async () => {

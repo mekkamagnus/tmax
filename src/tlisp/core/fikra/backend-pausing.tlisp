@@ -148,7 +148,7 @@ fikra-pausing-decide + the pump."
               (fikra-pausing-remember-always tool scope)
               (fikra/event/fikra-event-emit
                 (list (list "kind" "permission-allowed")
-                      (list "always" t)))
+                      (list "always" "true")))
               (fikra-pausing-emit-branch "assistant")
               (fikra-pausing-finish)))
           (t
@@ -184,7 +184,7 @@ fikra-pausing-decide + the pump."
                 (setq fikra-pausing-cursor (+ fikra-pausing-cursor 1))
                 (fikra/event/fikra-event-emit
                   (list (list "kind" "permission-allowed")
-                        (list "always" t)))
+                        (list "always" "true")))
                 (fikra-pausing-emit-rest-as "assistant")
                 (fikra-pausing-finish)
                 'done)

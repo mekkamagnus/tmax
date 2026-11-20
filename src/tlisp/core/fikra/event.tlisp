@@ -282,6 +282,15 @@ round-12 approvals catch)."
         (fikra-gate-panel event))
       ((string= kind "permission-response")
         (concat (fikra-face "\e[2m" (concat "  = " (fikra-event-get-str event "decision"))) "\n"))
+      ;; #303 (gate r1 catch): the fixture backend's decision kinds
+      ;; previously fell to the empty-string default — the decision lived
+      ;; only in the log, never in a rendered frame.
+      ((string= kind "permission-allowed")
+        (concat (fikra-face "\e[32m"
+                    (concat "  = allowed" (if (string= (fikra-event-get-str event "always") "true")
+                                          " (always for this tool+scope)" " this request"))) "\n"))
+      ((string= kind "permission-denied")
+        (concat (fikra-face "\e[31m" "  = denied — the turn ended") "\n"))
       ((string= kind "file-change")
         (concat (fikra-face "\e[35m"
                     (concat "± " (fikra-event-get-str event "path")

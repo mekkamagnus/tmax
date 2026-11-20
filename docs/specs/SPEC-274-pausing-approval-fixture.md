@@ -21,7 +21,8 @@ equality.
 - `n` rejects (the denial branch renders; clean turn-end).
 - `a` persists per-thread: the thread record carries an
   `approval-allow-list` of (tool, scope) pairs — persisted in
-  state.json (save + load + the background-session writer all carry it)
+  state.json (both json-encode writers carry it: the main save and the
+  background-session writer; the thread-list row reader is untouched)
   and reloaded threads retain it (tolerant of the json alist round-trip).
   The NEXT matching pair SKIPS the pause; a non-matching pair (either
   field differs) still pauses — tested across a save/reload.
@@ -33,8 +34,13 @@ equality.
 - [x] Pausing fixture backend with the poll-based decision seam;
       scripted allow/deny/always branches
 - [x] y/n/a each drive the correct branch; `a` persists per-thread and
-      suppresses the next matching pause; thread-scoped only
+      suppresses the next matching pause; thread-scoped only (a sibling
+      thread with an empty allow-list pauses on the same pair; both
+      non-match axes — tool-differing and scope-differing — pause)
 - [x] Graded capture: the full pause→decide→resume frame sequence
       (the pause frame with the [y/n/a] prompt; the resumed frame gains
       the continuation + completion — the answered popup stays as
-      append-only history)
+      append-only history). The DECISION renders in the frame:
+      permission-allowed/permission-denied now have renderer cases
+      (= allowed [this request | always for this tool+scope] / =
+      denied — the turn ended) — gate r1 caught them log-only
