@@ -1,7 +1,7 @@
 (defmodule fikra/diff
   (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn
           fikra-diff-restore-turn fikra-changed-paths-since-baseline
-          fikra-diff-turn-next fikra-diff-turn-prev
+          fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
           fikra-revert-confirm-table fikra-revert-confirm-accept)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
@@ -68,16 +68,25 @@
         (setq fikra-diff-view-turn n)
         (fikra-diff-render
           (concat "\e[1;36m── turn " (number-to-string n)
-                  " (completed) · ]/[ next/prev turn · n/N file · SPC a d returns live ──\e[0m\n\n"
+                  " (completed) · ]/[ next/prev turn · n/N file · SPC a d live view ──\e[0m\n\n"
                   patch))))))
 
 (defun fikra-diff-turn-step (delta)
   (let* ((count (fikra/thread/fikra-thread-turn-count))
-         (from (if fikra-diff-view-turn fikra-diff-view-turn count))
-         (target (+ from delta)))
-    (if (or (< target 1) (> target count))
-      (editor-set-status (concat "Fikra: turn 1.." (number-to-string count)))
-      (fikra-turn-diff-for target))))
+         (from (if fikra-diff-view-turn fikra-diff-view-turn count)))
+    (fikra-diff-turn-scan from delta count (+ from delta))))
+
+;; r48: a turn with an EMPTY patch (or missing refs) is SKIPPED — the walk
+;; reaches earlier turns through the gap instead of stopping dead.
+(defun fikra-diff-turn-scan (from delta count target)
+  (if (or (< target 1) (> target count)
+          (and (= target from) (not (= from (if fikra-diff-view-turn fikra-diff-view-turn count)))))
+    (editor-set-status (concat "Fikra: turn 1.." (number-to-string count)))
+    (if (= target from)
+      (editor-set-status "Fikra: no further turns with captured diffs")
+      (if (> (length (string-trim (fikra-diff-turn-patch target))) 0)
+        (fikra-turn-diff-for target)
+        (fikra-diff-turn-scan from delta count (+ target delta))))))
 
 (defun fikra-diff-turn-next () (fikra-diff-turn-step 1))
 (defun fikra-diff-turn-prev () (fikra-diff-turn-step -1))
@@ -88,7 +97,7 @@
           (number-to-string (fikra-diff-total rows 1)) " -"
           (number-to-string (fikra-diff-total rows 2)) " ──\e[0m\n\n"
           (fikra-diff-rows rows)
-          "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn · SPC a d returns live \n\n"))
+          "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn · SPC a d live view \n\n"))
 
 ;; ROWS are ((path adds dels) ...); IDX 1 = adds column, 2 = dels.
 (defun fikra-diff-total (rows idx)
@@ -194,6 +203,49 @@
 ;; files the turn CREATED. Destructive — requires an explicit "revert"
 ;; confirmation in the minibuffer.
 (defun fikra-diff-revert-turn ()
+  "r: in the LIVE view this reverts the current turn's working changes; in
+a COMPLETED-turn view it reverts THE VIEWED TURN (r48: the binding used
+to run the live revert from a history view — a genuinely dangerous
+ambiguity)."
+  (interactive)
+  (if fikra-diff-view-turn
+    (fikra-diff-revert-completed fikra-diff-view-turn)
+    (fikra-diff-revert-live)))
+
+;; Revert completed turn N: restore the BASELINE ref's version of every
+;; path the turn changed (paths from the turn's own numstat), then
+;; refresh the view.
+(defun fikra-diff-revert-completed (n)
+  (let* ((id (fikra/thread/fikra-thread-current))
+         (root (fikra/thread/fikra-thread-working-dir))
+         (base (concat "refs/fikra/" id "/" (number-to-string n) "-baseline"))
+         (paths (fikra-diff-completed-paths root id n)))
+    (if (or (null paths) (= (length paths) 0))
+      (editor-set-status (concat "Fikra: turn " (number-to-string n) " has no captured changes"))
+      (progn
+        (dolist (p paths)
+          (shell-command
+            (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                    " checkout " base " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null || true")))
+        (editor-set-status (concat "Fikra: reverted turn " (number-to-string n) " (baseline restored)"))
+        (fikra-turn-diff-for n)))))
+
+;; The turn's changed paths from ITS OWN numstat (not the live baseline).
+(defun fikra-diff-completed-paths (root id n)
+  (let ((raw (shell-command
+    (concat "git -C " (fikra/thread/fikra-thread-shq root)
+            " diff --numstat refs/fikra/" id "/" (number-to-string n) "-baseline"
+            " refs/fikra/" id "/" (number-to-string n)
+            " 2>/dev/null | cut -f3"))))
+    (fikra-diff-paths-filter (string-split raw "\n") (list))))
+
+(defun fikra-diff-paths-filter (lines acc)
+  (if (null lines)
+    (reverse acc)
+    (fikra-diff-paths-filter (cdr lines)
+      (if (> (length (car lines)) 0) (cons (car lines) acc) acc))))
+
+(defun fikra-diff-revert-live ()
   (interactive)
   (require-module fikra/thread)
   (let ((paths (fikra-changed-paths-since-baseline)))
