@@ -680,3 +680,25 @@ The highest-priority remaining fixes are:
 4. Capture and assess actual diff/revert and worktree handoff screens. [worktree.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/worktree.tlisp:130) applies a checked patch directly and reports status; the mockup calls for a reviewable handoff with explicit choices.
 
 The new captures establish that chat, composition and thread listing are live surfaces, and the earlier mediated approval proof supports the execution claim. Visual fidelity remains uneven at the captured width: the approval panel still breaks across lines, the modeline consumes several rows, and the threads table wraps. Diff and worktree handoff need live visual evidence before they can receive comparable grades.
+
+---
+
+# Round 22 (every section captured) — 2026-11-20
+
+| Section | Grade | Justification |
+|---|---:|---|
+| **8.1 Chat** | **7/10** | Live chat shows turn and tool output with a useful modeline; the proposed native loop, per-action checkpoints, and native tool evidence are not demonstrated. |
+| **8.2 Capture** | **7/10** | Live composition opens in insert mode with send/cancel guidance; the mockup’s recipient, context, separators, and visible history guidance are absent. |
+| **8.3 Approval** | **7/10** | The r44 capture demonstrates a CLI-mediated approval through execution, with checkpoint and origin information; native per-action provenance and the mockup’s detailed action panel remain missing, and narrow rendering truncates content. |
+| **8.4 Turn diff + revert** | **8/10** | Fresh captures show file summaries, totals, hints, and live `n` navigation to the new-file section; the mockup’s tool totals and turn navigation are not shown, and revert execution is not proven by these captures. |
+| **8.5 Threads** | **7/10** | The live list displays thread, trust, location, status, and turns; the richer project/worktree summary, native backend data, and full action bar differ from the mockup. |
+| **8.6 Worktree handoff** | **5/10** | Live evidence proves dirty-tree refusal and clean worktree entry, but those are entry paths; it does not demonstrate the mockup’s completed-worktree patch review, apply, or refuse handoff. |
+
+The highest-impact remaining fixes are:
+
+1. **Build and verify the handoff screen and its end-to-end choices.** The current entry and handoff logic lives in [worktree.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/worktree.tlisp:96); the handoff starts at line 130. Demonstrate review, successful application, and refusal with the worktree retained.
+2. **Deliver the native loop and per-action approval evidence.** The existing live proof is for the Claude CLI bridge; extend the chat and approval surfaces from [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:21) and [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:168) to support the RFC’s native-tool flow.
+3. **Improve narrow approval and information surfaces.** Make approval details readable at narrow widths, and bring the capture header and thread actions closer to the mockups in [capture.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/capture.tlisp:16) and [threads.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/threads.tlisp:30).
+4. **Complete diff review evidence.** Add the proposed turn/tool context and verify revert through the live UI; summary, navigation, and revert handlers are in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:38).
+
+The new captures resolve the previous visibility gap for diff navigation and establish both worktree-entry outcomes. Fikra now has substantial live evidence across all six areas, with especially strong proof of the existing CLI approval bridge and diff navigation. The largest remaining distance from the RFC is the proposed native harness and the **finished worktree-to-main handoff**: creating a worktree and refusing unsafe entry do not yet prove that handoff screen or its choices. These grades compare the supplied captures and current code with the proposal; I did not rerun the workflows for this review.
