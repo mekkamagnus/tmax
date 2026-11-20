@@ -75,6 +75,7 @@ export function createFramesHandlers(ctx: ServerContext): {
       const frame = ctx.getFrame(params.frameId);
       // Read-only: return frame's own state directly, no workspace activation (C2).
       // Viewport-only wire (issue #46): embed only the rows this frame's
+<<<<<<< HEAD
       // terminal can show.
       const renderHeight = renderHeightForTerminalSize(
         ctx.frameObservability.get(params.frameId)?.terminalSize,
@@ -85,6 +86,13 @@ export function createFramesHandlers(ctx: ServerContext): {
       // `tmaxclient --keys`) never acknowledge.
       markTransientServed(ctx.editor.tlispInterpreter, frame.currentBufferName ?? undefined);
       return editorStateToJson(state, renderHeight);
+=======
+      // terminal can show. #321: pass the WIDTH too — without it the wrap
+      // expansion never runs on this path (blank tails under wrap).
+      const frameTermSize = ctx.frameObservability.get(params.frameId)?.terminalSize;
+      const renderHeight = renderHeightForTerminalSize(frameTermSize);
+      return editorStateToJson(ctx.frameToEditorState(frame), renderHeight, frameTermSize?.width);
+>>>>>>> d561180 (fix(render): wrap-aware wire windows + viewport tops — blank tails on large buffers (#321))
     }
     const state = withTransientRevision(ctx.editor.getEditorState(), ctx.editor.tlispInterpreter);
     markTransientServed(ctx.editor.tlispInterpreter, (state as { currentBufferName?: string }).currentBufferName);

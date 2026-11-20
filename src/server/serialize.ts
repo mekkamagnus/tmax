@@ -171,19 +171,38 @@ export function editorStateToJson(
   // wrapped-row counts until the screen is covered (cw approximates the
   // gutter-reduced width conservatively; over-sending is harmless — the
   // client's ViewportBuffer just holds extra rows).
+  //
+  // #321 (capture-matrix catch): the walk ALSO stops only when the screen
+  // is covered — at ~2 wrapped rows/line that halts at rows/2 LOGICAL
+  // lines, while the logical clamp places the cursor up to `rows` lines
+  // below top. The wire window then EXCLUDES the cursor line entirely and
+  // the client (logical-only clamp) renders the cursor + tail below the
+  // fold — the blank/frozen tail. The window must ALWAYS span through the
+  // cursor line; the walk continues until the screen is covered AND the
+  // cursor is inside.
   let neededRows = rows;
-  if (state.config?.wordWrap && renderWidth && renderWidth > 24 && buffer) {
-    const cw = Math.max(20, renderWidth - 12);
-    const rowLimit = rows * 6; // wire bound: pathological single-line walls
-    let wrappedRows = 0;
-    let i = 0;
-    while (wrappedRows < rows && i < rowLimit) {
-      const lineResult = buffer.getLine(viewportTop + i);
-      const text = lineResult && lineResult._tag === "Right" ? lineResult.right : "";
-      wrappedRows += Math.max(1, Math.ceil(Bun.stringWidth(text) / cw));
-      i++;
+  if (state.config?.wordWrap && buffer) {
+    const cursorLine = state.cursorPosition.line;
+    // No width (render-state/no-frame paths) → no wrap estimate; still
+    // guarantee the cursor line plus forward screen slack on the wire.
+    if (!renderWidth || renderWidth <= 24) {
+      neededRows = Math.min(
+        Math.max(rows, cursorLine - viewportTop + 1 + rows),
+        rows * 6, // same wire bound as the estimated walk
+      );
+    } else {
+      const cw = Math.max(20, renderWidth - 12);
+      const rowLimit = rows * 6; // wire bound: pathological single-line walls
+      let wrappedRows = 0;
+      let i = 0;
+      while ((wrappedRows < rows || viewportTop + i <= cursorLine) && i < rowLimit) {
+        const lineResult = buffer.getLine(viewportTop + i);
+        const text = lineResult && lineResult._tag === "Right" ? lineResult.right : "";
+        wrappedRows += Math.max(1, Math.ceil(Bun.stringWidth(text) / cw));
+        i++;
+      }
+      neededRows = Math.max(rows, i);
     }
-    neededRows = Math.max(rows, i);
   }
   // #318 (codex r4/r5): the client RESERVES the spinner row from its
   // buffer (spinnerRowReserved) and may then advance its effective

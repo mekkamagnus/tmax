@@ -59,6 +59,32 @@ function fitToWidthWithScroll(rawLine: string, cw: number, viewportLeft: number)
 
 export { getVisibleViewportTop };
 
+/**
+ * #321: the wrap-aware viewport top for the FOCUSED single-window view —
+ * what renderSingleWindowWrapped actually renders from when word wrap is
+ * on (the logical clamp otherwise leaves the cursor's wrapped row below
+ * the fold). Frontends use this to precompute syntax spans over the REAL
+ * rendered range. Returns the logical clamp when wrap is off.
+ */
+export function getWrappedViewportTop(state: EditorState, visibleLines: number, width: number): number {
+  if (!state.config?.wordWrap) return getVisibleViewportTop(state, visibleLines);
+  const totalLines = getLineCount(state);
+  const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
+  const gw = gutterDisplayWidth(totalLines, gutterCfg);
+  const cw = Math.max(1, width - gw);
+  const cursorLine = state.cursorPosition.line;
+  let top = getVisibleViewportTop(state, visibleLines);
+  if (cursorLine <= top) return top;
+  const rowsOf = (ln: number) => Math.max(1, wrapLine(getLine(state, ln), cw).length);
+  let span = 0;
+  for (let ln = top; ln <= cursorLine && ln < totalLines; ln++) span += rowsOf(ln);
+  while (span > visibleLines && top < cursorLine) {
+    span -= rowsOf(top);
+    top++;
+  }
+  return top;
+}
+
 export function getVisibleViewportLeft(state: EditorState, contentWidth: number): number {
   const cursorColumn = state.cursorPosition.column;
   const viewportLeft = state.viewportLeft ?? 0;
@@ -407,6 +433,22 @@ function renderSingleWindowWrapped(
   const lines: string[] = [];
   let screenRow = 0;
 
+  // #321 (capture-matrix catch): WRAP-AWARE top. The logical clamp can
+  // leave the cursor's wrapped row below the screen — every line may
+  // occupy multiple rows, so [top, cursorLine] can consume far more than
+  // `visibleLines` rows and the cursor + tail render below the fold (the
+  // blank/frozen tail). Advance the top until the cursor's rows fit.
+  let top = viewportTop;
+  if (isFocused && cursorLine > top) {
+    const rowsOf = (ln: number) => Math.max(1, wrapLine(getLineForBuffer(buffer, ln), cw).length);
+    let span = 0;
+    for (let ln = top; ln <= cursorLine && ln < totalLines; ln++) span += rowsOf(ln);
+    while (span > visibleLines && top < cursorLine) {
+      span -= rowsOf(top);
+      top++;
+    }
+  }
+
   const hiddenLines = new Set<number>();
   if (foldRanges) {
     for (const [foldStart, foldEnd] of foldRanges) {
@@ -416,7 +458,7 @@ function renderSingleWindowWrapped(
     }
   }
 
-  let logicalLine = viewportTop;
+  let logicalLine = top;
   while (screenRow < visibleLines && logicalLine < totalLines) {
     if (hiddenLines.has(logicalLine)) { logicalLine++; continue; }
 

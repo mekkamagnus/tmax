@@ -6,7 +6,7 @@
  */
 
 import { RemoteEditor } from "../editor/remote-editor.ts";
-import { renderBufferLines, getVisibleViewportTop, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
+import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
 import { mergeFlashSpans } from "../render/flash-merge.ts";
 export { mergeFlashSpans };
 import { renderStatusLine } from "../frontend/render/status-line.ts";
@@ -79,7 +79,11 @@ function render(state: EditorState) {
   // turn (the row is given back when the segment clears).
   const spinnerRow = spinnerRowReserved(state) ? 1 : 0;
   const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight - spinnerRow);
-  const vt = getVisibleViewportTop(state, bufferHeight);
+  // #321: wrap-aware top — spans cover the range the wrapped render walks.
+  const vt = state.config?.wordWrap
+    ? getWrappedViewportTop(state, bufferHeight, width)
+    : getVisibleViewportTop(state, bufferHeight);
+  const spanHeight = state.config?.wordWrap ? bufferHeight * 2 : bufferHeight;
   const getLine = (ln: number) => {
     const r = state.currentBuffer?.getLine(ln);
     return r && Either.isRight(r) ? r.right : "";
@@ -88,7 +92,7 @@ function render(state: EditorState) {
     ? computeHighlightSpans(
         getLine,
         vt,
-        vt + bufferHeight,
+        vt + spanHeight,
         state.currentFilename,
         // SPEC-118: dim dangling [[wiki-links]] (no-op for non-markdown langs).
         makeWikiLinkResolver(state.currentBuffer, state.currentFilename),

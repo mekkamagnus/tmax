@@ -5,7 +5,7 @@
  */
 
 import type { EditorState } from "../core/contracts/editor.ts";
-import { renderBufferLines, getVisibleViewportTop } from "../frontend/render/buffer-lines.ts";
+import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop } from "../frontend/render/buffer-lines.ts";
 import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
@@ -34,7 +34,12 @@ export function captureFrame(state: EditorState, width: number, height: number):
   const commandHeight = minibuffer?.lines.length ?? ((state.mode === "command" || state.mode === "mx") ? 1 : 0);
   const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight);
 
-  const vt = getVisibleViewportTop(state, bufferHeight);
+  // #321: wrap-aware top — spans must cover the range the wrapped render
+  // actually walks (up to 2x the logical height under wrap).
+  const vt = state.config?.wordWrap
+    ? getWrappedViewportTop(state, bufferHeight, width)
+    : getVisibleViewportTop(state, bufferHeight);
+  const spanHeight = state.config?.wordWrap ? bufferHeight * 2 : bufferHeight;
   const getLine = (ln: number) => {
     const r = state.currentBuffer?.getLine(ln);
     return r && Either.isRight(r) ? r.right : "";
@@ -43,7 +48,7 @@ export function captureFrame(state: EditorState, width: number, height: number):
     ? computeHighlightSpans(
         getLine,
         vt,
-        vt + bufferHeight,
+        vt + spanHeight,
         state.currentFilename,
         // SPEC-118: dim dangling [[wiki-links]] (no-op for non-markdown langs).
         makeWikiLinkResolver(state.currentBuffer, state.currentFilename),
