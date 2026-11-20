@@ -32,17 +32,9 @@ body. (Mode must be active — the SPC a i binding implies it.)"
     (buffer-switch fikra-capture-buffer-name)
     (setq fikra-capture-ctx-label ctx))
   (buffer-set-read-only nil)
-  (let ((count (buffer-line-count)))
-    (if (> count 1)
-      (let ((second-last (buffer-line (- count 2))))
-        (if (> count 2)
-          (progn
-            (buffer-delete-range 0 0 (- count 2) (length second-last))
-            (let ((l (buffer-line 0)))
-              (buffer-delete-range 0 0 0 (length l))))
-          (let ((l (buffer-line 0)))
-            (if (> (length l) 0)
-              (buffer-delete-range 0 0 0 (length l))))))))
+  ;; The shared whole-buffer clear (r57: the open path's own cleanup
+  ;; skipped a single-line existing buffer).
+  (fikra-buffer-clear-all)
   (cursor-move 0 0)
   (buffer-insert (concat (fikra-capture-to-line-cached) "\n"))
   (buffer-insert "--------------------------------------------------------------\n")

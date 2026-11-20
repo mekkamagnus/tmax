@@ -182,7 +182,11 @@ describe("#8.2 capture frame", () => {
     const ed = await createStartedEditor("");
     e(ed, "(require-module fikra/mode)");
     e(ed, "(fikra-start)");
+    e(ed, "(require-module fikra/adapter)");
     e(ed, "(require-module fikra/backend-replay)");
+    // EXPLICIT replay selection (the r57 catch: requiring the module does
+    // not select it — the test spawned real claude processes and timed out).
+    e(ed, '(fikra/adapter/fikra-set-backend-forced "replay")');
     e(ed, '(require-module "fikra/thread")');
     e(ed, '(fikra-thread-set-field "root" "/tmp")');
     e(ed, "(require-module fikra/chat)");
@@ -196,5 +200,6 @@ describe("#8.2 capture frame", () => {
     const chat = String(e(ed, '(progn (buffer-switch "*Fikra*") (buffer-text))').value);
     expect(chat).toContain("the sent body");
     expect(chat).not.toContain("To: thread");
+    expect(chat).not.toContain("Context:");
   });
 });
