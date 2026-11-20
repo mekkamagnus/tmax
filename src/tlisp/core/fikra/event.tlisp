@@ -183,11 +183,15 @@ round-12 approvals catch)."
                  ;; A Always / C-g abort. y/n remain bound as aliases.
                  (concat "a Allow  r Reject  A Always allow " tool-word
                          " in this thread  C-g abort turn")
-                 ;; The ckpt row in the mockup's shape — the ref NAMES the
-                 ;; revert target (legacy events keep the short form).
+                 ;; The ckpt row in the mockup's shape — the ✓ is EARNED
+                 ;; (r81, codex r80 catch 2: the emit VERIFIED the baseline
+                 ;; ref exists; "" means no capture yet and the row must
+                 ;; SAY so — a synthesized ✓ lied about revert availability).
                  (if (and (> (length th) 0) (> (length tn) 0))
-                   (concat "ckpt    fikra/" th "/" tn
-                           " ✓ — revert available after execution")
+                   (if (> (length cp) 0)
+                     (concat "ckpt    " cp
+                             " ✓ — revert available after execution")
+                     "ckpt    none yet — revert unavailable after this action")
                    (if (string= cp "") "" (concat "ckpt " cp " · r reverts")))
                  (if (string= org "") "" (concat "origin: " org))
                  ;; The COMPLETE action (r72: the derived target/risk are

@@ -73,8 +73,20 @@ describe("P1 interactive gate — pause → USER KEY → resume", () => {
     // the wrapped tail, not the unwrapped string.
     expect(paused).toContain("a Allow  r Reject  A Always allow");
     expect(paused).toContain("C-g abort turn");
-    expect(paused).toContain("ckpt    fikra/main/1");
-    expect(paused).toContain("after execution");
+    // The baseline capture is ASYNC after turn-begin — at pause time it
+    // has not landed, and the row must SAY so (r81: the ✓ is earned only
+    // when the ref is verified; a synthesized ✓ lied about revertability).
+    expect(paused).toContain("ckpt    none yet — revert unavailable");
+    // The earning itself: seed the baseline ref -> the helper reports the
+    // NAME (which the panel renders with the ✓).
+    execFileSync("git", ["add", "-A"], { cwd: process.cwd() });
+    const tree = execFileSync("git", ["write-tree"], { cwd: process.cwd() }).toString().trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "base"], { cwd: process.cwd() }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/main/1-baseline", commit], { cwd: process.cwd() });
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-baseline-ref)").value)).toBe("fikra/main/1-baseline");
+    // r81 catch 3: bare-name and ABSOLUTE directory targets enrich too.
+    expect(String(e(editor, '(fikra/approvals/fikra-approval-target-rich "lib")').value)).toContain("lib  (2 files,");
+    expect(String(e(editor, '(fikra/approvals/fikra-approval-target-rich "/tmp")').value)).toContain("/tmp  (");
     expect(paused).toContain("lib/  (2 files,");
     // THE KEYSTROKE: y in the chat buffer (normal mode, buffer keymap).
     await editor.handleKey("y");

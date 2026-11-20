@@ -3,7 +3,8 @@
           fikra-approval-answer-allow fikra-approval-answer-reject
           fikra-approval-answer-always fikra-approval-resolve-guard
           fikra-set-approval-guard fikra-approval-pending-p
-          fikra-approvals-ensure-bindings fikra-approval-target-rich)
+          fikra-approvals-ensure-bindings fikra-approval-target-rich
+          fikra-approval-baseline-ref)
 
 ;; #220 (RFC-027 §D5 L2, §Security) — Fikra policy on the generic
 ;; confirmation mechanism (#210): the daemon parks a mediate from the MCP
@@ -96,13 +97,18 @@ decides instead."
 
 ;; The mockup's target context (8.3): "src/client/.legacy-render/  (14
 ;; files, 3.1 MB)" — a DIRECTORY target carries its file count and size,
-;; so the reviewer sees the blast radius before answering (r80). Non-dir
-;; and non-path targets pass through unchanged.
+;; so the reviewer sees the blast radius before answering (r80).
+;; r81 (codex r80 catch 3): ANY name resolving to an existing directory
+;; enriches (bare "lib" was missed); ABSOLUTE targets are used as-is
+;; (they were wrongly re-prefixed with the working dir). Non-dirs pass
+;; through unchanged.
 (defun fikra-approval-target-rich (target)
-  (if (or (string= target "") (not (string-match "/" target)))
+  (if (string= target "")
     target
     (let* ((dir (fikra/thread/fikra-thread-working-dir))
-           (abs (concat dir "/" target))
+           (abs (if (string-prefix-p "/" target)
+                  target
+                  (concat dir "/" target)))
            (is-dir (string= (string-trim (shell-command
                           (concat "test -d " (fikra/thread/fikra-thread-shq abs)
                                   " && echo yes || echo no"))) "yes")))
@@ -117,6 +123,21 @@ decides instead."
                   (concat "du -sh " (fikra/thread/fikra-thread-shq abs)
                           " 2>/dev/null | cut -f1")))
                 ")")))))
+
+;; The verified turn-begin baseline ref NAME (refs/fikra/<id>/<n>-baseline
+;; as "fikra/<id>/<n>-baseline") — "" when the capture has not landed (the
+;; panel must not synthesize a ✓ it cannot honor: r81, codex r80 catch 2).
+(defun fikra-approval-baseline-ref ()
+  (condition-case nil
+    (let* ((id (fikra/thread/fikra-thread-current))
+           (n (fikra/thread/fikra-thread-turn-count))
+           (ref (concat "refs/fikra/" id "/" (number-to-string n) "-baseline")))
+      (if (string= (string-trim (shell-command
+              (concat "git -C " (fikra/thread/fikra-thread-shq (fikra/thread/fikra-thread-working-dir))
+                      " rev-parse --verify -q " ref " >/dev/null 2>&1 && echo yes || echo no"))) "yes")
+        (concat "fikra/" id "/" (number-to-string n) "-baseline")
+        ""))
+    (error () "")))
 
 (defun fikra-approval-pending-p ()
   "t when an approval is waiting — EITHER a parked mediate (#220) OR a
@@ -226,10 +247,9 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
               ;; CHECKPOINT the turn began from (the stash baseline tree —
               ;; revert target), and the resolver origin.
               (list "mode" (fikra/modes/fikra-effective-mode))
-              (list "checkpoint" (condition-case nil
-                                    (let ((t-v (fikra/thread/fikra-thread-field "change-baseline-tree")))
-                                      (if (stringp t-v) (substring t-v 0 8) ""))
-                                    (error () "")))
+              ;; r81: the ✓ is EARNED — the verified baseline ref name, or
+              ;; "" (the panel then says revert unavailable).
+              (list "checkpoint" (fikra-approval-baseline-ref))
               (list "origin" (if (string= (confirmation-resolver-kind) "headless")
                                "headless" "interactive-frame"))))
       ;; running → confirming (checked transition — an illegal enqueue

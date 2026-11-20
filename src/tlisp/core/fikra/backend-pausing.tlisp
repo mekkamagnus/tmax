@@ -212,14 +212,12 @@ fikra-pausing-decide + the pump."
                         (list "mode" (condition-case nil
                                         (fikra/modes/fikra-effective-mode)
                                         (error () "")))
-                        (list "checkpoint" (condition-case nil
-                                              (let ((t-v (fikra/thread/fikra-thread-field "change-baseline-tree")))
-                                                (if (stringp t-v) (substring t-v 0 8) ""))
-                                              (error () "")))
+                        (list "checkpoint" (fikra/approvals/fikra-approval-baseline-ref))
                         (list "origin" "backend-pause")))
                 (fikra/thread/fikra-thread-status-set "confirming")
                 (editor-set-status
-                  "Fikra: approve Edit? a Allow · r Reject · A Always · C-g abort")
+                  (concat "Fikra: approve " tool
+                          "? a Allow · r Reject · A Always · C-g abort"))
                 'paused))))
         (t
           ;; A plain assistant chunk before the gate.
