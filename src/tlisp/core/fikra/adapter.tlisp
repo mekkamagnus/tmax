@@ -4,7 +4,8 @@
           fikra-list-backends fikra-list-available-backends fikra-backend-available-p
           fikra-backend-capabilities fikra-backend-capable-p
           fikra-backend-start-turn fikra-backend-abort
-          fikra-backend-prompt fikra-backend-call fikra-set-backend-forced)
+          fikra-backend-prompt fikra-backend-call fikra-set-backend-forced
+          fikra-backend-pending-p fikra-backend-decide)
 
 ;; #214 (RFC-027 §D4): Adapter contract v2. A backend module provides:
 ;;   fikra-backend-<name>-available-p           → t/nil (probed, cached)
@@ -144,6 +145,31 @@ set-backend survives refocus instead of being reset)."
       (condition-case nil
         (funcall fn-name)
         (error nil)))))
+
+;; The approval seam (the gate's P1 slice): same funcall contract as
+;; start-turn — backends that can pause expose pending-p + decide; backends
+;; that cannot simply answer nil / "cannot take approvals".
+(defun fikra-backend-pending-p ()
+  "t when the CURRENT backend has a permission parked awaiting a decision."
+  (if (not fikra-current-backend-name)
+    nil
+    (let ((fn-name (concat "fikra-backend-" fikra-current-backend-name "-pending-p")))
+      (condition-case nil
+        (let ((r (funcall fn-name)))
+          (if (and r (not (eq r nil))) t nil))
+        (error nil)))))
+
+(defun fikra-backend-decide (decision)
+  "Deliver the user's gate DECISION (y | n | a) to the current backend."
+  (if (not fikra-current-backend-name)
+    (progn (message "Fikra: no backend selected") nil)
+    (let ((fn-name (concat "fikra-backend-" fikra-current-backend-name "-decide")))
+      (condition-case nil
+        (funcall fn-name decision)
+        (error
+          (progn
+            (message "Fikra: backend %s cannot take approvals" fikra-current-backend-name)
+            nil))))))
 
 (defun fikra-backend-prompt ()
   "Pick a backend via completing-read over the REGISTERED backends (the

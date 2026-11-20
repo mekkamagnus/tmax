@@ -95,7 +95,12 @@ decides instead."
                  (string= (fikra/thread/fikra-thread-status) "running"))))))))
 
 (defun fikra-approval-pending-p ()
-  (if fikra-approval-pending-id t nil))
+  "t when an approval is waiting — EITHER a parked mediate (#220) OR a
+backend pause (#303's gate: the turn is parked at a permission awaiting
+the user's y/n/a — the same signal the modeline's approval-required
+segment reads)."
+  (require-module fikra/adapter)
+  (if (or fikra-approval-pending-id (fikra/adapter/fikra-backend-pending-p)) t nil))
 
 ;; ── the registered handler (runs at mediate-park time) ─────────────
 
@@ -212,11 +217,19 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
 
 ;; ── answering ────────────────────────────────────────────────────────
 (defun fikra-approval-answer (decision)
-  "Answer the pending approval (allow | reject | always). Guarded: a
-headless resolver is DENIED and the prompt stays pending. always also
-writes thread trust (promoted to --allowedTools on later turns)."
-  (if (null fikra-approval-pending-id)
-    (progn (editor-set-status "Fikra: no pending approval") nil)
+  "Answer the pending approval (allow | reject | always). The BACKEND
+pause takes precedence (#303's gate — the P1 interactive loop: pause →
+USER KEY → resume; the fixture backend proves the seam a native backend
+adopts); otherwise the parked mediate path (#220): guarded, a headless
+resolver is DENIED and the prompt stays pending. always also writes
+thread trust (promoted to --allowedTools on later turns)."
+  (require-module fikra/adapter)
+  (if (fikra/adapter/fikra-backend-pending-p)
+    (fikra/adapter/fikra-backend-decide
+      (if (string= decision "allow") "y"
+        (if (string= decision "reject") "n" "a")))
+    (if (null fikra-approval-pending-id)
+      (progn (editor-set-status "Fikra: no pending approval") nil)
     (if (not (fikra-approval-resolve-guard))
       (progn
         ;; The denial leaves the mediate PARKED (pending) — only an
@@ -242,7 +255,7 @@ writes thread trust (promoted to --allowedTools on later turns)."
           ;; have ended under us; that settle is the turn's business).
           (if (string= (fikra/thread/fikra-thread-status) "confirming")
             (fikra/thread/fikra-thread-status-set "running"))
-          won)))))
+          won))))))
 
 (defun fikra-approval-answer-allow () (fikra-approval-answer "allow"))
 (defun fikra-approval-answer-reject () (fikra-approval-answer "reject"))

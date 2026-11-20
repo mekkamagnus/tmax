@@ -159,6 +159,14 @@ context flakiness)."
         (setq kmap (editor/keymaps/keymap-init "fikra-chat"))
         (editor/keymaps/keymap-set-key kmap "RET" "(fikra/chat/fikra-follow-link)")
         (editor/keymaps/keymap-set-key kmap "C-g" "(fikra/chat/fikra-turn-interrupt)")
+        ;; The gate keys (mockup 8.3's [y]/[n]/[a]): answer whichever
+        ;; approval is pending — a backend PAUSE (#303: pause → USER KEY →
+        ;; resume, the P1 interactive loop) or a parked mediate (#220).
+        ;; Bound from the start (the handlers no-op with a status when
+        ;; nothing waits), require-progn per the mode.tlisp pattern.
+        (editor/keymaps/keymap-set-key kmap "y" "(progn (require-module fikra/approvals) (fikra/approvals/fikra-approval-answer-allow))")
+        (editor/keymaps/keymap-set-key kmap "n" "(progn (require-module fikra/approvals) (fikra/approvals/fikra-approval-answer-reject))")
+        (editor/keymaps/keymap-set-key kmap "a" "(progn (require-module fikra/approvals) (fikra/approvals/fikra-approval-answer-always))")
         (editor/keymaps/buffer-set-keymap (fikra/thread/fikra-thread-buffer-name) kmap))))
   t)
 

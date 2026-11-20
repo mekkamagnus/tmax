@@ -2,6 +2,7 @@
   (export fikra-backend-pausing-available-p fikra-backend-pausing-capabilities
           fikra-backend-pausing-load fikra-backend-pausing-start-turn
           fikra-backend-pausing-abort
+          fikra-backend-pausing-pending-p fikra-backend-pausing-decide
           fikra-pausing-pump fikra-pausing-decide
           fikra-pausing-pending-p fikra-pausing-allow-list-get fikra-pausing-allow-matches-p
           fikra-pausing-stream-until-pause-or-end)
@@ -193,12 +194,28 @@ fikra-pausing-decide + the pump."
                 (setq fikra-pausing-pending-tool-val tool)
                 (setq fikra-pausing-pending-scope-val scope)
                 (setq fikra-pausing-paused-at fikra-pausing-cursor)
+                ;; The request carries the mediate emit's FULL mockup-8.3
+                ;; field set (r70): without thread/turn/target/risk the
+                ;; panel degraded to its fallback title and empty rows.
+                (require-module fikra/approvals)
                 (fikra/event/fikra-event-emit
                   (list (list "kind" "permission-request")
                         (list "action" (concat tool ": " scope))
                         (list "tool" tool)
                         (list "scope" scope)
-                        (list "id" "fx-pausing")))
+                        (list "id" "fx-pausing")
+                        (list "target" (fikra/approvals/fikra-approval-target (concat tool ": " scope)))
+                        (list "thread" (fikra/thread/fikra-thread-current))
+                        (list "turn" (number-to-string (fikra/thread/fikra-thread-turn-count)))
+                        (list "risk" (fikra/approvals/fikra-approval-risk tool (concat tool ": " scope)))
+                        (list "mode" (condition-case nil
+                                        (fikra/modes/fikra-effective-mode)
+                                        (error () "")))
+                        (list "checkpoint" (condition-case nil
+                                              (let ((t-v (fikra/thread/fikra-thread-field "change-baseline-tree")))
+                                                (if (stringp t-v) (substring t-v 0 8) ""))
+                                              (error () "")))
+                        (list "origin" "backend-pause")))
                 (fikra/thread/fikra-thread-status-set "confirming")
                 (editor-set-status
                   "Fikra: approve Edit? [y] allow [n] reject [a] always")
@@ -262,6 +279,15 @@ fikra-pausing-decide + the pump."
   (fikra/thread/fikra-thread-turn-end "completed"))
 
 (defun fikra-backend-pausing-abort () nil)
+
+;; The adapter's approval contract names: pending-p reports the pause;
+;; decide records + PUMPS in one step (the interactive key handlers call
+;; exactly this — pause → USER KEY → resume, no out-of-band seam).
+(defun fikra-backend-pausing-pending-p () (fikra-pausing-pending-p))
+
+(defun fikra-backend-pausing-decide (decision)
+  (fikra-pausing-decide decision)
+  (fikra-pausing-pump))
 
 ;; Self-register
 (fikra/adapter/fikra-register-backend "pausing")
