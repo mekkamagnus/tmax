@@ -3,7 +3,7 @@
           fikra-approval-answer-allow fikra-approval-answer-reject
           fikra-approval-answer-always fikra-approval-resolve-guard
           fikra-set-approval-guard fikra-approval-pending-p
-          fikra-approvals-ensure-bindings)
+          fikra-approvals-ensure-bindings fikra-approval-target-rich)
 
 ;; #220 (RFC-027 §D5 L2, §Security) — Fikra policy on the generic
 ;; confirmation mechanism (#210): the daemon parks a mediate from the MCP
@@ -93,6 +93,30 @@ decides instead."
             (and (string= thread (fikra/thread/fikra-thread-current))
                  (= turn (fikra/thread/fikra-thread-turn-count))
                  (string= (fikra/thread/fikra-thread-status) "running"))))))))
+
+;; The mockup's target context (8.3): "src/client/.legacy-render/  (14
+;; files, 3.1 MB)" — a DIRECTORY target carries its file count and size,
+;; so the reviewer sees the blast radius before answering (r80). Non-dir
+;; and non-path targets pass through unchanged.
+(defun fikra-approval-target-rich (target)
+  (if (or (string= target "") (not (string-match "/" target)))
+    target
+    (let* ((dir (fikra/thread/fikra-thread-working-dir))
+           (abs (concat dir "/" target))
+           (is-dir (string= (string-trim (shell-command
+                          (concat "test -d " (fikra/thread/fikra-thread-shq abs)
+                                  " && echo yes || echo no"))) "yes")))
+      (if (not is-dir)
+        target
+        (concat target "  ("
+                (string-trim (shell-command
+                  (concat "find " (fikra/thread/fikra-thread-shq abs)
+                          " -type f 2>/dev/null | wc -l | tr -d ' '")))
+                " files, "
+                (string-trim (shell-command
+                  (concat "du -sh " (fikra/thread/fikra-thread-shq abs)
+                          " 2>/dev/null | cut -f1")))
+                ")")))))
 
 (defun fikra-approval-pending-p ()
   "t when an approval is waiting — EITHER a parked mediate (#220) OR a
@@ -193,7 +217,7 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
               ;; tool name, target (the detail's leading path/cmd), the
               ;; thread+turn the gate belongs to, and the risk tag.
               (list "tool" kind)
-              (list "target" (fikra-approval-target detail))
+              (list "target" (fikra-approval-target-rich (fikra-approval-target detail)))
               (list "thread" (fikra/thread/fikra-thread-current))
               (list "turn" (number-to-string (fikra/thread/fikra-thread-turn-count)))
               (list "risk" (fikra-approval-risk kind detail))
@@ -212,7 +236,8 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
       ;; errors rather than corrupting thread state).
       (fikra/thread/fikra-thread-status-set "confirming")
       (editor-set-status
-        (concat "Fikra: approve " kind "? [y] allow [n] reject [a] always"))
+        ;; Mockup 8.3 key labels (r80); y/n remain bound as aliases.
+        (concat "Fikra: approve " kind "? a Allow · r Reject · A Always · C-g abort"))
       t)))
 
 ;; ── answering ────────────────────────────────────────────────────────
@@ -282,9 +307,13 @@ thread trust (promoted to --allowedTools on later turns)."
   (let ((kmap (editor/keymaps/buffer-keymap (fikra/thread/fikra-thread-buffer-name))))
     (if kmap
       (progn
+        ;; Mockup 8.3 (r80): a Allow / r Reject / A Always; y/n stay as
+        ;; aliases (the pre-r80 muscle memory).
+        (editor/keymaps/keymap-set-key kmap "a" "(fikra/approvals/fikra-approval-answer-allow)")
+        (editor/keymaps/keymap-set-key kmap "r" "(fikra/approvals/fikra-approval-answer-reject)")
+        (editor/keymaps/keymap-set-key kmap "A" "(fikra/approvals/fikra-approval-answer-always)")
         (editor/keymaps/keymap-set-key kmap "y" "(fikra/approvals/fikra-approval-answer-allow)")
-        (editor/keymaps/keymap-set-key kmap "n" "(fikra/approvals/fikra-approval-answer-reject)")
-        (editor/keymaps/keymap-set-key kmap "a" "(fikra/approvals/fikra-approval-answer-always)"))))
+        (editor/keymaps/keymap-set-key kmap "n" "(fikra/approvals/fikra-approval-answer-reject)"))))
   t)
 
 (provide "fikra-approvals")

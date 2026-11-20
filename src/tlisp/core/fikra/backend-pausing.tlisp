@@ -204,7 +204,8 @@ fikra-pausing-decide + the pump."
                         (list "tool" tool)
                         (list "scope" scope)
                         (list "id" "fx-pausing")
-                        (list "target" (fikra/approvals/fikra-approval-target (concat tool ": " scope)))
+                        (list "target" (fikra/approvals/fikra-approval-target-rich
+                                         (fikra/approvals/fikra-approval-target (concat tool ": " scope))))
                         (list "thread" (fikra/thread/fikra-thread-current))
                         (list "turn" (number-to-string (fikra/thread/fikra-thread-turn-count)))
                         (list "risk" (fikra/approvals/fikra-approval-risk tool (concat tool ": " scope)))
@@ -218,7 +219,7 @@ fikra-pausing-decide + the pump."
                         (list "origin" "backend-pause")))
                 (fikra/thread/fikra-thread-status-set "confirming")
                 (editor-set-status
-                  "Fikra: approve Edit? [y] allow [n] reject [a] always")
+                  "Fikra: approve Edit? a Allow · r Reject · A Always · C-g abort")
                 'paused))))
         (t
           ;; A plain assistant chunk before the gate.

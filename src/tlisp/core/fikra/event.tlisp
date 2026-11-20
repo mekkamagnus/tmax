@@ -140,6 +140,13 @@ round-12 approvals catch)."
 ;; The boxed approval panel (mockup 8.3's focused presentation). Width 44 (round-21: 62 overflowed narrow panes — the wrap
 ;; continuation gutter shredded the border); content lines pad/truncate to
 ;; the inner width so the border always aligns.
+
+;; The first word of S — the tool name for the always-row's scope label
+;; (mockup: "A Always allow bash:rm in this thread").
+(defun fikra-gate-first-word (s)
+  (let ((parts (string-split s " ")))
+    (if (> (length parts) 0) (car parts) "")))
+
 (defun fikra-gate-panel (event)
   ;; Mockup 8.3's full row set (r70): title names the thread+turn, the
   ;; tool row carries the risk tag, the target rides its own row, the ckpt
@@ -160,6 +167,11 @@ round-12 approvals catch)."
          (tool-row (if (> (length tool) 0)
                      tool
                      (fikra-event-get-str event "action")))
+         ;; The tool WORD for the always-row's scope label (mockup: "A
+         ;; Always allow bash:rm in this thread").
+         (tool-word (if (> (length tool) 0)
+                      (fikra-gate-first-word tool)
+                      (fikra-gate-first-word (fikra-event-get-str event "action"))))
          (rows (list
                  (concat tool-row
                          (if (string= risk "") "" (concat " (" risk ")")))
@@ -167,8 +179,16 @@ round-12 approvals catch)."
                  (concat "paused"
                          (if (string= mode "") "" (concat " (" mode ")"))
                          " — holds until you answer")
-                 (concat "[y] allow  [n] reject  [a] always (trusts)")
-                 (if (string= cp "") "" (concat "ckpt " cp " · r reverts"))
+                 ;; Mockup 8.3's key labels (r80): a Allow / r Reject /
+                 ;; A Always / C-g abort. y/n remain bound as aliases.
+                 (concat "a Allow  r Reject  A Always allow " tool-word
+                         " in this thread  C-g abort turn")
+                 ;; The ckpt row in the mockup's shape — the ref NAMES the
+                 ;; revert target (legacy events keep the short form).
+                 (if (and (> (length th) 0) (> (length tn) 0))
+                   (concat "ckpt    fikra/" th "/" tn
+                           " ✓ — revert available after execution")
+                   (if (string= cp "") "" (concat "ckpt " cp " · r reverts")))
                  (if (string= org "") "" (concat "origin: " org))
                  ;; The COMPLETE action (r72: the derived target/risk are
                  ;; heuristics — the reviewer must always see the full text).

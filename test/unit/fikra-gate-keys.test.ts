@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
@@ -21,7 +21,7 @@ const originalCwd = process.cwd();
 
 const SCRIPT = [
   '{"type":"assistant","text":"before the gate"}',
-  '{"type":"permission","tool":"Edit","scope":"src/**"}',
+  '{"type":"permission","tool":"Edit","scope":"lib/"}',
   '{"type":"assistant","text":"allowed continuation"}',
   '{"type":"denied","text":"action rejected"}',
   '{"type":"end"}',
@@ -32,6 +32,11 @@ async function started(): Promise<Editor> {
   dirs.push(dir);
   execFileSync("git", ["init", "-q"], { cwd: dir });
   writeFileSync(join(dir, "fixture.jsonl"), SCRIPT);
+  // A REAL directory target (2 files) — the panel's target row carries
+  // the mockup's blast-radius context: "lib/  (2 files, <size>)".
+  mkdirSync(join(dir, "lib"), { recursive: true });
+  writeFileSync(join(dir, "lib", "a.ts"), "export const a = 1;\n");
+  writeFileSync(join(dir, "lib", "b.ts"), "export const b = 2;\n");
   process.chdir(dir);
   const editor = await createStartedEditor("");
   e(editor, "(require-module fikra/backend-pausing)");
@@ -62,7 +67,15 @@ describe("P1 interactive gate — pause → USER KEY → resume", () => {
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
     const paused = strip(bufferText(editor));
     expect(paused).toContain("APPROVE ACTION");
-    expect(paused).toContain("[y] allow");
+    // Mockup 8.3 key labels (r80) + the ckpt row's named-ref shape +
+    // the target's blast-radius context.
+    // Rows WRAP at the 40-char inner width (r73) — assert the head and
+    // the wrapped tail, not the unwrapped string.
+    expect(paused).toContain("a Allow  r Reject  A Always allow");
+    expect(paused).toContain("C-g abort turn");
+    expect(paused).toContain("ckpt    fikra/main/1");
+    expect(paused).toContain("after execution");
+    expect(paused).toContain("lib/  (2 files,");
     // THE KEYSTROKE: y in the chat buffer (normal mode, buffer keymap).
     await editor.handleKey("y");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
@@ -86,10 +99,20 @@ describe("P1 interactive gate — pause → USER KEY → resume", () => {
     expect(text).not.toContain("allowed continuation");
   });
 
-  test("a (real keystroke): persists — the NEXT matching pause is skipped entirely", async () => {
+  test("a (real keystroke) now ALLOWS this request only (mockup r80: A is always)", async () => {
     const editor = await started();
     e(editor, '(fikra/adapter/fikra-backend-start-turn "do it")');
     await editor.handleKey("a");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(strip(bufferText(editor))).toContain("= allowed this request");
+    expect(strip(bufferText(editor))).not.toContain("always for this tool+scope");
+  });
+
+  test("A (real keystroke): persists — the NEXT matching pause is skipped entirely", async () => {
+    const editor = await started();
+    e(editor, '(fikra/adapter/fikra-backend-start-turn "do it")');
+    await editor.handleKey("A");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
     expect(strip(bufferText(editor))).toContain("allowed (always for this tool+scope)");
