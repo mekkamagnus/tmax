@@ -258,9 +258,19 @@ describe("#304: id-based ending dedup", () => {
     replay(editor);
     const messages = String(executeTlisp(editor, '(buffer-switch "*Messages*") (buffer-text)').value ?? "");
     expect(messages).toContain("1 stale ending dropped");
-    // (A clean log notes nothing — not asserted here: the *Messages* store
-    // is process-global across test editors, so a prior test's note would
-    // false-fail the negative arm.)
+    // A clean log notes NOTHING (gate r2: the earlier documented-out
+    // rationale was FALSE — the confusion was setup()'s SHARED log path,
+    // which replayed this test's stale file into the "clean" editor).
+    const clean = await createStartedEditor("");
+    const cleanLog = log.replace(/\.jsonl$/, ".clean.jsonl");
+    executeTlisp(clean, "(require-module fikra/event)");
+    executeTlisp(clean, `(fikra/event/fikra-event-log-set "${cleanLog}")`);
+    executeTlisp(clean, '(fikra/event/fikra-event-emit (list (list "kind" "turn-start") (list "turn" "6") (list "backend" "claude")))');
+    executeTlisp(clean, '(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" "fine")))');
+    executeTlisp(clean, '(fikra/event/fikra-event-emit (list (list "kind" "turn-end") (list "turn" "6") (list "status" "completed")))');
+    executeTlisp(clean, "(fikra/event/fikra-event-replay)");
+    const cleanMessages = String(executeTlisp(clean, '(buffer-switch "*Messages*") (buffer-text)').value ?? "");
+    expect(cleanMessages).not.toContain("stale ending");
   });
 
   test("mixed logs: id-less adjacent endings dedupe; id'd endings keep the id rule (gate r1)", async () => {
