@@ -99,39 +99,67 @@ decides instead."
 
 ;; ── the registered handler (runs at mediate-park time) ─────────────
 
-;; The detail's leading PATH or command word — the panel's "target".
+;; The detail's actionable TARGET: the first PATH-looking token (a word
+;; containing "/"), else the first word (the command). Word-scanning keeps
+;; the path whole ("src/x.ts", never "/x.ts") and skips filler.
 (defun fikra-approval-target (detail)
-  (fikra-approval-target-scan detail 0))
+  (fikra-approval-target-words (string-split detail " ") nil))
 
-(defun fikra-approval-target-scan (s i)
-  (if (>= i (length s))
-    (if (> (length s) 30) (concat (substring s 0 27) "…") s)
-    (if (string= (substring s i (+ i 1)) "\"")
-      (fikra-approval-target-quote s (+ i 1) (substring s i (+ i 1)))
-      (if (string= (substring s i (+ i 1)) "/")
-        (fikra-approval-target-bare s i)
-        (fikra-approval-target-scan s (+ i 1))))))
+(defun fikra-approval-target-words (words hit)
+  (if (null words)
+    (if hit hit "")
+    (let ((w (car words)))
+      (if (or (string= w "") (string= w "to") (string= w "in") (string= w "at")
+              (> (length w) 36))
+        (fikra-approval-target-words (cdr words) hit)
+        (if (string-match "/" w)
+          (fikra-approval-target-words (cdr words) w)
+          (if hit
+            (fikra-approval-target-words (cdr words) hit)
+            (fikra-approval-target-words (cdr words) w)))))))
 
-(defun fikra-approval-target-quote (s i acc)
-  (if (or (>= i (length s)) (string= (substring s i (+ i 1)) "\""))
-    acc
-    (fikra-approval-target-quote s (+ i 1) (concat acc (substring s i (+ i 1))))))
-
-(defun fikra-approval-target-bare (s i)
-  ;; The tail from the FIRST path char to the end (the scan hands us the
-  ;; slash index; the target is the path/command remainder).
-  (substring s i (length s)))
-
-;; The risk tag: destructive-pattern tools get "destructive:"; edits get
-;; "file-edit"; reads get nothing (the mockup's "bash (destructive: rm -rf)").
 (defun fikra-approval-risk (kind detail)
-  (if (string-match "rm -rf" detail)
-    "destructive: rm -rf"
-    (if (string= kind "bash")
+  ;; Destructive first (any tool can carry it), then the tool class —
+  ;; CASE-INSENSITIVE (the CLIs emit "Bash"/"Edit").
+  (if (or (string-match "rm -rf" detail)
+          (string-match "rm -fr" detail)
+          (string-match "git push --force" detail)
+          (string-match "git reset --hard" detail)
+          (string-match "DROP TABLE" detail))
+    "destructive"
+    (if (or (string= (fikra-risk-down kind) "bash") (string= (fikra-risk-down kind) "shell"))
       "shell"
-      (if (or (string= kind "Edit") (string= kind "Write") (string= kind "buffer-edit"))
+      (if (or (string= (fikra-risk-down kind) "edit") (string= (fikra-risk-down kind) "write")
+              (string= (fikra-risk-down kind) "buffer-edit"))
         "file-edit"
         ""))))
+
+(defun fikra-risk-down (s)
+  (if s (fikra-risk-down-scan s 0 "") ""))
+
+(defun fikra-risk-down-scan (s i acc)
+  (if (>= i (length s))
+    acc
+    (fikra-risk-down-scan s (+ i 1)
+      (concat acc (fikra-risk-lower (substring s i (+ i 1)))))))
+
+;; Downcase ONE char via the uppercase alphabet index (string<= does not
+;; exist in this dialect — string= only).
+(defun fikra-risk-lower (ch)
+  (if (>= (length ch) 1)
+    (let ((i (fikra-risk-alpha-index ch 0)))
+      (if i
+        (substring "abcdefghijklmnopqrstuvwxyz" i (+ i 1))
+        ch))
+    ch))
+
+(defun fikra-risk-alpha-index (ch i)
+  (if (>= i 26)
+    nil
+    (if (string= (substring "ABCDEFGHIJKLMNOPQRSTUVWXYZ" i (+ i 1)) ch)
+      i
+      (fikra-risk-alpha-index ch (+ i 1)))))
+
 
 (defun fikra-approval-enqueue (id detail kind scope)
   "A confirmation/mediate arrived for fikra. Validate the scope names a
