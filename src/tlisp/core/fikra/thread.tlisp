@@ -778,7 +778,7 @@ thread→adapter has no cycle but keep the lazy convention)."
       (let* ((btree (hashmap-get state "change-baseline-tree"))
              (tree (if (and (stringp btree) (> (length btree) 0)) btree "HEAD"))
              (rows (list)))
-        (dolist (line (string-split (shell-command (concat "git -C " (fikra-thread-shq dir) " diff " tree " --numstat 2>/dev/null")) "\n"))
+        (dolist (line (string-split (shell-command (concat "git -C " (fikra-thread-shq dir) " -c core.quotepath=off diff " tree " --numstat 2>/dev/null")) "\n"))
           (let ((parts (string-split line "\t")))
             (if (= (length parts) 3)
               (let ((path (car (cdr (cdr parts)))))

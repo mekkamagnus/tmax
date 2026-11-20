@@ -581,14 +581,14 @@ ambiguity)."
       (setq out (concat out
                         (shell-command
                           (concat "git -C " (fikra/thread/fikra-thread-shq dir)
-                                  " diff --no-color --no-index -- /dev/null "
+                                  " -c core.quotepath=off diff --no-color --no-index -- /dev/null "
                                   (fikra/thread/fikra-thread-shq p)
                                   " 2>/dev/null || true"))
                         "\n")))
     out))
 
 (defun fikra-file-kind (dir path)
-  (if (> (length (string-trim (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " ls-files -- " (fikra/thread/fikra-thread-shq path) " 2>/dev/null")))) 0)
+  (if (> (length (string-trim (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " -c core.quotepath=off ls-files -- " (fikra/thread/fikra-thread-shq path) " 2>/dev/null")))) 0)
     "tracked" "untracked"))
 
 (defun fikra-join-args (parts)

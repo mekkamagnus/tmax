@@ -94,7 +94,7 @@ describe("#305 A — untracked files as new-file patches", () => {
     const patch = String(e(editor, '(fikra/diff/fikra-diff-for-paths (fikra/thread/fikra-thread-working-dir) (list "with space.txt" "uni-éè.txt" "-dashy.txt") "HEAD")').value);
     expect(patch).toContain("diff --git a/with space.txt b/with space.txt");
     expect(patch).toContain("+spaced");
-    expect(patch).toContain('diff --git "a/uni-'); // git quote-escapes non-ASCII (correct)
+    expect(patch).toContain("diff --git a/uni-éè.txt b/uni-éè.txt"); // quotepath=off: the REAL name (codex r2)
     expect(patch).toContain("+unicode");
     expect(patch).toContain("+unicode");
     expect(patch).toContain("diff --git a/-dashy.txt b/-dashy.txt");
