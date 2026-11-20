@@ -314,8 +314,11 @@ its summary are missing')."
                     "worktree: " path "\n"
                     "re-enter worktree mode or inspect the path above.\n"))
           (buffer-set-read-only t)
-          ;; NO a/d/r on the failure screen (codex r36: the actions must
-          ;; not stay callable when generation failed).
+          ;; NO a/d/r on the failure screen — and CLEAR any keymap a prior
+          ;; successful render left bound to this buffer (codex r37: the
+          ;; actions stayed callable with a stale patch on disk).
+          (editor/keymaps/buffer-set-keymap fikra-worktree-review-buffer nil)
+          (shell-command (concat "rm -f " (fikra-shq (fikra-worktree-review-patch-path)) " 2>/dev/null"))
           (editor-set-status "Fikra: review generation failed")
           (setq fikra-worktree-review-gen-failed t))))
     (if fikra-worktree-review-gen-failed
@@ -397,11 +400,14 @@ its summary are missing')."
 ;; diff can describe different content under concurrent edits — and an
 ;; empty comm result must count as ZERO, not one split element).
 (defun fikra-worktree-review-overlap (root base path)
+  ;; POSIX sh has no process substitution (codex r37 reproduced the
+  ;; syntax error) — two temp files and plain comm.
   (let ((out (string-trim (shell-command
-    (concat "comm -12 "
-            "<(git -C " (fikra-shq root) " diff --name-only " base " -- 2>/dev/null | sort) "
-            "<(git apply --numstat " (fikra-shq (fikra-worktree-review-patch-path))
-            " 2>/dev/null | cut -f3 | sort) 2>/dev/null || true")))))
+    (concat "git -C " (fikra-shq root) " diff --name-only " base " -- 2>/dev/null | sort > /tmp/fikra-ov-local.$$ ; "
+            "git apply --numstat " (fikra-shq (fikra-worktree-review-patch-path))
+            " 2>/dev/null | cut -f3 | sort > /tmp/fikra-ov-patch.$$ ; "
+            "comm -12 /tmp/fikra-ov-local.$$ /tmp/fikra-ov-patch.$$ ; "
+            "rm -f /tmp/fikra-ov-local.$$ /tmp/fikra-ov-patch.$$")))))
     (if (string= out "")
       0
       (length (string-split out "\n")))))
