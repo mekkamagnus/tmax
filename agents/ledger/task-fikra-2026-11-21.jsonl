@@ -70,3 +70,5 @@
 {"event":"telemetry","ts":"2026-11-21T12:55:00+08:00","wall-minutes":60,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null}
 {"event":"unit-start","ts":"2026-11-21T13:40:00+08:00","unit":"iter-8.4-r49-redo"}
 {"event":"landing","ts":"2026-11-21T14:00:00+08:00","unit":"iter-8.4-r49-redo","shas":["ae5f97e"],"files-staged-count":2,"tests-run":[{"name":"bun test test/unit/fikra-diff-nav.test.ts","output":"0 fail\n10 expect() calls\nRan 3 tests across 1 file."},{"name":"bun test test/unit/fikra-revert.test.ts","output":"0 fail\n22 expect() calls\nRan 7 tests across 1 file."}],"adr-spec":[]}
+{"event":"gate","ts":"2026-11-21T15:00:00+08:00","kind":"codex-grade","verdict":"6/10","rounds":50,"reviewed-sha":"ae5f97e","findings-count":5}
+{"event":"landing","ts":"2026-11-21T15:30:00+08:00","unit":"iter-8.4-r49-redo","shas":["HEAD"],"files-staged-count":2,"tests-run":[{"name":"bun test test/unit/fikra-diff-nav.test.ts test/unit/fikra-revert.test.ts","output":"0 fail\n35 expect() calls\nRan 11 tests across 2 files."}],"adr-spec":["docs/specs/SPEC-218-fikra-diff-revert.md"]}
