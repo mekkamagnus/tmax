@@ -101,6 +101,43 @@ describe("#8.7 skills — defworkflow rows (codex r25 fix 2)", () => {
   });
 });
 
+describe("#8.7 skills — codex r26 fixes", () => {
+  test("anchored visibility: a frontmatter line 'notes: ... visibility: user ...' does not mislabel", async () => {
+    writeSkill("tricky", "---\nname: tricky\nnotes: see docs on visibility: user handling\n---\nbody\n");
+    const editor = await setup();
+    e(editor, "(fikra/skills/fikra-skills-refresh)");
+    // Assert the SCAN classification (fix 2's unit) and the anchored parser
+    // directly — both deterministic regardless of the rows pipeline state.
+    expect(String(e(editor, '(hashmap-get (car (fikra/skills/fikra-skills-list)) "visibility")').value)).toBe("model-visible");
+    expect(String(e(editor, '(if (fikra/skills/fikra-skill-fm-value "notes: see docs on visibility: user handling" "visibility") "NOT-NIL" "NIL")').value)).toBe("NIL");
+  });
+
+  test("the picker opens with workflows only (no .fikra/skills present)", async () => {
+    const editor = await setup();
+    e(editor, "(require-module fikra/workflow)");
+    e(editor, '(fikra/workflow/fikra-register-workflow "solo-flow" "just a workflow")');
+    // No skill files in this repo — rows must still expose the workflow.
+    const n = Number(e(editor, '(length (fikra/skills/fikra-skill-table "" "rows"))').value);
+    expect(n).toBe(1);
+  });
+
+  test("the cache rescans when the thread root changes", async () => {
+    writeSkill("here", "---\nname: here\n---\nbody\n");
+    const editor = await setup();
+    expect(Number(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe(1);
+    // Fresh temp root with a different skill count; switch the thread root.
+    const other = mkdtempSync(join(tmpdir(), "fikra-sk2-"));
+    mkdirSync(join(other, ".fikra", "skills", "a"), { recursive: true });
+    mkdirSync(join(other, ".fikra", "skills", "b"), { recursive: true });
+    writeFileSync(join(other, ".fikra", "skills", "a", "SKILL.md"), "---\nname: a\n---\nx\n");
+    writeFileSync(join(other, ".fikra", "skills", "b", "SKILL.md"), "---\nname: b\n---\nx\n");
+    e(editor, `(fikra/thread/fikra-thread-set-field "root" "${other}")`);
+    expect(Number(e(editor, "(length (fikra/skills/fikra-skills-list))").value)).toBe(2); // stale root -> rescan
+    const rows = Number(e(editor, '(length (fikra/skills/fikra-skill-table "" "rows"))').value);
+    expect(rows).toBe(2);
+  });
+});
+
 describe("#8.7 skills — model roster (codex r25 fix 1)", () => {
   test("model-visible only; user-only excluded", async () => {
     writeSkill("pub", "---\nname: pub\ndescription: Public skill\n---\nbody\n");

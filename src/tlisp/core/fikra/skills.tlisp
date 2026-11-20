@@ -2,7 +2,7 @@
   (export fikra-skills-list fikra-skills-rows fikra-skills-refresh
           fikra-skills-dir fikra-skill-prompt fikra-skill-accept
           fikra-skill-table fikra-skill-annotator fikra-skill-name-of
-          fikra-skill-visibility fikra-skills-model-roster)
+          fikra-skill-visibility fikra-skill-fm-value fikra-skills-model-roster)
 
 ;; RFC-029 section 8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
 ;; surfaced to model and user. Skills from
@@ -13,6 +13,9 @@
 
 ;; A discovered skill row: hashmap id/path/visibility/description.
 (defvar fikra-skills-cache (list))
+;; The cache is ROOT-SCOPED (codex r26 fix 3): skills live under
+;; <root>/.fikra/skills — a thread-root switch invalidates the cache.
+(defvar fikra-skills-cache-root nil)
 
 (defun fikra-skills-dir ()
   ;; #298: the thread's PERSISTED root (the legacy resolver follows the
@@ -24,6 +27,7 @@
 frontmatter carries 'visibility: user' are user-only; everything else
 is model-visible."
   (let ((dir (fikra-skills-dir)))
+    (setq fikra-skills-cache-root dir)
     (setq fikra-skills-cache (fikra-skills-scan dir))
     (length fikra-skills-cache)))
 
@@ -59,6 +63,15 @@ is model-visible."
 
 (defun fikra-skill-fm-field (body field)
   (fikra-skill-fm-field-scan (string-split body "\n") field 0))
+
+;; One frontmatter LINE as a field value: anchored "field: value" (codex
+;; r26 fix 2 — an unanchored substring let "notes on visibility: user"
+;; misclassify). Nil when the line is not that exact field.
+(defun fikra-skill-fm-value (line field)
+  (if (string= (substring line 0 (min (length line) (+ (length field) 1)))
+               (concat field ":"))
+    (string-trim (substring line (+ (length field) 2) (length line)))
+    nil))
 
 (defun fikra-skill-fm-field-scan (lines field phase)
   (if (null lines)
@@ -114,12 +127,26 @@ is model-visible."
           (fikra-skill-fm-scan (cdr lines) 1
             (if hit
               hit
-              (string-match "visibility: *user" line))))))))
+              (let ((v (fikra-skill-fm-value line "visibility"))) (if v (string= v "user") nil)))))))))
+
+(defun fikra-skills-cache-stale-p ()
+  ;; Empty cache, or the thread root moved since the last scan.
+  (if (= (length fikra-skills-cache) 0)
+    t
+    (not (string= (if fikra-skills-cache-root fikra-skills-cache-root "")
+                  (let ((dir (fikra-skills-dir))) (if dir dir ""))))))
 
 (defun fikra-skills-list ()
-  (if (= (length fikra-skills-cache) 0)
+  (if (fikra-skills-cache-stale-p)
     (fikra-skills-refresh))
   fikra-skills-cache)
+
+(defun fikra-skills-workflow-names ()
+  "Registered defworkflow names (empty when the workflow module has none)."
+  (condition-case nil
+    (progn (require-module fikra/workflow)
+           (fikra/workflow/fikra-registered-workflows))
+    (error () (list))))
 
 (defun fikra-skills-rows ()
   "Rows for the completion table (display + metadata for the annotator):
@@ -138,10 +165,7 @@ is model-visible."
                  "display" (concat "defworkflow " w)
                  "metadata" (hashmap "path" "init.tlisp"
                                      "visibility" "T-Lisp program")))
-      (condition-case nil
-        (progn (require-module fikra/workflow)
-               (fikra/workflow/fikra-registered-workflows))
-        (error () (list))))))
+      (fikra-skills-workflow-names))))
 
 ;; The roster fed to the MODEL each turn: model-visible skills only —
 ;; user-only skills stay unlisted until the user invokes them (mockup
@@ -226,8 +250,11 @@ T-Lisp workflow by name (mockup 8.7; composition is section 9 Q3)."
   "M-x fikra-skill: pick a skill (completes over .fikra/skills)."
   (interactive)
   (fikra-skills-refresh)
-  (if (= (length fikra-skills-cache) 0)
-    (editor-set-status "Fikra: no skills in .fikra/skills/")
+  ;; codex r26 fix 1: registered defworkflows count too — a workflow-only
+  ;; project still opens the picker.
+  (if (and (= (length fikra-skills-cache) 0)
+           (= (length (fikra-skills-workflow-names)) 0))
+    (editor-set-status "Fikra: no skills in .fikra/skills/ and no registered workflows")
     (progn
       (require-module fikra/thread)
       (completing-read "fikra-skill "
