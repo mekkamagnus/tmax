@@ -17,7 +17,9 @@ endings (error + completed interleaved).
 - **Distinct ids never merge** — the id rule REPLACES the consecutive
   rule for id'd logs (adjacent same-status turns both render).
 - **No-id legacy logs** (probe-era) keep the consecutive rule
-  (documented frozen-history fallback).
+  (documented frozen-history fallback). **Mixed logs** (appended across
+  the probe→id transition): id'd endings take the id rule, id-less
+  endings take the consecutive rule, in one pass (gate r1 guard).
 
 ## Implementation
 

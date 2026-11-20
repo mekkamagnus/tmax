@@ -248,6 +248,38 @@ describe("#304: id-based ending dedup", () => {
     expect(stripAnsi(text).split("── completed ──").length - 1).toBe(2);
   });
 
+  test("the *Messages* note fires when stale endings drop (gate r1: normative rule had zero coverage)", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    turn(editor, 5);
+    ev(editor, "turn-end", { turn: "5", status: "completed" });
+    ev(editor, "text-delta", { text: "intervening" });
+    ev(editor, "turn-end", { turn: "5", status: "completed" });
+    replay(editor);
+    const messages = String(executeTlisp(editor, '(buffer-switch "*Messages*") (buffer-text)').value ?? "");
+    expect(messages).toContain("1 stale ending dropped");
+    // (A clean log notes nothing — not asserted here: the *Messages* store
+    // is process-global across test editors, so a prior test's note would
+    // false-fail the negative arm.)
+  });
+
+  test("mixed logs: id-less adjacent endings dedupe; id'd endings keep the id rule (gate r1)", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    // Probe-era id-less pair (adjacent identical) + an id'd dup.
+    ev(editor, "turn-end", { status: "completed" });
+    ev(editor, "turn-end", { status: "completed" });
+    turn(editor, 7);
+    ev(editor, "turn-end", { turn: "7", status: "completed" });
+    ev(editor, "text-delta", { text: "x" });
+    ev(editor, "turn-end", { turn: "7", status: "completed" });
+    const text = replay(editor);
+    const m = stripAnsi(text).split("── completed ──").length - 1;
+    expect(m).toBe(2); // one id-less + one id'd (the later of each dup dropped)
+    const messages = String(executeTlisp(editor, '(buffer-switch "*Messages*") (buffer-text)').value ?? "");
+    expect(messages).toContain("2 stale endings dropped");
+  });
+
   test("no-id legacy logs keep the consecutive rule (non-consecutive NOT deduped — documented fallback)", async () => {
     const editor = await createStartedEditor("");
     setup(editor);

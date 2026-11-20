@@ -519,7 +519,11 @@ text-deltas inside the batch join into the same line."
 
 ;; Backward scan: the FIRST turn-end seen per id (from the end) is the
 ;; LAST by log order — keep it; every later sighting for the same id is a
-;; stale ending (dropped + counted).
+;; stale ending (dropped + counted). MIXED logs (appended across the
+;; probe→id transition) get the CONSECUTIVE rule for their ID-LESS
+;; endings: the later of two adjacent identical id-less ends drops
+;; (verify-gate r1 — the id arm alone never deduped them). In the
+;; backward walk, the ORIGINAL-order predecessor is (cadr rev-events).
 (defun fikra-dedupe-by-id (rev-events seen acc)
   ;; Iterating the REVERSED list, cons-building yields FORWARD order
   ;; already — no final reverse (the double-reverse shipped reversed
@@ -528,16 +532,29 @@ text-deltas inside the batch join into the same line."
     acc
     (let* ((e (car rev-events))
            (tid (fikra-dedupe-turn-id e))
-           (is-end (string= (fikra-event-get-str e "kind") "turn-end")))
-      (if (and is-end (> (length tid) 0))
-        (if (hashmap-get seen tid)
-          (progn
-            (setq fikra-dedupe-dropped (+ 1 fikra-dedupe-dropped))
-            (fikra-dedupe-by-id (cdr rev-events) seen acc))
-          (fikra-dedupe-by-id (cdr rev-events)
-            (progn (editor/keymaps/keymap-mutable-set! seen tid t) seen)
-            (cons e acc)))
-        (fikra-dedupe-by-id (cdr rev-events) seen (cons e acc))))))
+           (is-end (string= (fikra-event-get-str e "kind") "turn-end"))
+           (pred (if (cdr rev-events) (car (cdr rev-events)) nil))
+           (pred-endless-id (and pred
+                                 (string= (fikra-event-get-str pred "kind") "turn-end")
+                                 (string= (fikra-dedupe-turn-id pred) "")))
+           (pred-same-status (and pred-endless-id
+                                  (string= (fikra-event-get-str e "status")
+                                           (fikra-event-get-str pred "status")))))
+      (if (and is-end (= (length tid) 0) pred-same-status)
+        (progn
+          ;; This id-less end is the LATER of an adjacent identical pair —
+          ;; the consecutive rule drops it.
+          (setq fikra-dedupe-dropped (+ 1 fikra-dedupe-dropped))
+          (fikra-dedupe-by-id (cdr rev-events) seen acc))
+        (if (and is-end (> (length tid) 0))
+          (if (hashmap-get seen tid)
+            (progn
+              (setq fikra-dedupe-dropped (+ 1 fikra-dedupe-dropped))
+              (fikra-dedupe-by-id (cdr rev-events) seen acc))
+            (fikra-dedupe-by-id (cdr rev-events)
+              (progn (editor/keymaps/keymap-mutable-set! seen tid t) seen)
+              (cons e acc)))
+          (fikra-dedupe-by-id (cdr rev-events) seen (cons e acc)))))))
 
 ;; The legacy consecutive rule (no-id logs only).
 (defun fikra-dedupe-scan (events acc last-kind last-status)
