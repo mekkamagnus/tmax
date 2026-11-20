@@ -11,8 +11,7 @@
 ;; composition deferred).
 
 ;; A discovered skill row: hashmap id/path/visibility/description.
-(defvar fikra-skills-cache (list)
-  "Discovered skills (refreshed on demand).")
+(defvar fikra-skills-cache (list))
 
 (defun fikra-skills-dir ()
   (concat (progn (require-module fikra/thread) (fikra/thread/fikra-thread-root)) "/.fikra/skills"))
