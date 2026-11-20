@@ -136,7 +136,7 @@ With 0 or negative number, disable."
 (key-bind "SPC a d" "(progn (require-module fikra/diff) (fikra/diff/fikra-turn-diff))" "normal")
 ;; Mockup 8.1's chat hint: "SPC a R to revert" — open the viewer on the
 ;; LAST completed turn (the confirm gate still owns the revert).
-(key-bind "SPC a R" "(progn (require-module fikra/diff) (require-module fikra/thread) (fikra/diff/fikra-turn-diff-for (fikra/thread/fikra-thread-turn-count)))" "normal")
+(key-bind "SPC a R" "(progn (require-module fikra/diff) (fikra/diff/fikra-turn-diff-for (fikra/diff/fikra-last-completed-turn)))" "normal")
 ;; Skills picker (mockup 8.7: .fikra/skills surfaced to model and user).
 ;; NOTE: symbol form INSIDE the action string — embedded double quotes
 ;; terminate the string literal early and mangle the form (the

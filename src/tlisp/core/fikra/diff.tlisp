@@ -96,11 +96,16 @@
   (require-module fikra/thread)
   (let ((n (fikra/thread/fikra-thread-field "turn-count"))
         (st (fikra/thread/fikra-thread-status)))
-    (if (and (numberp n)
-             (or (string= st "running") (string= st "confirming"))
-             (> n 1))
-      (- n 1)
-      (if (numberp n) n 1))))
+    (cond
+      ;; A mid-flight FIRST turn: nothing has completed — 0 (the caller
+      ;; reports 'no captured diff for turn 0'; r59's catch).
+      ((and (or (string= st "running") (string= st "confirming")) (= n 1)) 0)
+      ((and (numberp n)
+            (or (string= st "running") (string= st "confirming"))
+            (> n 1))
+        (- n 1))
+      ((numberp n) n)
+      (t 0))))
 
 (defun fikra-diff-turn-next () (fikra-diff-turn-step 1))
 (defun fikra-diff-turn-prev () (fikra-diff-turn-step -1))
