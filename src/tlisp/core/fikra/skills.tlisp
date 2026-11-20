@@ -182,9 +182,10 @@ T-Lisp workflow by name (mockup 8.7; composition is section 9 Q3)."
     (fikra-skill-accept-skill choice)))
 
 (defun fikra-choice-defworkflow-p (choice)
-  (if (< (length choice) 11)
+  ;; "defworkflow " is 12 characters (11 + the space).
+  (if (< (length choice) 12)
     nil
-    (string= (substring choice 0 11) "defworkflow ")))
+    (string= (substring choice 0 12) "defworkflow ")))
 
 (defun fikra-skill-accept-defworkflow (name)
   (if (not name)

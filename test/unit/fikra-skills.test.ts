@@ -122,13 +122,19 @@ describe("#8.7 skills — model roster (codex r25 fix 1)", () => {
 describe("#8.7 skills — accept dispatch", () => {
   test("a defworkflow row runs the named workflow, not a skill turn", async () => {
     const editor = await setup();
+    e(editor, "(require-module fikra/thread)");
     e(editor, "(require-module fikra/workflow)");
     e(editor, '(fikra/workflow/fikra-register-workflow "nightly-triage" "triage prompt")');
     // Accept dispatches on the choice string; the workflow path creates a
-    // labeled thread rather than sending a skill-body turn.
+    // labeled thread rather than sending a skill-body turn to the CURRENT
+    // thread (the skill branch would bump its turn count).
     e(editor, '(fikra/skills/fikra-skill-accept "defworkflow nightly-triage")');
     const label = e(editor, '(fikra/workflow/fikra-workflow-thread-for "nightly-triage")');
-    expect(String(label.value)).not.toBe(""); // thread exists for the label
+    expect(String(label.value)).not.toBe("");
+    // The workflow path FOCUSES its own labeled thread for the run (a skill
+    // accept would have stayed on the current thread).
+    const current = e(editor, "(fikra/thread/fikra-thread-current)");
+    expect(String(current.value)).toBe(String(label.value));
   });
 
   test("a skill row sends the SKILL.md body as a chat turn", async () => {
