@@ -281,6 +281,15 @@ describe("#298 connect-frame handshake (production wiring)", () => {
     await server.start();
     const request = (id: number, method: string, params: Record<string, unknown>) =>
       JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+    // Poll instead of fixed sleeps (verify-gate r4 flake note): the close
+    // handler runs async after socket.destroy().
+    const until = async (pred: () => boolean, what: string): Promise<void> => {
+      for (let i = 0; i < 200; i++) {
+        if (pred()) return;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      throw new Error(`timeout waiting for ${what}`);
+    };
     try {
       const remote = new RemoteEditor(socketPath);
       await remote.start(); // connect-frame with clientCwd: process.cwd()
@@ -300,8 +309,7 @@ describe("#298 connect-frame handshake (production wiring)", () => {
       });
       expect(editor.getClientLaunchDir()).toBe(otherDir);
       // ...then disconnects: the dir clears (nothing stale survives)...
-      await new Promise((r) => setTimeout(r, 300));
-      expect(editor.getClientLaunchDir()).toBeUndefined();
+      await until(() => editor.getClientLaunchDir() === undefined, "disconnect clear");
       // ...while a value ANOTHER client overwrote stays (guard check): the
       // first remote is still connected with process.cwd() — reconnect a
       // fresh client and confirm set/clear symmetry.
@@ -313,8 +321,7 @@ describe("#298 connect-frame handshake (production wiring)", () => {
       });
       expect(editor.getClientLaunchDir()).toBe(otherDir);
       sock3.destroy();
-      await new Promise((r) => setTimeout(r, 300));
-      expect(editor.getClientLaunchDir()).toBeUndefined();
+      await until(() => editor.getClientLaunchDir() === undefined, "sock3 disconnect clear");
 
       // codex r1 fix 2: two clients sharing the SAME cwd — one leaving
       // must NOT clear the other's context (value-refcounted release).
@@ -333,11 +340,10 @@ describe("#298 connect-frame handshake (production wiring)", () => {
       });
       expect(editor.getClientLaunchDir()).toBe(shared);
       sockA.destroy(); // first sharer leaves — the value SURVIVES
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 150)); // let the close land
       expect(editor.getClientLaunchDir()).toBe(shared);
       sockB.destroy(); // last sharer leaves — now it clears
-      await new Promise((r) => setTimeout(r, 300));
-      expect(editor.getClientLaunchDir()).toBeUndefined();
+      await until(() => editor.getClientLaunchDir() === undefined, "last sharer clear");
     } finally {
       await forceShutdown(server);
     }

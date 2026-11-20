@@ -1201,6 +1201,10 @@ export class TmaxServer {
 	            // root from this client context, never the daemon cwd.
 	            const clientCwd = typeof params.clientCwd === 'string' ? params.clientCwd : undefined;
 	            if (clientCwd) {
+	              // Degenerate re-handshake on one connection (raw JSON-RPC
+	              // surface): release the PRIOR registration first so the
+	              // refcount cannot skew (verify-gate r4).
+	              if (client.launchDirSet) this.releaseLaunchDir(client);
 	              this.editor?.setClientLaunchDir(clientCwd);
 	              client.launchDirSet = clientCwd;
 	              this.launchDirCounts.set(clientCwd, (this.launchDirCounts.get(clientCwd) ?? 0) + 1);
