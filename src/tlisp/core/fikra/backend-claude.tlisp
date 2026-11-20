@@ -156,9 +156,22 @@ config is written per turn by fikra-claude-write-mcp-config)."
                            "--permission-prompt-tool"
                            "mcp__tmax-confirmation__permission"))
              with-trust)))
-    (if (and resume-id (stringp resume-id) (> (length resume-id) 0))
-      (append with-l2 (list "--resume" resume-id "-p" message))
-      (append with-l2 (list "-p" message)))))
+    ;; Mockup 8.7 (codex r25 fix 1): model-visible skills ride EVERY turn
+    ;; as the system-prompt roster — user-only skills stay unlisted until
+    ;; the user invokes them from the picker. Guarded: a skills failure
+    ;; must never kill the turn itself.
+    (let* ((roster (condition-case nil
+                       (progn (require-module fikra/skills)
+                              (fikra/skills/fikra-skills-model-roster))
+                       (error () "")))
+           (with-roster (if (> (length roster) 0)
+                          (append with-l2
+                                  (list "--append-system-prompt"
+                                        (concat "Available workflows (follow the skill by re-reading its SKILL.md from disk):\n" roster)))
+                          with-l2)))
+      (if (and resume-id (stringp resume-id) (> (length resume-id) 0))
+        (append with-roster (list "--resume" resume-id "-p" message))
+        (append with-roster (list "-p" message))))))
 
 ;; ── L2 wiring: the per-turn --mcp-config + token ────────────────────
 ;; The adapter mints the one-time token itself and writes the config

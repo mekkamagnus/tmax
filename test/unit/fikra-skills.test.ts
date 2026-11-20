@@ -1,0 +1,142 @@
+import { describe, expect, test, beforeEach, afterAll } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
+
+// RFC-029 §8.7 (codex round 25) — .fikra/skills discovery: frontmatter-
+// scoped visibility, defworkflow rows in the picker, the model-visible
+// roster, and the accept dispatch (skill turn vs defworkflow run).
+
+type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
+
+let repoDir = "";
+const repoDirs: string[] = [];
+const originalCwd = process.cwd();
+
+beforeEach(() => {
+  repoDir = mkdtempSync(join(tmpdir(), "fikra-sk-"));
+  repoDirs.push(repoDir);
+  execFileSync("git", ["init", "-q"], { cwd: repoDir });
+  execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+  execFileSync("git", ["config", "user.name", "t"], { cwd: repoDir });
+  writeFileSync(join(repoDir, ".gitignore"), ".tmax/\n");
+  process.chdir(repoDir);
+});
+
+afterAll(() => {
+  process.chdir(originalCwd);
+  for (const d of repoDirs) rmSync(d, { recursive: true, force: true });
+});
+
+const e = (editor: Editor, expr: string) => executeTlisp(editor, expr);
+
+function writeSkill(name: string, body: string): void {
+  mkdirSync(join(repoDir, ".fikra", "skills", name), { recursive: true });
+  writeFileSync(join(repoDir, ".fikra", "skills", name, "SKILL.md"), body);
+}
+
+async function setup(): Promise<Editor> {
+  const editor = await createStartedEditor("");
+  e(editor, '(require-module "fikra/skills")');
+  e(editor, "(require-module fikra/adapter)");
+  e(editor, "(require-module fikra/backend-replay)");
+  writeFileSync(join(repoDir, "f.jsonl"), '{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}\n');
+  e(editor, '(fikra/backend-replay/fikra-backend-replay-load "f.jsonl")');
+  e(editor, '(fikra/adapter/fikra-set-backend "replay")');
+  return editor;
+}
+
+const row = (editor: Editor, i: number, key: string) =>
+  e(editor, `(hashmap-get (nth ${i} (fikra/skills/fikra-skill-table "" "rows")) "${key}")`);
+
+const rowMeta = (editor: Editor, i: number, key: string) =>
+  e(editor, `(hashmap-get (hashmap-get (nth ${i} (fikra/skills/fikra-skill-table "" "rows")) "metadata") "${key}")`);
+
+describe("#8.7 skills — frontmatter visibility", () => {
+  test("visibility: user in the leading frontmatter block is user-only", async () => {
+    writeSkill("secret", "---\nname: secret\nvisibility: user\n---\nbody\n");
+    const editor = await setup();
+    expect(String(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe("1");
+    expect(String(row(editor, 0, "display").value)).toContain("secret");
+    expect(String(rowMeta(editor, 0, "visibility").value)).toBe("user-only");
+  });
+
+  test("a visibility: user phrase in the BODY does not mislabel (codex r25 fix 3)", async () => {
+    writeSkill("leaky", "---\nname: leaky\n---\nif the text says visibility: user it is still model-visible\n");
+    const editor = await setup();
+    e(editor, "(fikra/skills/fikra-skills-refresh)");
+    expect(String(rowMeta(editor, 0, "visibility").value)).toBe("model-visible");
+  });
+
+  test("no frontmatter at all defaults to model-visible", async () => {
+    writeSkill("bare", "just instructions\n");
+    const editor = await setup();
+    e(editor, "(fikra/skills/fikra-skills-refresh)");
+    expect(String(rowMeta(editor, 0, "visibility").value)).toBe("model-visible");
+  });
+});
+
+describe("#8.7 skills — defworkflow rows (codex r25 fix 2)", () => {
+  test("registered workflows appear with the init.tlisp annotation", async () => {
+    writeSkill("one", "---\nname: one\n---\nbody\n");
+    const editor = await setup();
+    e(editor, "(require-module fikra/workflow)");
+    e(editor, '(fikra/workflow/fikra-register-workflow "nightly-triage" "do the triage")');
+    e(editor, "(fikra/skills/fikra-skills-refresh)");
+    const n = Number(e(editor, '(length (fikra/skills/fikra-skill-table "" "rows"))').value);
+    expect(n).toBe(2);
+    const wf = e(editor, '(car (fikra/skills/fikra-skill-table "" "rows"))');
+    // The workflow row sorts after skills only by construction (skills first).
+    // Find it explicitly:
+    const found = e(editor, `
+      (let ((rows (fikra/skills/fikra-skill-table "" "rows")) (hit nil))
+        (dolist (r rows)
+          (if (string= (hashmap-get r "display") "defworkflow nightly-triage")
+            (setq hit r)))
+        (hashmap-get (hashmap-get hit "metadata") "visibility"))`);
+    expect(String(found.value)).toBe("T-Lisp program");
+    expect(String(wf.value)).toBeTruthy();
+  });
+});
+
+describe("#8.7 skills — model roster (codex r25 fix 1)", () => {
+  test("model-visible only; user-only excluded", async () => {
+    writeSkill("pub", "---\nname: pub\ndescription: Public skill\n---\nbody\n");
+    writeSkill("priv", "---\nname: priv\ndescription: Private skill\nvisibility: user\n---\nbody\n");
+    const editor = await setup();
+    e(editor, "(fikra/skills/fikra-skills-refresh)");
+    const roster = String(e(editor, "(fikra/skills/fikra-skills-model-roster)").value);
+    expect(roster).toContain("fikra-skill pub");
+    expect(roster).toContain("Public skill");
+    expect(roster).not.toContain("priv");
+  });
+
+  test("empty when no skills exist", async () => {
+    const editor = await setup();
+    expect(String(e(editor, "(fikra/skills/fikra-skills-model-roster)").value)).toBe("");
+  });
+});
+
+describe("#8.7 skills — accept dispatch", () => {
+  test("a defworkflow row runs the named workflow, not a skill turn", async () => {
+    const editor = await setup();
+    e(editor, "(require-module fikra/workflow)");
+    e(editor, '(fikra/workflow/fikra-register-workflow "nightly-triage" "triage prompt")');
+    // Accept dispatches on the choice string; the workflow path creates a
+    // labeled thread rather than sending a skill-body turn.
+    e(editor, '(fikra/skills/fikra-skill-accept "defworkflow nightly-triage")');
+    const label = e(editor, '(fikra/workflow/fikra-workflow-thread-for "nightly-triage")');
+    expect(String(label.value)).not.toBe(""); // thread exists for the label
+  });
+
+  test("a skill row sends the SKILL.md body as a chat turn", async () => {
+    writeSkill("greeter", "---\nname: greeter\n---\nsay hi politely\n");
+    const editor = await setup();
+    e(editor, "(fikra/skills/fikra-skills-refresh)");
+    e(editor, '(fikra/skills/fikra-skill-accept "fikra-skill greeter")');
+    const turns = e(editor, "(fikra/thread/fikra-thread-turn-count)");
+    expect(Number(turns.value)).toBeGreaterThan(0);
+  });
+});

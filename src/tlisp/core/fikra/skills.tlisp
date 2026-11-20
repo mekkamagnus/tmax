@@ -1,7 +1,8 @@
 (defmodule fikra/skills
   (export fikra-skills-list fikra-skills-rows fikra-skills-refresh
           fikra-skills-dir fikra-skill-prompt fikra-skill-accept
-          fikra-skill-table fikra-skill-annotator fikra-skill-name-of)
+          fikra-skill-table fikra-skill-annotator fikra-skill-name-of
+          fikra-skill-visibility fikra-skills-model-roster)
 
 ;; RFC-029 section 8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
 ;; surfaced to model and user. Skills from
@@ -42,15 +43,78 @@ is model-visible."
                   (hashmap
                     "id" (concat "fikra-skill " name)
                     "path" (concat ".fikra/skills/" name)
-                    "visibility" (if (string-match "visibility: *user" body)
-                                   "user-only"
-                                   "model-visible")
+                    "visibility" (fikra-skill-visibility body)
                     "description" (fikra-skills-first-line body))
                   out)))))))
       (reverse out))))
 
+;; Description: the frontmatter "description:" field (codex r25 — the raw
+;; first line is "---" for every frontmatter skill); fall back to the first
+;; body line after the closing delimiter, then the raw first line.
 (defun fikra-skills-first-line (body)
-  (car (string-split body "\n")))
+  (let ((fm (fikra-skill-fm-field body "description")))
+    (if (> (length fm) 0)
+      fm
+      (fikra-skill-first-body-line (string-split body "\n") 0))))
+
+(defun fikra-skill-fm-field (body field)
+  (fikra-skill-fm-field-scan (string-split body "\n") field 0))
+
+(defun fikra-skill-fm-field-scan (lines field phase)
+  (if (null lines)
+    ""
+    (let ((line (string-trim (car lines))))
+      (if (= phase 0)
+        (if (string= line "---")
+          (fikra-skill-fm-field-scan (cdr lines) field 1)
+          "")
+        (if (string= line "---")
+          ""
+          (if (string= (substring line 0 (min (length line) (+ (length field) 1)))
+                       (concat field ":"))
+            (string-trim (substring line (+ (length field) 2) (length line)))
+            (fikra-skill-fm-field-scan (cdr lines) field 1)))))))
+
+(defun fikra-skill-first-body-line (lines phase)
+  (if (null lines)
+    ""
+    (let ((line (string-trim (car lines))))
+      (if (= phase 0)
+        (if (string= line "---")
+          (fikra-skill-first-body-line (cdr lines) 1)
+          (car lines))
+        (if (string= line "---")
+          (fikra-skill-first-body-line (cdr lines) 2)
+          (if (= phase 2)
+            (if (> (length line) 0)
+              line
+              (fikra-skill-first-body-line (cdr lines) 2))
+            (fikra-skill-first-body-line (cdr lines) 1)))))))
+
+;; Visibility is a FRONTMATTER field (codex r25: matching the whole body
+;; lets an instruction line mislabel the skill). user-only only when the
+;; leading --- block carries "visibility: user"; anything else (or no
+;; frontmatter at all) is model-visible per the RFC default.
+(defun fikra-skill-visibility (body)
+  (if (fikra-skill-fm-scan (string-split body "\n") 0 nil)
+    "user-only"
+    "model-visible"))
+
+;; phase 0 = before the leading delimiter, 1 = inside frontmatter.
+(defun fikra-skill-fm-scan (lines phase hit)
+  (if (null lines)
+    hit
+    (let ((line (string-trim (car lines))))
+      (if (= phase 0)
+        (if (string= line "---")
+          (fikra-skill-fm-scan (cdr lines) 1 hit)
+          nil)
+        (if (string= line "---")
+          hit
+          (fikra-skill-fm-scan (cdr lines) 1
+            (if hit
+              hit
+              (string-match "visibility: *user" line))))))))
 
 (defun fikra-skills-list ()
   (if (= (length fikra-skills-cache) 0)
@@ -58,14 +122,42 @@ is model-visible."
   fikra-skills-cache)
 
 (defun fikra-skills-rows ()
-  "Rows for the completion table (display + metadata for the annotator)."
-  (mapcar
-    (lambda (s)
-      (hashmap "value" (hashmap-get s "id")
-               "display" (hashmap-get s "id")
-               "metadata" (hashmap "path" (hashmap-get s "path")
-                                   "visibility" (hashmap-get s "visibility"))))
-    (fikra-skills-list)))
+  "Rows for the completion table (display + metadata for the annotator):
+.fikra skills AND registered defworkflows (codex r25 / mockup 8.7)."
+  (append
+    (mapcar
+      (lambda (s)
+        (hashmap "value" (hashmap-get s "id")
+                 "display" (hashmap-get s "id")
+                 "metadata" (hashmap "path" (hashmap-get s "path")
+                                     "visibility" (hashmap-get s "visibility"))))
+      (fikra-skills-list))
+    (mapcar
+      (lambda (w)
+        (hashmap "value" (concat "defworkflow " w)
+                 "display" (concat "defworkflow " w)
+                 "metadata" (hashmap "path" "init.tlisp"
+                                     "visibility" "T-Lisp program")))
+      (condition-case nil
+        (progn (require-module fikra/workflow)
+               (fikra/workflow/fikra-registered-workflows))
+        (error () (list))))))
+
+;; The roster fed to the MODEL each turn: model-visible skills only —
+;; user-only skills stay unlisted until the user invokes them (mockup
+;; 8.7 "fed to the model as available workflows"; codex r25 fix 1).
+(defun fikra-skills-model-roster ()
+  (fikra-skills-roster-join (fikra-skills-list) ""))
+
+(defun fikra-skills-roster-join (skills acc)
+  (if (null skills)
+    acc
+    (let ((s (car skills)))
+      (fikra-skills-roster-join (cdr skills)
+        (if (string= (hashmap-get s "visibility") "model-visible")
+          (concat acc (if (> (length acc) 0) "\n" "")
+                  "- " (hashmap-get s "id") ": " (hashmap-get s "description"))
+          acc)))))
 
 ;; The completion table (FUNCTION contract — input action). The custom
 ;; "fikra-skill" category routes marginalia to our annotator below (the
@@ -82,9 +174,26 @@ is model-visible."
             " · " (hashmap-get details "visibility"))))
 
 (defun fikra-skill-accept (choice)
-  "Accept: run the chosen skill — the mockup's model-visible skills are
-fed to the model as available workflows; running one starts a chat turn
-describing the skill (its SKILL.md body is the instruction)."
+  "Accept: run the chosen row — a .fikra skill starts a chat turn whose
+instruction is the SKILL.md body; a defworkflow row runs the registered
+T-Lisp workflow by name (mockup 8.7; composition is section 9 Q3)."
+  (if (fikra-choice-defworkflow-p choice)
+    (fikra-skill-accept-defworkflow (fikra-skill-name-of choice))
+    (fikra-skill-accept-skill choice)))
+
+(defun fikra-choice-defworkflow-p (choice)
+  (if (< (length choice) 11)
+    nil
+    (string= (substring choice 0 11) "defworkflow ")))
+
+(defun fikra-skill-accept-defworkflow (name)
+  (if (not name)
+    (editor-set-status "Fikra: unknown workflow")
+    (progn
+      (require-module fikra/workflow)
+      (fikra/workflow/fikra-run-named-workflow name))))
+
+(defun fikra-skill-accept-skill (choice)
   (let ((name (fikra-skill-name-of choice)))
     (if (not name)
       (editor-set-status "Fikra: unknown skill")
