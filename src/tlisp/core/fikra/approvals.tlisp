@@ -1,5 +1,5 @@
 (defmodule fikra/approvals
-  (export fikra-approval-enqueue fikra-approval-answer
+  (export fikra-approval-target fikra-approval-risk fikra-approval-enqueue fikra-approval-answer
           fikra-approval-answer-allow fikra-approval-answer-reject
           fikra-approval-answer-always fikra-approval-resolve-guard
           fikra-set-approval-guard fikra-approval-pending-p
@@ -98,6 +98,41 @@ decides instead."
   (if fikra-approval-pending-id t nil))
 
 ;; ── the registered handler (runs at mediate-park time) ─────────────
+
+;; The detail's leading PATH or command word — the panel's "target".
+(defun fikra-approval-target (detail)
+  (fikra-approval-target-scan detail 0))
+
+(defun fikra-approval-target-scan (s i)
+  (if (>= i (length s))
+    (if (> (length s) 30) (concat (substring s 0 27) "…") s)
+    (if (string= (substring s i (+ i 1)) "\"")
+      (fikra-approval-target-quote s (+ i 1) (substring s i (+ i 1)))
+      (if (string= (substring s i (+ i 1)) "/")
+        (fikra-approval-target-bare s i)
+        (fikra-approval-target-scan s (+ i 1))))))
+
+(defun fikra-approval-target-quote (s i acc)
+  (if (or (>= i (length s)) (string= (substring s i (+ i 1)) "\""))
+    acc
+    (fikra-approval-target-quote s (+ i 1) (concat acc (substring s i (+ i 1))))))
+
+(defun fikra-approval-target-bare (s i)
+  ;; The tail from the FIRST path char to the end (the scan hands us the
+  ;; slash index; the target is the path/command remainder).
+  (substring s i (length s)))
+
+;; The risk tag: destructive-pattern tools get "destructive:"; edits get
+;; "file-edit"; reads get nothing (the mockup's "bash (destructive: rm -rf)").
+(defun fikra-approval-risk (kind detail)
+  (if (string-match "rm -rf" detail)
+    "destructive: rm -rf"
+    (if (string= kind "bash")
+      "shell"
+      (if (or (string= kind "Edit") (string= kind "Write") (string= kind "buffer-edit"))
+        "file-edit"
+        ""))))
+
 (defun fikra-approval-enqueue (id detail kind scope)
   "A confirmation/mediate arrived for fikra. Validate the scope names a
 LIVE thread+turn; dead correlation → reject immediately (no prompt).
@@ -116,6 +151,14 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
         (list (list "kind" "permission-request")
               (list "action" (concat kind ": " detail))
               (list "id" id)
+              ;; Mockup 8.3 fields (r70): the panel's context rows —
+              ;; tool name, target (the detail's leading path/cmd), the
+              ;; thread+turn the gate belongs to, and the risk tag.
+              (list "tool" kind)
+              (list "target" (fikra-approval-target detail))
+              (list "thread" (fikra/thread/fikra-thread-current))
+              (list "turn" (number-to-string (fikra/thread/fikra-thread-turn-count)))
+              (list "risk" (fikra-approval-risk kind detail))
               ;; Provenance (codex rounds 12/16: richer approval presentation):
               ;; the runtime mode that GATED this action, the content
               ;; CHECKPOINT the turn began from (the stash baseline tree —

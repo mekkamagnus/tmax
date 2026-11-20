@@ -141,11 +141,29 @@ round-12 approvals catch)."
 ;; continuation gutter shredded the border); content lines pad/truncate to
 ;; the inner width so the border always aligns.
 (defun fikra-gate-panel (event)
+  ;; Mockup 8.3's full row set (r70): title names the thread+turn, the
+  ;; tool row carries the risk tag, the target rides its own row, the ckpt
+  ;; row states the revert contract, the origin row the provenance.
   (let* ((mode (fikra-event-get-str event "mode"))
          (cp (fikra-event-get-str event "checkpoint"))
          (org (fikra-event-get-str event "origin"))
+         (th (fikra-event-get-str event "thread"))
+         (tn (fikra-event-get-str event "turn"))
+         (tool (fikra-event-get-str event "tool"))
+         (risk (fikra-event-get-str event "risk"))
+         (target (fikra-event-get-str event "target"))
+         (title (if (and (> (length th) 0) (> (length tn) 0))
+                  (concat " APPROVE ACTION — " th ", turn " tn " ")
+                  " approval required "))
+         ;; Legacy logs (pre-r70) carry only "action" — fall back so old
+         ;; threads still render a readable tool row.
+         (tool-row (if (> (length tool) 0)
+                     tool
+                     (fikra-event-get-str event "action")))
          (rows (list
-                 (concat "? " (fikra-event-get-str event "action"))
+                 (concat tool-row
+                         (if (string= risk "") "" (concat " (" risk ")")))
+                 (if (string= target "") "" (concat "target  " target))
                  (concat "paused"
                          (if (string= mode "") "" (concat " (" mode ")"))
                          " — holds until you answer")
@@ -153,7 +171,7 @@ round-12 approvals catch)."
                  (if (string= cp "") "" (concat "ckpt " cp " · r reverts"))
                  (if (string= org "") "" (concat "origin: " org)))))
     (concat
-      (fikra-face "\e[1;33m" (fikra-box-line "┌" "─" " approval required " "┐")) "\n"
+      (fikra-face "\e[1;33m" (fikra-box-line "┌" "─" title "┐")) "\n"
       (fikra-face "\e[1;33m"
         (apply 'concat
           (mapcar (lambda (r) (concat (fikra-gate-row r) "\n")) rows)))
