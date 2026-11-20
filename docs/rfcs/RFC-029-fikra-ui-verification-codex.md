@@ -863,3 +863,31 @@ The P1 slice every receipt named — the native per-action gate's interactive lo
 - **r81 (`21baba6`, PASS 8)**: every claim earned — `fikra-approval-baseline-ref` verifies the baseline ref at emit (truthful `none yet — revert unavailable` row otherwise), complete blast-radius coverage, tool-aware prompt.
 
 **Named follow-ups**: live-CLI native mediation (P1 — backend-claude drives a real permission pause through the guarded seam); queued-action count in the modeline (P2); origin frame-id + model provenance (P2). Board: 8.1 7, 8.2 7, 8.3 8, 8.4 7, 8.5 7, 8.6 6, 8.7 9, 8.8 6 = 57/80.
+
+## Round 82 — the P1 CLOSED: LIVE L2 mediation against the real claude CLI
+
+The machinery (#220's token + MCP bridge + guarded resolve) was complete but disabled: the capability probe was WIDTH-FRAGILE — claude wraps `--help` to the terminal width, a piped 80-col help split `--permission-prompt-tool` across lines, and the grep counted 0 on a CLI that HAS the hook (L2 silently off since the 2.1.195-era recording). The probe now flattens newlines first (1 on 2.1.329, 0 on 2.1.195).
+
+**Live run 1** (isolated daemon `TMAX_SOCKET=/tmp/fikra-l2-e2e.sock`, TUI attached via tmux, backend=claude, real turn): the `touch PROBE.txt` Bash permission parked through `--permission-prompt-tool mcp__tmax-confirmation__permission` → the panel rendered with an **earned** ✓ (the async baseline ref had landed and verified) → a headless `--eval` allow was **DENIED** (stayed parked, no file) → the TUI's `a` **keypress** resolved → claude resumed → `PROBE.txt` created → the completed transcript:
+
+```
+⚙ Bash #f6b770  touch PROBE.txt
+┌ APPROVE ACTION — main, turn 1 ───────────┐
+│ Bash (shell)                             │
+│ paused (approval-required) — holds un …  │
+│ a Allow  r Reject  A Always allow Bas …  │
+│ ckpt    fikra/main/1-baseline ✓ — rev …  │
+│ origin: headless                         │
+│ action  Bash: {"command":"touch PROBE …  │
+└──────────────────────────────────────────┘
+  = allow
+  → ok #f6b770 (Bash completed with no output)
+AI: DONE
+± PROBE.txt +0 -0
+── completed ──
+  ⌘ [ckpt main/1 ✓]
+```
+
+**Live run 2** (fresh daemon, new source): the target-row fix proven — `target rm -f PROBE2.txt && touch PRO…` (was the JSON blob word `{"command":"touch`); resolved via keypress; `→ ok #687e08` / `AI: DONE2` / PROBE2.txt created.
+
+**Fixes landed** (`196649b`): the flattened probe; `fikra-approval-json-command` (the "command" VALUE is the target; mode base `""` — cond's `(string= mode …)` tests throw on nil, which also cured 3 latent #220 failures). Tests: approvals 32/32 solo + the neighbor suites. Remaining named: queued-action count (P2), origin frame-id/model provenance (P2).
