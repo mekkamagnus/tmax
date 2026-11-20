@@ -1,0 +1,124 @@
+(defmodule fikra/skills
+  (export fikra-skills-list fikra-skills-rows fikra-skills-refresh
+          fikra-skill-prompt fikra-skill-accept fikra-skill-table)
+
+;; RFC-029 §8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
+;; surfaced to model and user. Skills from
+;; <thread-root>/.fikra/skills/<name>/SKILL.md — the frontmatter's
+;; visibility tag decides model-visible vs user-only (default
+;; model-visible). Coexists with pure T-Lisp defworkflows (§9 Q3
+;; composition deferred).
+
+;; A discovered skill row: hashmap id/path/visibility/description.
+(defvar fikra-skills-cache (list)
+  "Discovered skills (refreshed on demand).")
+
+(defun fikra-skills-dir ()
+  (concat (fikra/thread/fikra-thread-root) "/.fikra/skills"))
+
+(defun fikra-skills-refresh ()
+  "Rescan .fikra/skills/*/SKILL.md. Skills with SKILL.md files whose
+frontmatter carries 'visibility: user' are user-only; everything else
+is model-visible."
+  (let ((dir (fikra-skills-dir)))
+    (setq fikra-skills-cache (fikra-skills-scan dir))
+    (length fikra-skills-cache)))
+
+(defun fikra-skills-scan (dir)
+  (if (not (file-exists-p dir))
+    (list)
+    (let ((names (string-split
+                   (shell-command
+                     (concat "ls -1 '" dir "' 2>/dev/null | grep -v '^\\.' || true"))
+                   "\n"))
+          (out (list)))
+      (dolist (name names)
+        (if (> (length name) 0)
+          (let ((md (concat dir "/" name "/SKILL.md")))
+            (if (file-exists-p md)
+              (let ((body (read-file-content md)))
+                (setq out (cons
+                  (hashmap
+                    "id" (concat "fikra-skill " name)
+                    "path" (concat ".fikra/skills/" name)
+                    "visibility" (if (string-match "visibility: *user" body)
+                                   "user-only"
+                                   "model-visible")
+                    "description" (fikra-skills-first-line body))
+                  out)))))))
+      (reverse out))))
+
+(defun fikra-skills-first-line (body)
+  (car (string-split body "\n")))
+
+(defun fikra-skills-list ()
+  (if (= (length fikra-skills-cache) 0)
+    (fikra-skills-refresh))
+  fikra-skills-cache)
+
+(defun fikra-skills-rows ()
+  "Rows for the completion table (id/display/annotation)."
+  (mapcar
+    (lambda (s)
+      (hashmap "value" (hashmap-get s "id")
+               "display" (hashmap-get s "id")
+               "annotation" (concat (hashmap-get s "path")
+                                    " · " (hashmap-get s "visibility"))
+               "metadata" (hashmap)))
+    (fikra-skills-list)))
+
+;; The completion table (FUNCTION contract — input action).
+(defun fikra-skill-table (input action)
+  (if (string= action "metadata")
+    (hashmap "category" "command")
+    (fikra-skills-rows)))
+
+(defun fikra-skill-accept (choice)
+  "Accept: run the chosen skill — the mockup's model-visible skills are
+fed to the model as available workflows; running one starts a chat turn
+describing the skill (its SKILL.md body is the instruction)."
+  (let ((name (fikra-skill-name-of choice)))
+    (if (not name)
+      (editor-set-status "Fikra: unknown skill")
+      (progn
+        (let ((body (read-file-content
+                      (concat (fikra-skills-dir) "/" name "/SKILL.md"))))
+          (require-module fikra/chat)
+          (fikra/chat/fikra-turn-send
+            (concat "Follow the skill at .fikra/skills/" name
+                    "/SKILL.md (re-read it from disk):\n\n" body))
+          (editor-set-status (concat "Fikra: skill " name " → thread")))))))
+
+(defun fikra-skill-name-of (choice)
+  ;; choice = "fikra-skill <name>" — take everything after the space.
+  (fikra-skill-name-scan choice 0 nil))
+
+(defun fikra-skill-name-scan (s i acc)
+  (if (>= i (length s))
+    (if acc (fikra-skill-name-strip acc) nil)
+    (fikra-skill-name-scan s (+ i 1)
+      (if (and (not acc) (string= (substring s i (+ i 1)) " "))
+        " "
+        (if acc (concat acc (substring s i (+ i 1))) nil))))
+
+(defun fikra-skill-name-strip (s)
+  (substring s 1 (length s)))
+
+(defun fikra-skill-prompt ()
+  "M-x fikra-skill: pick a skill (completes over .fikra/skills)."
+  (interactive)
+  (fikra-skills-refresh)
+  (if (= (length fikra-skills-cache) 0)
+    (editor-set-status "Fikra: no skills in .fikra/skills/")
+    (progn
+      (require-module fikra/thread)
+      (completing-read "fikra-skill "
+                       "fikra/skills/fikra-skill-table"
+                       nil nil ""
+                       "fikra-skill-history"
+                       "fikra/skills/fikra-skill-accept"))))
+
+(defvar fikra-skill-history nil)
+
+(provide "fikra-skills")
+)
