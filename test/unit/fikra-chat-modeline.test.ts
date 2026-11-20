@@ -137,14 +137,25 @@ describe("#8.1 inline ckpt marker (r63)", () => {
     expect(line).toContain("[ckpt main/2 ✓]");
   });
 
-  test("a tool-result between the call and the checkpoint still attaches to the CALL", async () => {
+  test("edit-only + turn-bounded association (r63: reads/shell never carry it; a new turn resets)", async () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
-    e(ed, '(defvar r63-evs3 nil)');
-    e(ed, '(setq r63-evs3 (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "bash") (list "id" "cd34") (list "summary" "make test")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "cd34") (list "summary" "pass")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4"))) (list) nil))');
-    const call = String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r63-evs3))").value);
-    expect(call).toContain("[ckpt main/4 ✓]");
-    const result = String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r63-evs3))").value);
-    expect(result).not.toContain("[ckpt");
+    // A bash call + result + checkpoint: STANDALONE (not an edit tool).
+    e(ed, '(defvar r64-a nil)');
+    e(ed, '(setq r64-a (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "bash") (list "id" "cd34") (list "summary" "make test")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "cd34") (list "summary" "pass")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4"))) (list) nil))');
+    expect(String(e(ed, "(length r64-a)").value)).toBe("3"); // standalone kept
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r64-a))").value)).not.toContain("[ckpt");
+    // An edit call in turn 1, then TURN 2 with only a checkpoint: the
+    // marker does NOT leak across the boundary.
+    e(ed, '(defvar r64-b nil)');
+    e(ed, '(setq r64-b (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "replay") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "ef01") (list "summary" "src/a.ts @5")) (list (list "kind" "turn-end") (list "turn" 1) (list "status" "completed")) (list (list "kind" "turn-start") (list "turn" 2) (list "backend" "replay") (list "mode" "")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/2"))) (list) nil))');
+    const t2call = String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r64-b))").value);
+    expect(t2call).not.toContain("[ckpt"); // no cross-turn leak
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 4 r64-b))").value)).toContain("[ckpt main/2 ✓]");
+    // Same-turn Edit + intervening result: attaches to the CALL.
+    e(ed, '(defvar r64-c nil)');
+    e(ed, '(setq r64-c (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "ef02") (list "summary" "src/a.ts @7")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "ef02") (list "summary" "applied")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/5"))) (list) nil))');
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r64-c))").value)).toContain("[ckpt main/5 ✓]");
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r64-c))").value)).not.toContain("[ckpt");
   });
 });

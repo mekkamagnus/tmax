@@ -607,33 +607,55 @@ text-deltas inside the batch join into the same line."
 ;; on the buffer-edit row). Pure list transform: a checkpoint-ready that
 ;; directly follows a tool-call attaches its ref to that call and is
 ;; dropped; anything else keeps the standalone marker row.
+;; Bounded association (r63): a checkpoint attaches ONLY to an EDIT-like
+;; call in its OWN turn (the turn-start boundary resets the search; reads
+;; and shell calls never carry the marker — the mockup's row is ⚙
+;; buffer-edit, action-level provenance, overstating it is a lie).
 (defun fikra-event-inline-ckpt-merge (events out last-kind)
   (if (null events)
     (reverse out)
     (let* ((e (car events))
            (k (fikra-event-get-str e "kind")))
       (cond
+        ((string= k "turn-start")
+          ;; A new turn: everything before is OUT OF SCOPE for attachment.
+          (fikra-event-inline-ckpt-merge (cdr events) (cons e out) 'turn))
         ((string= k "checkpoint-ready")
-          (let ((call-idx (fikra-inline-find-call out 0)))
-            (if call-idx
-              ;; Attach to the nearest preceding TOOL-CALL (results may
-              ;; intervene; the mockup puts the marker on the ⚙ row).
-              (fikra-event-inline-ckpt-merge (cdr events)
-                (fikra-inline-replace out call-idx
-                  (fikra-event-with-ckpt (nth call-idx out)
-                    (fikra-event-get-str e "ref")))
-                last-kind)
-              (fikra-event-inline-ckpt-merge (cdr events) (cons e out) last-kind))))
+          (if (eq last-kind 'turn)
+            (fikra-event-inline-ckpt-merge (cdr events) (cons e out) last-kind)
+            (let ((call-idx (fikra-inline-find-call out 0)))
+              (if call-idx
+                (fikra-event-inline-ckpt-merge (cdr events)
+                  (fikra-inline-replace out call-idx
+                    (fikra-event-with-ckpt (nth call-idx out)
+                      (fikra-event-get-str e "ref")))
+                  last-kind)
+                (fikra-event-inline-ckpt-merge (cdr events) (cons e out) last-kind)))))
         (t
           (fikra-event-inline-ckpt-merge (cdr events) (cons e out) k))))))
 
-;; The index of the nearest tool-call in OUT (a reversed accumulator), or nil.
+;; The index of the nearest EDIT-like tool-call in OUT, stopping at the
+;; turn boundary, or nil.
 (defun fikra-inline-find-call (out i)
   (if (>= i (length out))
     nil
-    (if (string= (fikra-event-get-str (nth i out) "kind") "tool-call")
-      i
-      (fikra-inline-find-call out (+ i 1)))))
+    (let ((ev (nth i out))
+          (k (fikra-event-get-str (nth i out) "kind")))
+      (cond
+        ((string= k "turn-start") nil)
+        ((and (string= k "tool-call")
+              (fikra-inline-edit-p (fikra-event-get-str ev "tool")))
+          i)
+        (t (fikra-inline-find-call out (+ i 1)))))))
+
+;; The mockup's edit-bearing tools (the claude CLI's Edit/Write/NotebookEdit
+;; + our buffer-edit naming).
+(defun fikra-inline-edit-p (tool)
+  (or (string= tool "buffer-edit")
+      (string= tool "Edit")
+      (string= tool "Write")
+      (string= tool "MultiEdit")
+      (string= tool "NotebookEdit")))
 
 ;; Replace index I in the reversed accumulator OUT (rebuild the tail).
 (defun fikra-inline-replace (out i new)
