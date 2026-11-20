@@ -6,3 +6,4 @@
 {"event":"gate","ts":"2026-11-20T11:00:13Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"74bf007","findings-count":4}
 {"event":"gate","ts":"2026-11-20T11:37:54Z","kind":"codex-grade","verdict":"5/10","rounds":1,"reviewed-sha":"5a6f627","findings-count":3}
 {"event":"gate","ts":"2026-11-20T11:43:19Z","kind":"codex-grade","verdict":"7/10","rounds":2,"reviewed-sha":"2280c65","findings-count":2}
+{"event":"gate","ts":"2026-11-20T11:44:17Z","kind":"codex-grade","verdict":"9/10","rounds":3,"reviewed-sha":"5792aa5","findings-count":1}
