@@ -41,6 +41,8 @@ the old sticky-flag design did exactly that).")
 (defvar fikra-checkpoint-last-output nil
   "The async filter's captured output (sentinel consumes it).")
 
+;; pid -> "<thread-id>/<turn>" stamped at SPAWN (the async identity fix).
+(defvar fikra-checkpoint-async-ids (hashmap))
 (defvar fikra-checkpoint-async-kinds (hashmap)
   "PID → kind of in-flight async captures (the sentinel emits the ref for
 ITS capture's kind — a single global would race between concurrent
@@ -171,7 +173,14 @@ the next turn). Returns the pid or nil when disabled. The pid→kind map
 keys the sentinel's ref name (concurrent captures cannot race)."
   (if (fikra-checkpoint-disable-p)
     nil
-    (let* ((tmp (concat (fikra/thread/fikra-thread-field "root")
+    ;; r65: STAMP the ref identity AT SPAWN TIME — a delayed finish must
+    ;; never carry a LATER turn's identity (the sentinel used to derive
+    ;; the ref from the CURRENT thread/turn when it ran; a finish after
+    ;; the next turn-start emitted the wrong turn's ref and replay then
+    ;; associated by proximity to the wrong edit).
+    (let* ((thread-id (fikra/thread/fikra-thread-current))
+           (turn-n (fikra/thread/fikra-thread-turn-count))
+           (tmp (concat (fikra/thread/fikra-thread-field "root")
                         "/.tmax/fikra/tmp-index-" kind))
            (pid (make-process
                   :command (list "sh" "-c" (fikra-checkpoint-command tmp kind))
@@ -180,6 +189,9 @@ keys the sentinel's ref name (concurrent captures cannot race)."
                   :sentinel "fikra/checkpoint/fikra-checkpoint-sentinel")))
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-kinds
         (number-to-string pid) kind)
+      (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-ids
+        (number-to-string pid)
+        (concat thread-id "/" (number-to-string turn-n)))
       pid)))
 
 (defun fikra-checkpoint-filter (pid output)
@@ -195,15 +207,23 @@ keys the sentinel's ref name (concurrent captures cannot race)."
   (let* ((out (if fikra-checkpoint-last-output fikra-checkpoint-last-output ""))
          (key (number-to-string pid))
          (kind (let ((k (hashmap-get fikra-checkpoint-async-kinds key)))
-                 (if k k "completion"))))
+                 (if k k "completion")))
+         ;; r65: the SPAWN-STAMPED identity — never the sentinel-time
+         ;; current thread/turn (a delayed finish would carry a later
+         ;; turn's ref; replay then misattributes by proximity).
+         (stamped (hashmap-get fikra-checkpoint-async-ids key)))
     (let ((sha (fikra-checkpoint-tail out)))
       (setq fikra-checkpoint-last-ref sha)
       (setq fikra-checkpoint-last-output nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-kinds key nil)
+      (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-ids key nil)
       (fikra/event/fikra-event-emit
         (if sha
           (list (list "kind" "checkpoint-ready")
-                (list "ref" (fikra-checkpoint-ref kind))
+                (list "ref" (if stamped
+                              (concat "refs/fikra/" stamped
+                                      (if (string= kind "baseline") "-baseline" ""))
+                              (fikra-checkpoint-ref kind)))
                 (list "sha" sha))
           (list (list "kind" "checkpoint-error")
                 (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))))
