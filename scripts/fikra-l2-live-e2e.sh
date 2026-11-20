@@ -17,6 +17,9 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# PIN the PATH (codex r83: a minimal-env caller left the daemon without
+# /bin — posix_spawn 'sh' ENOENT killed every git step).
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.bun/bin"
 SOCK="/tmp/fikra-l2-verify-$$.sock"
 LIVE="$(mktemp -d /tmp/fikra-l2-verify-XXXXXX)"
 TMUX_SESS="fikra-l2-verify-$$"
@@ -26,11 +29,12 @@ PASS=0; FAIL=0
 say()  { printf '%s\n' "$*" | tee -a "$LOG"; }
 ok()   { PASS=$((PASS+1)); say "  ok: $*"; }
 bad()  { FAIL=$((FAIL+1)); say "  FAIL: $*"; }
+DAEMON_PID=""
 cleanup() {
   tmux kill-session -t "$TMUX_SESS" 2>/dev/null
-  pkill -f "TMAX_SOCKET=$SOCK" 2>/dev/null
-  # The daemon holds the socket; kill by its unique socket arg match.
-  [ -S "$SOCK" ] && pkill -f "src/main.ts --daemon" 2>/dev/null
+  # PID-scoped ONLY (codex r83 catch: a pkill on the daemon pattern could
+  # kill ANOTHER checkout's daemon on a shared machine).
+  [ -n "$DAEMON_PID" ] && kill "$DAEMON_PID" 2>/dev/null
   if [ "$KEEP" != "--keep" ]; then rm -rf "$LIVE" "$SOCK"; fi
 }
 trap cleanup EXIT
@@ -53,15 +57,21 @@ say "== fikra L2 live e2e ($(date '+%H:%M:%S')) =="
 git init -q "$LIVE" && git -C "$LIVE" config user.email t@t && git -C "$LIVE" config user.name t
 printf 'Answer in one short sentence. Do not explore.\n' > "$LIVE/CLAUDE.md"
 git -C "$LIVE" add -A && git -C "$LIVE" commit -q -m init
-( cd "$LIVE" && TMAX_SOCKET="$SOCK" nohup "$REPO/bin/tmax" --daemon > "$LIVE/daemon.log" 2>&1 ) &
+( cd "$LIVE" && TMAX_SOCKET="$SOCK" exec "$REPO/bin/tmax" --daemon > "$LIVE/daemon.log" 2>&1 ) &
+DAEMON_PID=$!
 for i in $(seq 1 40); do [ -S "$SOCK" ] && break; sleep 0.5; done
 [ -S "$SOCK" ] && ok "daemon up on $SOCK" || { bad "daemon socket never appeared"; tail -5 "$LIVE/daemon.log"; exit 1; }
 
 # ── TUI attach (the INTERACTIVE frame; sets the client context dir) ──
 tmux new-session -d -s "$TMUX_SESS" -x 110 -y 32 -c "$LIVE"
 tmux send-keys -t "$TMUX_SESS" "TMAX_SOCKET=$SOCK $REPO/bin/tmaxclient --tui $LIVE/CLAUDE.md" Enter
-sleep 5
-tmux capture-pane -t "$TMUX_SESS" -p | grep -q -- "--NORMAL--" && ok "TUI attached" || bad "TUI did not attach"
+# Tolerant wait (codex r83: under load the attach outlived the fixed 5s).
+TUI_OK=""
+for i in $(seq 1 30); do
+  tmux capture-pane -t "$TMUX_SESS" -p | grep -q -- "--NORMAL--" && { TUI_OK=1; break; }
+  sleep 1
+done
+[ -n "$TUI_OK" ] && ok "TUI attached" || { bad "TUI did not attach"; tmux capture-pane -t "$TMUX_SESS" -p -S -20 | tee -a "$LOG"; }
 
 # ── setup: chat + backend claude; the probe must say AVAILABLE ───────
 OUT=$(ev '(progn (require-module fikra/chat) (require-module fikra/approvals)
