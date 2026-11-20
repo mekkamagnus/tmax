@@ -110,13 +110,14 @@ in thread state, refreshes the lighter. Returns the worktree path."
         (editor-set-status
           "Fikra: local tree dirty beyond the latest checkpoint — commit or stash first")
         nil)
-      (let* ((base (or (fikra-worktree-latest-ref)
-                       ;; The RESOLVED fork sha — the literal "HEAD" string
-                       ;; would drift with the worktree branch as it commits
-                       ;; (codex r34 live catch: base..working-tree went empty).
-                       (string-trim (shell-command
-                         (concat "git -C " (fikra-shq (fikra/thread/fikra-thread-field "root"))
-                                 " rev-parse HEAD 2>/dev/null")))))
+      (let* ((base (string-trim
+                     ;; ALWAYS the RESOLVED sha (codex r35: a ref NAME is
+                     ;; mutable — an updated/removed completion ref would
+                     ;; silently move the review's baseline).
+                     (shell-command
+                       (concat "git -C " (fikra-shq (fikra/thread/fikra-thread-field "root"))
+                               " rev-parse " (or (fikra-worktree-latest-ref) "HEAD")
+                               " 2>/dev/null"))))
              (path (fikra-worktree-path))
              (out (fikra/thread/fikra-thread-root-shell
                     (concat "git worktree add " (fikra-shq path)
@@ -258,6 +259,8 @@ Returns t when fully closed."
 ;; clean-apply check, and a/d/r. The APPLY keeps the existing
 ;; patch-apply-or-refuse handoff; nothing merges implicitly.
 (defvar fikra-worktree-review-buffer "*Fikra-worktree*")
+(defvar fikra-worktree-review-gen-failed nil
+  "t when THIS render's patch generation failed (short-circuits).")
 
 (defun fikra-worktree-review ()
   "SPC a w: enter worktree mode when local; OPEN THE REVIEW SCREEN when
@@ -281,19 +284,41 @@ its summary are missing')."
   ;; completion ref omits post-turn worktree edits; the render context's
   ;; own capture resolves the thread root differently — #298 residual).
   ;; ONE patch file feeds display, check, AND apply.
+  (setq fikra-worktree-review-gen-failed nil)
   (let* ((id (fikra/thread/fikra-thread-current))
          (path (fikra/thread/fikra-thread-field "worktree"))
          (base (fikra/thread/fikra-thread-field "worktree-base"))
          (root (fikra/thread/fikra-thread-field "root"))
          (patch-path (fikra-worktree-review-patch-path)))
     (shell-command (concat "mkdir -p " (fikra-shq (fikra-dirname patch-path))))
-    ;; Intent-to-add the worktree's untracked files so the working-tree
-    ;; diff SEES them (a plain git diff <base> covers tracked changes only
-    ;; — a brand-new agent file would vanish from the review).
-    (shell-command (concat "git -C " (fikra-shq path) " add -N . 2>/dev/null"))
-    (shell-command
-      (concat "git -C " (fikra-shq path) " diff --binary " base
-              " > " (fikra-shq patch-path) " 2>/dev/null"))
+    ;; Intent-to-add untracked files (a plain diff covers tracked only) +
+    ;; VERIFIED generation (codex r35: a failed add/diff silently produced
+    ;; an "empty" review). A failure SHORT-CIRCUITS into an error render.
+    (let ((gen (string-trim (shell-command
+               (concat "git -C " (fikra-shq path) " add -N . 2>/dev/null; "
+                       "git -C " (fikra-shq path) " diff --binary " base
+                       " > " (fikra-shq patch-path) " 2>/dev/null"
+                       " && echo GEN-OK || echo GEN-FAIL")))))
+      (if (string-match "GEN-OK" gen)
+        nil
+        (progn
+          (if (not (member fikra-worktree-review-buffer (buffer-list)))
+            (buffer-create fikra-worktree-review-buffer))
+          (buffer-switch fikra-worktree-review-buffer)
+          (buffer-set-read-only nil)
+          (let ((count (buffer-line-count)))
+            (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+          (cursor-move 0 0)
+          (buffer-insert
+            (concat "\e[1;31m✗ patch generation failed — the worktree or base is unreadable\e[0m\n"
+                    "worktree: " path "\n"
+                    "re-enter worktree mode or inspect the path above.\n"))
+          (buffer-set-read-only t)
+          (fikra-worktree-review-ensure-keymap)
+          (editor-set-status "Fikra: review generation failed")
+          (setq fikra-worktree-review-gen-failed t))))
+    (if fikra-worktree-review-gen-failed
+      nil
     ;; let* — conflicts reads clean (a parallel let leaves it unbound).
     (let* ((stat (fikra-worktree-review-stat root base nil))
            (empty (= (hashmap-get stat "files") 0))
@@ -322,7 +347,7 @@ its summary are missing')."
     (buffer-set-read-only t)
     (cursor-move 0 0)
     (fikra-worktree-review-ensure-keymap)
-    (editor-set-status (concat "Fikra: worktree review — " id)))))
+    (editor-set-status (concat "Fikra: worktree review — " id))))))
 
 ;; "9 files · +214 −96 · 12 turns · checkpoints 12/12 retained"
 (defun fikra-worktree-review-summary-line (root id base _snap)
@@ -336,11 +361,13 @@ its summary are missing')."
 
 ;; numstat aggregate: files / +adds / −dels over base..snap.
 (defun fikra-worktree-review-stat (root base _snap)
-  ;; numstat of the worktree's WORKING TREE vs base — the same diff the
-  ;; patch materializes, so summary and patch cannot diverge.
+  ;; numstat OF THE PATCH FILE (codex r35: a separate diff read could
+  ;; describe different content than the saved patch under concurrent
+  ;; edits — one file is the single source of truth).
   (let ((raw (shell-command
-               (concat "git -C " (fikra-shq (fikra/thread/fikra-thread-field "worktree"))
-                       " diff --numstat " base " 2>/dev/null"))))
+               (concat "git -C " (fikra-shq root)
+                       " apply --numstat " (fikra-shq (fikra-worktree-review-patch-path))
+                       " 2>/dev/null"))))
     (fikra-wt-stat-scan (string-split raw "\n") 0 0 0)))
 
 (defun fikra-wt-stat-scan (lines files adds dels)
@@ -420,8 +447,8 @@ review). SPC a w re-renders the summary."
       (concat "\e[1;36m" (fikra/thread/fikra-thread-current) " → main tree — reviewed patch\e[0m\n\n"
               (shell-command (concat "head -400 " (fikra-shq patch-path) " 2>/dev/null"))
               (if (> (length (string-trim (shell-command (concat "sed -n '401,800p' " (fikra-shq patch-path) " 2>/dev/null")))) 0)
-                "\n\e[2m… preview truncated at 400 lines — full patch: "
-                (fikra-shq patch-path) "\e[0m\n"
+                (concat "\n\e[2m… preview truncated at 400 lines — full patch: "
+                        (fikra-shq patch-path) "\e[0m\n")
                 "")))
     (buffer-set-read-only t)
     (cursor-move 0 0)

@@ -255,6 +255,36 @@ describe("#221 modeline + binding", () => {
     expect(String(e(editor, "(buffer-name)").value)).toBe("*scratch*");
   });
 
+  test("d previews the patch and r refuses keeping the worktree (the other two key ACTIONS)", async () => {
+    const editor = await setupThread("p");
+    e(editor, "(require-module fikra/adapter)");
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(editor, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = String(e(editor, '(fikra/thread/fikra-thread-field "worktree")').value);
+    writeFileSync(join(wt, "pv.txt"), "previewed content\n");
+    e(editor, "(fikra/worktree/fikra-worktree-review)");
+    e(editor, "(fikra/worktree/fikra-worktree-review-diff)");
+    const preview = String(e(editor, "(buffer-text)").value);
+    expect(preview).toContain("reviewed patch");
+    expect(preview).toContain("previewed content");
+    // r refuses: no local landing, the worktree file survives.
+    e(editor, "(fikra/worktree/fikra-worktree-review-refuse)");
+    expect(existsSync(join(process.cwd(), "pv.txt"))).toBe(false);
+    expect(existsSync(join(wt, "pv.txt"))).toBe(true);
+  });
+
+  test("a broken worktree renders an explicit generation failure, not an empty review", async () => {
+    const editor = await setupThread("x");
+    e(editor, "(require-module fikra/adapter)");
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(editor, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = String(e(editor, '(fikra/thread/fikra-thread-field "worktree")').value);
+    rmSync(wt, { recursive: true, force: true });
+    e(editor, "(fikra/worktree/fikra-worktree-review)");
+    const text = String(e(editor, "(buffer-text)").value);
+    expect(text).toContain("patch generation failed");
+  });
+
   test("review apply refuses when the tree moved since the review", async () => {
     const editor = await setupThread("c");
     e(editor, "(require-module fikra/adapter)");
