@@ -230,3 +230,27 @@ When a loader seeds a fresh-defaults record and overlays persisted fields "if no
 ## Skills picker: string-require FIXED the module; the KEY-BIND is the residue (round 31)
 
 String-form (require-module "fikra/skills") loads and the prompt opens (probe hangs on the minibuffer = success). SPC a k still "Unbound" in the live TUI despite the binding being in mode.tlisp (line 118) AND embedded in dist/tmax (strings x3). The a-menu which-key overlay lists 13 entries WITHOUT k. NEXT (one probe): in a live session, `(keymap-ref (editor-keymaps-named "normal") "SPC a k")` — or simpler, check whether a STALE daemon process is serving (TMAX_SOCKET daemons survive `tmax --stop`, which only stops the DEFAULT socket — pkill or unique socket per test round; the r75 daemon may predate the ec8670e rebuild). ALSO: each round's `tmax --stop` never killed the private-socket daemons (r46-r75 all leaked!). pkill -f "dist/tmax --daemon" before the next live test.
+
+## Agent attribution must be structural (Agent-Run trailers), never scope-guessed
+
+The codex benchmark of the two running tabs couldn't tell their commits apart — both wrote `fix(fikra)` for days, and every post-hoc reconstruction (efficiency, self-correction, test discipline) inherited that ambiguity. Commit-message prefixes describe WHAT changed, not WHO changed it; two agents in one namespace destroy the signal. **Rule:** every agent-run commit carries `Agent-Run: <ledger-id>` (the run's ledger file stem); attribution is `git log --grep`, not forensics. And the compliance check belongs in a READER that audits the window and flags missing trailers — never in a git hook, because agent sessions run hooks bypassed (a hook that agents skip is theater; an audit that humans read is real). ADR-0293.
+
+## Skills 8.7 RESOLVED (round 32): the "unbound in TUI" was a paren-truncated defmodule AST
+
+Root cause of "Undefined symbol: fikra/skills/fikra-skill-prompt": fikra-skill-name-scan's defun left ONE paren unclosed, and a stray `)` at EOF compensated the file total — the file LOOKS balanced (naive paren count says 1 form), but the parser closes the defmodule at the broken defun; every later defun parses as a top-level form and is SILENTLY DROPPED (no parse error, no load error — module registers "loaded" with the full export list but a truncated env). Signature to hunt next time: `module-exports` lists the symbol but `module-lookup` says "not found in module environment". Probe recipe: parse the file with the real `TLispParser.parseProgram` and count defuns in the defmodule AST vs the source. The earlier "symbol vs string require" and "stale daemon" theories were both wrong — ec8670e's string-form error was the mangled key-bind line (unescaped quotes INSIDE the action string), fixed at 77943bb; daemon staleness only muddied the diagnosis.
+
+## TMAX_SOCKET daemon lifecycle: auto-respawn on -e REBINDS the socket = silent split-brain
+
+A TMAX_SOCKET daemon shuts down when its last TUI frame closes; the next `tmax -e` then AUTO-SPAWNS a fresh daemon that unlinks+rebinds the same socket path while the OLD daemon may still hold the fd — every probe thereafter hits the NEW (blank) engine while you believe you're on the old one (symptom: earlier-set globals suddenly "Undefined symbol"). Rules: after any TUI lifecycle event, re-verify the daemon PID (lsof -U | grep <socket>); prefer keeping the TUI alive across probe batches; never trust `pgrep -f 'dist/tmax --daemon'` alone — the argv does NOT contain the socket path.
+
+## Key-send notation: binding "SPC a k" is THREE keys, no separators
+
+tmux: `send-keys ' ' a k` (space, a, k — a literal space between a and k is a 4th key that breaks the sequence). tmaxclient: `--keys '<SPC>ak'` (angle-bracket SPC, then the rest with NO spaces — the plain string 'SPC a k' parses as 7 literal characters and types into the buffer). Both wrong forms fail silently or insert text, which looks like a keymap bug.
+
+## Marginalia: a custom completion category is REQUIRED to keep row annotations
+
+completion-all-completions OVERWRITES each row's "annotation" via the marginalia registry by CATEGORY (built-in command/buffer/file annotators; unknown category → blank). A table whose rows carry their own "annotation" strings will render them BLANK unless metadata declares a custom category and the module registers an annotator: `(marginalia-register-annotator "<category>" "<qualified-annotator-fn>")` at load; the annotator formats from the row's "metadata" hashmap (see fikra/skills.tlisp — category "fikra-skill", annotation "path · visibility").
+
+## -e side effects leak into the live TUI frame
+
+Daemon-side `(buffer-switch ...)`/thread ops from a probe -e call mutate the SHARED editor state and the live TUI renders them (mid-artifact, the frame jumped to *scratch* and threads switched). Before probing around a live capture, snapshot what you need; re-drive the UI state (SPC a a / thread switch) after any -e that touched buffers or threads.
