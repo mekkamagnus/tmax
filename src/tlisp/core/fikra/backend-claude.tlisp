@@ -195,7 +195,7 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
       (write-file-content path
         (concat "{\"mcpServers\":{\"tmax-confirmation\":{"
                 "\"command\":\"bun\","
-                "\"args\":[\"" (fikra-claude-mcp-bridge-path) "/bin/tmax-mcp-confirmation.ts\",\"fikra\",\""
+                "\"args\":[\"" (fikra-claude-mcp-bridge-path) "\",\"fikra\",\""
                 token "\"]}}}"))
       ;; Best-effort 0600 (gate note): the token authorizes ORIGINATING a
       ;; mediate, never resolving — but don't leave it world-readable.
