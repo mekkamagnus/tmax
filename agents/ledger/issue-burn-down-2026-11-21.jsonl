@@ -42,3 +42,4 @@
 {"event":"gate","ts":"2026-11-20T22:46:09Z","kind":"codex-grade","verdict":"5/10","rounds":3,"reviewed-sha":"1cf17f3","findings-count":3,"note":"every round applied; residual asks recorded as named follow-ups on the issue (per the sub-arc cap)"}
 {"event":"landing","ts":"2026-11-20T22:46:09Z","unit":"#305","shas":["dc5327a"],"files-staged-count":7,"tests-run":[{"name":"bun run test:unit","output":"3922 pass\n0 fail"},{"name":"bun test test/unit/untracked-newfile-patches.test.ts","output":"6 pass\n0 fail"}],"adr-spec":["docs/adrs/ADR-0301-untracked-newfile-patches.md","docs/specs/SPEC-275-untracked-newfile-patches.md"]}
 {"event":"unit-start","ts":"2026-11-20T23:06:16Z","unit":"#318"}
+{"event":"gate","ts":"2026-11-20T23:21:14Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"6403740","findings-count":5}
