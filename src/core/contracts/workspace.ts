@@ -91,7 +91,8 @@ export interface WorkspaceState {
   tabs: Tab[];  // Array of tabs (reserved for future use)
   cursorState: Position;  // Current cursor position
   viewportState: ViewportState;  // Current viewport state
-  currentBufferName?: string;  // Name of currently active buffer
+  currentBufferName?: string;
+  /** §8.8: the dim inline completion at the cursor (transient render state). */
   currentFilename?: string;  // Filename of currently active buffer
   currentMajorMode?: string;  // Active major mode
   activeMinorModes?: string[];  // Active minor modes
@@ -185,6 +186,8 @@ export interface Frame {
   currentFilename?: string;
   currentBuffer?: TextBuffer;
   currentBufferName?: string;  // Name of the current buffer within the frame workspace
+  /** §8.8: the dim inline completion at the cursor (transient render state). */
+  ghostText?: string;
   statusMessage: string;
   cursorFocus: 'buffer' | 'command';
   lastActivity: Date;

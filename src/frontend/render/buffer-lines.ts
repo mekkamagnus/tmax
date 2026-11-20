@@ -532,7 +532,7 @@ export function renderBufferLines(
       );
     }
 
-    return renderSingleWindow(
+    const rows = renderSingleWindow(
       state.currentBuffer!,
       state.cursorPosition.line,
       state.cursorPosition.column,
@@ -547,6 +547,24 @@ export function renderBufferLines(
       state.foldRanges,
       wikiDisp,
     );
+    // RFC-029 §8.8: the ghost renders AT THE CURSOR — splice the row at the
+    // cursor's screen column (gutter + column minus horizontal scroll),
+    // dim italic, width-clipped to the content width. (Appending after the
+    // row's padding pushed it off-screen at wide terminals — live catch.)
+    if (state.ghostText) {
+      const cursorRow = state.cursorPosition.line - getVisibleViewportTop(state, height);
+      if (cursorRow >= 0 && cursorRow < rows.length) {
+        const gw = gutterDisplayWidth(getLineCount(state), gutterCfg);
+        const col = gw + Math.max(0, state.cursorPosition.column - viewportLeft);
+        const row = rows[cursorRow]!;
+        // sliceToVisualWidth = the PREFIX up to the cursor column
+        // (sliceFromVisualOffset returns the suffix — viewport-scroll use).
+        const head = sliceToVisualWidth(row, col);
+        const ghost = sliceToVisualWidth(style(state.ghostText, { dim: true, italic: true }), cw - Math.min(col, cw));
+        rows[cursorRow] = head + ghost;
+      }
+    }
+    return rows;
   }
 
   // Multi-window path (#260: cells come from the split tree when present —

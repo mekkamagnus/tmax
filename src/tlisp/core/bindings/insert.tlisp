@@ -20,6 +20,9 @@
 
 ;; Return to normal mode from insert mode (Escape)
 (key-bind "Escape" "(editor-set-mode \"normal\")" "insert")
+;; RFC-029 8.8: partial-accept the ghost completion (Tab accepts fully —
+;; the insert handler checks the ghost FIRST, before snippet mode).
+(key-bind "C-n" "(condition-case nil (progn (require-module \"fikra/ghost\") (fikra/ghost/fikra-ghost-accept-word)) (error () nil))" "insert")
 
 ;; =================================================================
 ;; BASIC EDITING (Insert Mode)

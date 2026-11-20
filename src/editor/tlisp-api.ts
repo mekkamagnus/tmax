@@ -44,6 +44,7 @@ import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps } from "./api/visual-ops.ts";
 import { createFlashOps } from "./api/flash-ops.ts";
+import { createGhostOps } from "./api/ghost-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
@@ -487,6 +488,15 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         const write = (msg: Msg): void => { ctx.applyUpdate(msg); };
         return createFlashOps(write);
+      },
+    },
+
+    // ── ghost text (RFC-029 §8.8) ──────────────────────────────────────
+    {
+      name: "ghost",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        const write = (msg: Msg): void => { ctx.applyUpdate(msg); };
+        return createGhostOps(write);
       },
     },
 

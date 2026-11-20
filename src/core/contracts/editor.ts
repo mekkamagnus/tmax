@@ -264,6 +264,9 @@ export interface EditorState {
   highlightSpans?: HighlightSpan[][];
   /** #231: transient vim-goggles flash spans (TTL-cleared, merged at render). */
   flashSpans?: HighlightSpan[][];
+  /** RFC-029 §8.8 ghost text: the dim inline completion at the cursor
+   * (single line; rendered after the cursor column on the cursor row). */
+  ghostText?: string;
   searchMatches?: Range[];
   currentMajorMode?: string;
   activeMinorModes?: string[];

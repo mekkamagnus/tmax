@@ -657,6 +657,7 @@ export class TmaxServer {
 	    frame.currentFilename = state.currentFilename;
 	    frame.currentBuffer = state.currentBuffer;
 	    frame.currentBufferName = this.currentBufferName(state) ?? undefined;
+	    frame.ghostText = state.ghostText;
 	    frame.statusMessage = state.statusMessage;
     frame.currentMajorMode = state.currentMajorMode ?? 'fundamental';
     frame.activeMinorModes = state.activeMinorModes ?? [];
@@ -932,6 +933,7 @@ export class TmaxServer {
       // fell through to the *scratch* fallback over a named chat buffer
       // (fikra modeline; codex r25-r31).
       currentBufferName: bufferName ?? undefined,
+      ghostText: frame.ghostText,
 	      cursorPosition: { ...frame.cursorPosition },
 	      mode: frame.mode,
 	      statusMessage: frame.statusMessage,

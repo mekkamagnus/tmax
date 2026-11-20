@@ -206,6 +206,8 @@ export interface SerializedEditorState {
   currentFilename?: string;
   /** #253 wire: the named buffer the modeline should show (*Fikra*, *Help*). */
   currentBufferName?: string | null;
+  /** RFC-029 §8.8 wire: the dim inline completion at the cursor. */
+  ghostText?: string;
   currentMajorMode: string;
   activeMinorModes: string[];
   activeMinorModeLighters: string[];

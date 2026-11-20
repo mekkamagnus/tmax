@@ -117,6 +117,8 @@ export function update(model: EditorModel, msg: Msg): UpdateResult {
       return { model: patch(model, { highlightSpans: msg.spans ? msg.spans.map((s: HighlightSpan[]) => [...s]) : undefined }), cmds: noCmds };
     case "SetFlashSpans":
       return { model: patch(model, { flashSpans: msg.spans ? msg.spans.map((s: HighlightSpan[]) => [...s]) : undefined }), cmds: noCmds };
+    case "SetGhostText":
+      return { model: patch(model, { ghostText: msg.text }), cmds: noCmds };
     case "SetSearchMatches":
       return { model: patch(model, { searchMatches: msg.matches ? [...msg.matches] : undefined }), cmds: noCmds };
     case "SetFoldRanges":

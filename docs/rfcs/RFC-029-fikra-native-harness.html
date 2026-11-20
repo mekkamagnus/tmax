@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RFC-029: Fikra as a Native AI Harness</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #f0883e;
+    --accent-dim: rgba(240, 136, 62, 0.15);
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --red: #f85149;
+    --code-bg: #0d1117;
+    --inline-code-bg: rgba(88, 166, 255, 0.12);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 2rem 2rem 6rem;
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .rfc-header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+  .rfc-header h1 { font-size: 1.9rem; margin-bottom: 0.5rem; }
+  .rfc-meta { color: var(--text-muted); font-size: 0.9rem; }
+  .rfc-meta span { margin-right: 1.5rem; }
+  h2 { font-size: 1.35rem; margin: 2.5rem 0 0.9rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 0.6rem; color: var(--purple); }
+  p { margin-bottom: 0.9rem; }
+  ul, ol { margin: 0.6rem 0 1rem 1.4rem; }
+  li { margin-bottom: 0.4rem; }
+  code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.86em; background: var(--inline-code-bg); padding: 0.15em 0.4em; border-radius: 4px; color: var(--blue); }
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; overflow-x: auto; margin: 1rem 0 1.4rem; }
+  pre code { background: none; padding: 0; color: var(--text); font-size: 0.82rem; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0 1.5rem; font-size: 0.88rem; }
+  th, td { border: 1px solid var(--border); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+  th { background: var(--surface); color: var(--accent); }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+  .callout { border-left: 3px solid var(--accent); background: var(--accent-dim); padding: 0.9rem 1.2rem; border-radius: 0 8px 8px 0; margin: 1.2rem 0; }
+  .callout.green { border-left-color: var(--green); background: rgba(63,185,80,0.08); }
+  .callout.red { border-left-color: var(--red); background: rgba(248,81,73,0.08); }
+  .tag { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.55rem; border-radius: 10px; margin-right: 0.35rem; vertical-align: middle; }
+  .tag.none { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tag.big { background: rgba(248,81,73,0.15); color: var(--red); }
+  .tag.med { background: rgba(240,136,62,0.15); color: var(--accent); }
+  .tag.small { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.4rem; margin-bottom: 2rem; font-size: 0.92rem; }
+  .toc a { display: block; padding: 0.15rem 0; }
+
+  /* ── Screen mockups (§8) ─────────────────────────────────────────── */
+  .mock { background: var(--terminal-bg, #0c0e14); border: 1px solid var(--border); border-radius: 10px; margin: 1.2rem 0 2rem; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,0.45); }
+  .mock-title { display: flex; align-items: center; gap: 0.5rem; background: #161b22; border-bottom: 1px solid var(--border); padding: 0.45rem 0.9rem; font-size: 0.74rem; color: var(--text-muted); font-family: 'SF Mono', Menlo, monospace; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.r { background: #f85149; } .dot.y { background: #d29922; } .dot.g { background: #3fb950; }
+  .mock-title .t { margin-left: 0.6rem; }
+  .mock-body { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.55; padding: 0.7rem 0; color: var(--text); }
+  .row { display: flex; white-space: pre; }
+  .g { width: 3.2rem; flex: none; text-align: right; padding-right: 0.7rem; color: #484f58; user-select: none; }
+  .g.cur { color: var(--accent); }
+  .c { flex: 1; padding-right: 1rem; overflow: hidden; }
+  .mline { display: flex; justify-content: space-between; background: #1a3a5c; color: #e6edf3; font-size: 12px; padding: 0.15rem 0.7rem; margin-top: 0.55rem; white-space: pre; }
+  .mline .mid { color: #fff; }
+  .mline.dim { background: #2d1f4e; }
+  .mline.warn { background: #5c3a1a; }
+  .who { color: var(--purple); font-weight: 700; }
+  .who.u { color: var(--green); }
+  .who.sys { color: var(--text-muted); }
+  .txt { color: var(--text); }
+  .txt.mut { color: var(--text-muted); }
+  .tool-hdr { color: var(--accent); }
+  .ok { color: var(--green); } .bad { color: var(--red); }
+  .add { color: #3fb950; background: rgba(63,185,80,0.10); display: block; }
+  .del { color: #f85149; background: rgba(248,81,73,0.10); display: block; }
+  .cursor { background: #e6edf3; color: #0c0e14; }
+  .sep { color: #30363d; }
+  .popup { border: 1px solid var(--purple); background: rgba(188,140,255,0.06); margin: 0.4rem 1rem 0.4rem 3.9rem; border-radius: 6px; padding: 0.55rem 0.9rem; }
+  .popup .ph { color: var(--purple); font-weight: 700; font-size: 11.5px; }
+  .key { display: inline-block; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: #161b22; padding: 0 0.35rem; font-size: 11px; color: var(--accent); }
+  .cand { display: flex; justify-content: space-between; padding: 0 1rem 0 3.9rem; }
+  .cand .k { color: var(--blue); }
+  .figref { font-size: 0.85rem; color: var(--text-muted); margin: 0.3rem 0 0; font-style: italic; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.5rem; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="rfc-header">
+  <h1>RFC-029: Fikra as a Native AI Harness</h1>
+  <div class="rfc-meta">
+    <span><strong>Date:</strong> 2026-11-17</span>
+    <span><strong>Status:</strong> Draft — native-backend phase <strong>TABLED 2026-11-18</strong> until the t3code/zcode-style task arc ships (label <code>fikra-native-backend</code>)</span>
+    <span><strong>Related:</strong> <a href="RFC-013-fikra-ai-harness.html">RFC-013</a>, <a href="RFC-027-fikra-agent-completion.md">RFC-027</a>, <a href="../mockups/fikra-task-arc.html">task-arc mockups</a> (the now-current direction), <a href="../index.html">docs index</a>, <a href="RFC-018-tlisp-scripting-primitives.md">RFC-018</a></span>
+  </div>
+</div>
+
+<div class="toc">
+  <a href="#summary">1. Summary</a>
+  <a href="#architecture">2. The architectural fact</a>
+  <a href="#capmap">3. Capability map</a>
+  <a href="#gaps">4. The three load-bearing gaps</a>
+  <a href="#conventions">5. Standard harness conventions</a>
+  <a href="#advantages">6. What fikra would have that Claude Code doesn't</a>
+  <a href="#phasing">7. Phasing</a>
+  <a href="#mockups">8. Screen mockups</a>
+  <a href="#open">9. Open questions</a>
+</div>
+
+<h2 id="summary">1. Summary</h2>
+<p>Fikra-mode is spec-complete as designed (RFC-013/RFC-027, issues #206–#225): chat, threads, checkpoints, tree-diff revert, worktree isolation, L1/L2 approvals, FAEP events, two CLI backends. This RFC analyzes what remains to make it a <strong>full AI harness in its own right</strong> — the peer of Claude Code or Pi — rather than an orchestration and safety layer wrapped around other harnesses' CLIs.</p>
+<p>The finding: three load-bearing gaps (a native model backend, an own tool system, an own agent loop) plus six secondary ones. Everything needed at the primitive level already exists in tmax (<code>http-request</code>, <code>make-process</code>, <code>signal</code>, buffer ops). The conventions follow current harness standards: <code>AGENT.md</code> for project memory, a <code>.fikra/skills/</code> folder for skills.</p>
+
+<h2 id="architecture">2. The architectural fact</h2>
+<p>Fikra today is a <strong>harness around harnesses</strong>. Its backends are complete agent CLIs (Claude Code, Codex) invoked per turn via <code>claude --print --output-format stream-json --resume …</code>. The agent loop, tools, context management, and permissions all live <em>inside</em> the wrapped CLI. Fikra contributes UI, threads/projects, checkpoints, and an approval bridge (L2 rides the CLI's <code>--permission-prompt-tool</code> hook where available).</p>
+<pre><code> fikra today:                          target ("like Claude Code/Pi"):
+
+ you -&gt; chat -&gt; claude CLI              you -&gt; chat -&gt; native model API
+                |                                        |
+                | (loop, tools,                          v
+                |  perms INSIDE CLI)              fikra agent loop (T-Lisp)
+                v                                        |
+        checkpoints, revert,                       tool_use request
+        worktrees, approvals                              |
+        (bridged via MCP hook)                    fikra tools execute:
+                                                      buffer-edit, bash,
+                                                      search, web
+                                                        |
+                                                        v
+                                              checkpoint -&gt; approve (L2)
+                                              -&gt; execute -&gt; tool_result
+                                              -&gt; loop until done</code></pre>
+<p>The right side makes fikra's safety machinery <strong>per-action instead of per-turn</strong> — which is what the L2 design was built for. Today it can only gate the wrapped CLI through a single hook; with native tools, every edit, command, and search passes through checkpoint → approval → execution.</p>
+
+<h2 id="capmap">3. Capability map</h2>
+<table>
+<tr><th>#</th><th>Capability</th><th>Claude Code / Pi</th><th>fikra today</th><th>Gap</th></tr>
+<tr><td>1</td><td>Chat UI, streaming, composition</td><td>yes</td><td>yes — <code>*Fikra*</code> buffer + capture, <code>C-c C-c</code></td><td><span class="tag none">none</span></td></tr>
+<tr><td>2</td><td>Sessions, resume, concurrency</td><td>yes</td><td>yes — threads, <code>--resume</code>, per-thread backend, project grouping (beyond CC)</td><td><span class="tag none">none</span></td></tr>
+<tr><td>3</td><td>Turn checkpoints, diff, revert</td><td>/rewind (recent)</td><td>yes — tree-diff revert, git refs <code>fikra/&lt;thread&gt;/&lt;turn&gt;</code></td><td><span class="tag none">none</span></td></tr>
+<tr><td>4</td><td>Worktree isolation</td><td>not native</td><td>yes — per thread, patch-apply-or-refuse</td><td><span class="tag none">none</span></td></tr>
+<tr><td>5</td><td>Approvals / permissions</td><td>per-tool allowlists, modes</td><td>L1/L2 + frame-provenance — but gates the <em>wrapped CLI's</em> actions via one MCP hook</td><td><span class="tag med">real</span></td></tr>
+<tr><td>6</td><td>Event log / replay</td><td>transcripts</td><td>yes — FAEP emit/append/replay/render</td><td><span class="tag none">none</span></td></tr>
+<tr><td>7</td><td>Custom commands</td><td>skills / slash commands</td><td>yes — <code>defworkflow</code> in T-Lisp</td><td><span class="tag none">concept</span></td></tr>
+<tr><td>8</td><td><strong>Native model backend</strong></td><td>core</td><td><strong>none</strong> — no adapter talks to a raw model API; <code>http-request</code> exists unused for this</td><td><span class="tag big">the big one</span></td></tr>
+<tr><td>9</td><td><strong>Own tool system</strong></td><td>core (Edit/Bash/Grep/…)</td><td><strong>none</strong> — tools belong to the wrapped CLI; <code>tool_use</code> events are only rendered</td><td><span class="tag big">the big one</span></td></tr>
+<tr><td>10</td><td><strong>Agent loop</strong> (tool_use → execute → result → model, until done)</td><td>core</td><td>one CLI call per turn</td><td><span class="tag big">the big one</span></td></tr>
+<tr><td>11</td><td>Context management (project memory, compaction, @-files, todos)</td><td>CLAUDE.md, auto-compaction, @-refs</td><td><code>context.tlisp</code> = 26 lines (buffer/selection/project)</td><td><span class="tag med">large</span></td></tr>
+<tr><td>12</td><td>Subagents / orchestration</td><td>Agent tool, background agents, MCP</td><td>threads exist; no spawn/coordinate protocol; MCP config is written <em>for</em> claude, not consumed</td><td><span class="tag med">medium</span></td></tr>
+<tr><td>13</td><td>Hooks at tool boundary</td><td>PreToolUse / PostToolUse</td><td>tmax hook system exists, unwired to approvals/tools</td><td><span class="tag small">small</span></td></tr>
+<tr><td>14</td><td>Headless / SDK</td><td><code>-p</code>, SDK</td><td>daemon + <code>tmaxclient --eval</code> — surface exists, no turn API</td><td><span class="tag small">small</span></td></tr>
+<tr><td>15</td><td>Verification loop (run tests → feed failures → retry)</td><td>yes</td><td>workflow scaffolding only; no auto-loop (trt exists for the T-Lisp side)</td><td><span class="tag med">medium</span></td></tr>
+<tr><td>16</td><td>Inline completion (ghost text)</td><td>yes</td><td>specced (<code>fikra-ghost</code>), never built</td><td><span class="tag small">small</span></td></tr>
+<tr><td>17</td><td>Provider breadth</td><td>1–2</td><td>claude, codex, replay fixtures (+specced: gemini, ollama, pi)</td><td><span class="tag med">medium</span></td></tr>
+</table>
+
+<h2 id="gaps">4. The three load-bearing gaps</h2>
+
+<h3>4.1 Native backend (capability 8)</h3>
+<p>An adapter that talks directly to a model API over the existing <code>http-request</code> primitive, parses the response stream, and normalizes to FAEP events. This is what removes the dependency on another harness being installed. Ollama (localhost, no key) is the natural first target; Anthropic/OpenAI follow.</p>
+
+<h3>4.2 Own tools (capability 9)</h3>
+<p>A tool registry + executor in T-Lisp. The natural toolset is nearly free because the host is an editor:</p>
+<ul>
+  <li><code>buffer-read</code> / <code>buffer-edit</code> — atomic, checkpointable, and <em>visible in the UI as buffer changes</em> (the editor is the tool surface)</li>
+  <li><code>bash</code> — via <code>make-process</code>, streamed</li>
+  <li><code>search</code> — <code>rg</code> via <code>make-process</code></li>
+  <li><code>web</code> — via <code>http-request</code></li>
+</ul>
+<p>Tool schemas (what the model sees) and result formatting (what the model gets back) are the work.</p>
+
+<h3>4.3 Agent loop (capability 10)</h3>
+<p>The turn state machine becomes: send → stream → on <code>tool_use</code>: <strong>checkpoint → approve (L2) → execute → tool_result → send again</strong>, until a stop-condition or budget. Abort already exists (<code>signal</code>). This loop converts fikra's safety design from per-turn to per-action enforcement — the original design intent, finally load-bearing.</p>
+
+<h2 id="conventions">5. Standard harness conventions</h2>
+<p>Fikra adopts the conventions users already know from current agent harnesses, instead of inventing parallels:</p>
+<table>
+<tr><th>Convention</th><th>Claude Code analog</th><th>fikra form</th></tr>
+<tr><td><code>AGENT.md</code></td><td><code>CLAUDE.md</code> (project memory, loaded every session)</td><td>Loaded by <code>context.tlisp</code> at thread start in the project root; overrides in <code>init.tlisp</code> per usual T-Lisp rules</td></tr>
+<tr><td><code>.fikra/skills/&lt;name&gt;/SKILL.md</code></td><td><code>.claude/skills/</code></td><td>Markdown skill files with YAML frontmatter (name, description, when-to-use); discovered at runtime, exposed to the model as available workflows, executable as T-Lisp <code>defworkflow</code> steps</td></tr>
+<tr><td><code>.fikra/settings.tlisp</code></td><td><code>settings.json</code> (allowlists, modes)</td><td>Per-project tool allowlists and default runtime mode (L1/L2) for the native tool system</td></tr>
+<tr><td>Slash commands</td><td><code>/skill</code></td><td>existing <code>defworkflow</code> + M-x discoverability (already in place)</td></tr>
+</table>
+<pre><code> project/
+   AGENT.md              # project memory, auto-loaded
+   .fikra/
+     settings.tlisp       # tool allowlist, runtime mode
+     skills/
+       review-pr/
+         SKILL.md         # frontmatter + instructions
+       fix-flaky/
+         SKILL.md</code></pre>
+
+<h2 id="advantages">6. What fikra would have that Claude Code doesn't</h2>
+<ul>
+  <li>The whole harness is user-rewritable in T-Lisp <em>while it runs</em>. Claude Code needs its own extension mechanisms; fikra <strong>is</strong> the environment.</li>
+  <li>Per-action git checkpoints with tree-diff revert of AI work.</li>
+  <li>Per-thread worktrees as the isolation unit.</li>
+  <li>A real editor as the tool surface — edits land in buffers the user is looking at.</li>
+</ul>
+
+<h2 id="phasing">7. Phasing</h2>
+<table>
+<tr><th>Phase</th><th>Scope</th><th>Definition of done</th></tr>
+<tr><td><strong>P1 — native loop MVP</strong></td><td>One HTTP backend (Ollama first) + three tools (buffer-read, buffer-edit, bash) + the agent loop + L2 gating each tool call. Wrapped-CLI backends keep working alongside.</td><td>A thread driven by the native backend edits a file and runs a command end-to-end, with a checkpoint and approval at each action.</td></tr>
+<tr><td><strong>P2 — context</strong></td><td><code>AGENT.md</code> loading, token budgeting/compaction, <code>@</code>-file references, todo tracking.</td><td>A thread answers questions grounded in <code>AGENT.md</code> without manual pasting.</td></tr>
+<tr><td><strong>P3 — skills + orchestration</strong></td><td><code>.fikra/skills/</code> discovery + exposure to the model; subagent = thread + spawn/join protocol; background threads.</td><td>A thread spawns a subagent thread and merges its result.</td></tr>
+<tr><td><strong>P4 — verification loop</strong></td><td>Workflow steps that run trt/tests and feed failures back automatically; budgeted retries.</td><td>A fix workflow runs the suite, reads the failure, and iterates to green unattended.</td></tr>
+<tr><td><strong>P5 — polish</strong></td><td>Ghost-text completion (<code>fikra-ghost</code>), the three specced backends (gemini/ollama/pi), headless turn API over the daemon.</td><td>Parity sweep against the capability map — rows 8–17 all green.</td></tr>
+</table>
+
+<h2 id="mockups">8. Screen mockups</h2>
+<p>High-fidelity mockups of the harness screens this RFC proposes, in tmax's real visual language (gutter, blue mode line, lighters). These are <strong>design proposals, not screenshots</strong> — existing surfaces (chat, capture, approvals, thread list) are drawn as they behave today where noted, and extended with the native-loop elements from §4.</p>
+
+<h3>8.1 Chat — the native agent loop at work <span class="figref">(P1; extends today's <code>*Fikra*</code> buffer)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — *Fikra* — thread: fix-scroll #3</span></div>
+  <div class="mock-body">
+    <div class="row"><div class="g">12</div><div class="c"><span class="who u">user    ›</span> <span class="txt">the status line lags one repaint on resize — find it and fix it</span></div></div>
+    <div class="row"><div class="g">13</div><div class="c"><span class="who">assistant ›</span> <span class="txt">I'll reproduce it first.</span></div></div>
+    <div class="row"><div class="g">14</div><div class="c"><span class="tool-hdr">⚙ bash</span> <span class="txt mut">rg -n "onResize" src/ | head -3</span></div></div>
+    <div class="row"><div class="g">15</div><div class="c"><span class="txt mut">  src/steep/screen.ts:41:  onResize(callback: () =&gt; void): () =&gt; void {</span></div></div>
+    <div class="row"><div class="g">16</div><div class="c"><span class="txt mut">  src/client/tui-client.ts:118:  process.stdout.on("resize", …)</span></div></div>
+    <div class="row"><div class="g">17</div><div class="c"><span class="tool-hdr">⚙ buffer-read</span> <span class="txt mut">src/client/tui-client.ts :112-124</span></div></div>
+    <div class="row"><div class="g">18</div><div class="c"><span class="tool-hdr">⚙ buffer-edit</span> <span class="txt mut">src/client/tui-client.ts @118</span> <span class="ok">[ckpt fikra/3/7 ✓]</span></div></div>
+    <div class="row"><div class="g">19</div><div class="c"><span class="del">-  process.stdout.on("resize", () =&gt; render(remote.getEditorState()));</span></div></div>
+    <div class="row"><div class="g">20</div><div class="c"><span class="add">+  process.stdout.on("resize", () =&gt; { render(remote.getEditorState());</span></div></div>
+    <div class="row"><div class="g">21</div><div class="c"><span class="add">+    remote.sendEvent("resize", { terminalSize: getDims() }); });</span></div></div>
+    <div class="row"><div class="g">22</div><div class="c"><span class="who">assistant ›</span> <span class="txt">Fixed — the resize handler re-rendered but never told the daemon, so the</span></div></div>
+    <div class="row"><div class="g">23</div><div class="c"><span class="txt">next poll overwrote the frame. Checkpoint </span><span class="ok">fikra/3/7</span><span class="txt"> holds the change; </span><span class="key">SPC a d</span><span class="txt"> to diff,</span></div></div>
+    <div class="row"><div class="g">24</div><div class="c"><span class="key">SPC a R</span><span class="txt"> to revert. Running the suite now.</span> <span class="txt mut">▊</span></div></div>
+    <div class="mline"><span>--FIKRA--</span><span class="mid">*Fikra*  ·  thread fix-scroll  ·  backend: ollama (qwen2.5-coder:32b)</span><span>T7 · 3 tools · L2</span></div>
+  </div>
+</div>
+<p class="figref">Tool calls render inline with their evidence; each mutating action lands a checkpoint ref before it runs (§4.3). The mode line carries thread, backend, turn count, and runtime mode.</p>
+
+<h3>8.2 Capture — composing a message <span class="figref">(exists today; shown for orientation)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — *Fikra-capture*</span></div>
+  <div class="mock-body">
+    <div class="row"><div class="g">1</div><div class="c"><span class="txt mut">⟩ To: thread fix-scroll (ollama)   Context: src/client/tui-client.ts @112-124</span></div></div>
+    <div class="row"><div class="g">2</div><div class="c"><span class="sep">──────────────────────────────────────────────────────────────────────</span></div></div>
+    <div class="row"><div class="g">3</div><div class="c"><span class="txt">also handle the tab-bar height change on resize —</span></div></div>
+    <div class="row"><div class="g cur">4</div><div class="c"><span class="cursor"> </span></div></div>
+    <div class="row"><div class="g">5</div><div class="c"><span class="sep">──────────────────────────────────────────────────────────────────────</span></div></div>
+    <div class="row"><div class="g"> </div><div class="c"><span class="key">C-c C-c</span> <span class="txt">send</span>   <span class="key">C-c C-k</span> <span class="txt">cancel</span>   <span class="key">M-p</span>/<span class="key">M-n</span> <span class="txt">history</span>   <span class="txt mut">3 msgs in history</span></div></div>
+    <div class="mline"><span>--INSERT--</span><span class="mid">*Fikra-capture*</span><span>L4 C1 [text] (Fikra)</span></div>
+  </div>
+</div>
+
+<h3>8.3 Approval — L2 gates a native tool call <span class="figref">(P1; the L2 machinery becomes per-action)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — *Fikra* — approval pending</span></div>
+  <div class="mock-body">
+    <div class="row"><div class="g">31</div><div class="c"><span class="who">assistant ›</span> <span class="txt">The suite passes. Now let me clean up the old flag —</span></div></div>
+    <div class="row"><div class="g">32</div><div class="c"><span class="tool-hdr">⚙ bash</span> <span class="txt">rm -rf src/client/.legacy-render/</span>  <span class="bad">[needs approval]</span></div></div>
+    <div class="popup">
+      <div class="ph">APPROVE ACTION — thread fix-scroll, turn 7</div>
+      <div><span class="txt mut">tool    </span><span class="txt">bash (destructive: rm -rf)</span></div>
+      <div><span class="txt mut">target  </span><span class="txt">src/client/.legacy-render/  (14 files, 3.1 MB)</span></div>
+      <div><span class="txt mut">ckpt    </span><span class="ok">fikra/3/7 ✓ — revert available after execution</span></div>
+      <div><span class="txt mut">origin  </span><span class="txt">frame fj-204 · provenance: model=fikra-loop ✓ (not prompt-forged)</span></div>
+      <div style="margin-top:0.4rem"><span class="key">a</span> <span class="txt">Allow</span>  <span class="key">r</span> <span class="txt">Reject</span>  <span class="key">A</span> <span class="txt">Always allow bash:rm in this thread</span>  <span class="key">C-g</span> <span class="txt">abort turn</span></div>
+    </div>
+    <div class="mline warn"><span>--FIKRA--</span><span class="mid">approval pending — loop paused</span><span>L2 · 1 queued</span></div>
+  </div>
+</div>
+<p class="figref">The provenance line is the L2 design made visible: approvals are checked at the service-primitive layer, so a forged request cannot show a ✓ here (§4.3, RFC-027 security model).</p>
+
+<h3>8.4 Turn diff + revert <span class="figref">(exists today as tree-diff; native turns deepen it)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — *Fikra-diff* — fikra/3/7 vs HEAD</span></div>
+  <div class="mock-body">
+    <div class="row"><div class="g">1</div><div class="c"><span class="txt mut">turn 7 · 2 files · +6 −2 · tools: buffer-edit ×2, bash ×1</span></div></div>
+    <div class="row"><div class="g">2</div><div class="c"><span class="ok">M src/client/tui-client.ts</span><span class="txt mut">   +5 −1</span></div></div>
+    <div class="row"><div class="g">3</div><div class="c"><span class="ok">A src/client/resize-sync.md</span><span class="txt mut">  +1 −0</span></div></div>
+    <div class="row"><div class="g">4</div><div class="c"><span class="sep">── src/client/tui-client.ts ────────────────────────────────────────</span></div></div>
+    <div class="row"><div class="g">5</div><div class="c"><span class="del">-  process.stdout.on("resize", () =&gt; render(remote.getEditorState()));</span></div></div>
+    <div class="row"><div class="g">6</div><div class="c"><span class="add">+  process.stdout.on("resize", () =&gt; {</span></div></div>
+    <div class="row"><div class="g">7</div><div class="c"><span class="add">+    render(remote.getEditorState());</span></div></div>
+    <div class="row"><div class="g">8</div><div class="c"><span class="add">+    void remote.sendEvent("resize", { terminalSize: getDims() });</span></div></div>
+    <div class="row"><div class="g">9</div><div class="c"><span class="add">+  });</span></div></div>
+    <div class="row"><div class="g"> </div><div class="c"><span class="key">SPC a R</span> <span class="txt">revert this turn</span>  <span class="key">SPC a p</span> <span class="txt">previous turn</span>  <span class="key">SPC a n</span> <span class="txt">next</span></div></div>
+    <div class="mline"><span>--NORMAL--</span><span class="mid">*Fikra-diff*  fikra/3/7</span><span>L9 C3 [help]</span></div>
+  </div>
+</div>
+
+<h3>8.5 Threads — projects, backends, worktrees <span class="figref">(exists today; worktree + native-backend columns are new)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — *Fikra-threads*</span></div>
+  <div class="mock-body">
+    <div class="row"><div class="g">1</div><div class="c"><span class="who sys">PROJECT tmax  ·  4 threads  ·  .tmax/worktrees: 2 active</span></div></div>
+    <div class="row"><div class="g">2</div><div class="c"><span class="ok">●</span> <span class="txt">fix-scroll      </span><span class="txt mut">ollama  T7  L2  worktree ✓  last: 2m ago</span></div></div>
+    <div class="row"><div class="g">3</div><div class="c"><span class="ok">●</span> <span class="txt">docs-rfc-029    </span><span class="txt mut">claude  T3  L1  main-tree    last: 18m ago</span></div></div>
+    <div class="row"><div class="g">4</div><div class="c"><span class="txt mut">○ refactor-gutter </span><span class="txt mut">codex   T12 done  worktree ✓  merged via patch ✓</span></div></div>
+    <div class="row"><div class="g">5</div><div class="c"><span class="txt mut">○ nightly-triage  </span><span class="txt mut">replay  T0  —   fixture     (deterministic test thread)</span></div></div>
+    <div class="row"><div class="g"> </div><div class="c"><span class="key">RET</span> <span class="txt">open</span>  <span class="key">t</span> <span class="txt">new</span>  <span class="key">b</span> <span class="txt">backend</span>  <span class="key">w</span> <span class="txt">worktree</span>  <span class="key">k</span> <span class="txt">kill</span></div></div>
+    <div class="mline"><span>--NORMAL--</span><span class="mid">*Fikra-threads*  tmax</span><span>L3 C1 [help] (Fikra)</span></div>
+  </div>
+</div>
+
+<h3>8.6 Worktree handoff — patch-apply-or-refuse <span class="figref">(exists today; the native loop's per-action diffs make conflicts rare)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — *Fikra-worktree* — refactor-gutter → main tree</span></div>
+  <div class="mock-body">
+    <div class="row"><div class="g">1</div><div class="c"><span class="txt mut">thread refactor-gutter finished in worktree .tmax/worktrees/refactor-gutter</span></div></div>
+    <div class="row"><div class="g">2</div><div class="c"><span class="txt">9 files · +214 −96 · 12 turns · all checkpoints retained</span></div></div>
+    <div class="row"><div class="g">3</div><div class="c"><span class="ok">✓ patch applies cleanly against main</span></div></div>
+    <div class="row"><div class="g">4</div><div class="c"><span class="txt mut">conflicts: none · files touched by others since fork: 2 (auto-merged)</span></div></div>
+    <div class="row"><div class="g"> </div><div class="c"><span class="key">a</span> <span class="txt">apply patch</span>  <span class="key">d</span> <span class="txt">review diff first</span>  <span class="key">r</span> <span class="txt">refuse + keep worktree</span></div></div>
+    <div class="mline dim"><span>--NORMAL--</span><span class="mid">*Fikra-worktree*</span><span>[help] (Fikra)</span></div>
+  </div>
+</div>
+
+<h3>8.7 Skills — <code>.fikra/skills/</code> surfaced to model and user <span class="figref">(P3)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — *Fikra* — M-x fikra-skill</span></div>
+  <div class="mock-body">
+    <div class="cand"><span>fikra-skill review-pr</span><span class="k">.fikra/skills/review-pr · model-visible</span></div>
+    <div class="cand"><span>fikra-skill fix-flaky</span><span class="k">.fikra/skills/fix-flaky · model-visible</span></div>
+    <div class="cand"><span>defworkflow nightly-triage</span><span class="k">init.tlisp · T-Lisp program</span></div>
+    <div class="cand"><span>fikra-skill release-notes</span><span class="k">.fikra/skills/release-notes · user-only</span></div>
+    <div class="row"><div class="g"> </div><div class="c"><span class="txt mut">M-x fikra-skill re</span> <span class="txt mut">2/4</span></div></div>
+    <div class="mline"><span>--M-X--</span><span class="mid">*Fikra*</span><span>[text] (Fikra)</span></div>
+  </div>
+</div>
+<p class="figref">Skills from <code>.fikra/skills/*/SKILL.md</code> are discovered at runtime, listed with their visibility (fed to the model as available workflows vs. user-invoked only), and coexist with pure T-Lisp <code>defworkflow</code>s — the composition question is §9 Q3.</p>
+
+<h3>8.8 Ghost text — inline completion <span class="figref">(P5; the specced-but-unbuilt fikra-ghost)</span></h3>
+<div class="mock">
+  <div class="mock-title"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">tmax — src/cli/launcher.ts</span></div>
+  <div class="mock-body">
+    <div class="row"><div class="g">141</div><div class="c"><span class="txt mut">/** Wait for the daemon socket to answer; clear a stale (dead-pid) lock</span></div></div>
+    <div class="row"><div class="g">142</div><div class="c"><span class="txt">  * racing start can retry.</span><span class="txt mut"> 100 × 50ms (5s budget</span><span style="color:#7ee787;background:rgba(63,185,80,0.08)">; 50ms poll</span></div></div>
+    <div class="row"><div class="g cur">143</div><div class="c"><span class="cursor"> </span><span style="color:#7ee787;background:rgba(63,185,80,0.08)">   * — the bash launcher's 200ms added dead time before spawn.)</span></div></div>
+    <div class="row"><div class="g"> </div><div class="c"><span class="txt mut">TAB accept · C-n partial · Esc dismiss · ollama (local, 40ms)</span></div></div>
+    <div class="mline"><span>--NORMAL--</span><span class="mid">launcher.ts</span><span>L143 C2 [ts] (Fikra Indent)</span></div>
+  </div>
+</div>
+
+<h2 id="open">9. Open questions</h2>
+<ol>
+  <li><strong>Streaming transport</strong>: <code>http-request</code> today is request/response. Token streaming needs either a chunked/SSE-capable primitive or a buffered non-streaming loop first. Which for P1?</li>
+  <li><strong>Tool schema format</strong>: mirror the major-provider JSON tool schema verbatim, or a T-Lisp-native description normalized at the adapter boundary?</li>
+  <li><strong>Skills execution</strong>: SKILL.md bodies are prompts for the model; <code>defworkflow</code>s are T-Lisp programs. One mechanism or two, and how do they compose?</li>
+  <li><strong>Concurrency model</strong>: does the agent loop run on the daemon's editor thread (simple, blocks no one?) or per-thread processes (matches the worktree isolation)?</li>
+  <li><strong>L2 degradation</strong>: with native tools, approvals no longer depend on the CLI's <code>--permission-prompt-tool</code> — does L2 become the <em>default</em> runtime mode?</li>
+</ol>
+
+<div class="callout">
+  <strong>Provenance note:</strong> capability claims about fikra verified against the source (<code>src/tlisp/core/fikra/</code>, 19 modules, ~4,000 lines) on 2026-11-17. Claude Code capability claims are from its public feature set; Pi from the design notes referenced in RFC-013.
+</div>
+
+</body>
+</html>

@@ -118,6 +118,8 @@ export interface EditorModel {
   readonly highlightSpans?: readonly (readonly HighlightSpan[])[];
   /** #231: transient vim-goggles flash spans (inverse style, TTL-cleared). */
   readonly flashSpans?: readonly (readonly HighlightSpan[])[];
+  /** RFC-029 §8.8: the dim inline completion (single line). */
+  readonly ghostText?: string;
   /** Current search match ranges (immutable array). */
   readonly searchMatches?: readonly Range[];
   /** Collapsed fold ranges keyed by start line (immutable map). */
@@ -243,6 +245,7 @@ export function modelToEditorState(model: EditorModel): EditorState {
     currentTabIndex: model.currentTabIndex,
     highlightSpans: model.highlightSpans ? model.highlightSpans.map(spans => [...spans]) : undefined,
     flashSpans: model.flashSpans ? model.flashSpans.map(spans => [...spans]) : undefined,
+    ghostText: model.ghostText,
     searchMatches: model.searchMatches ? [...model.searchMatches] : undefined,
     currentMajorMode: model.currentMajorMode,
     activeMinorModes: model.activeMinorModes ? [...model.activeMinorModes] : undefined,

@@ -250,7 +250,9 @@ Requires a running tmax daemon. Start one with:
         // value-shape compare, not presence (two yy within one poll window
         // otherwise drops the second flash; verify-gate retry 2). Flash
         // arrays are tiny, so JSON compare is cheap.
-        JSON.stringify(current.flashSpans) !== JSON.stringify(lastState.flashSpans);
+        JSON.stringify(current.flashSpans) !== JSON.stringify(lastState.flashSpans) ||
+        // §8.8: ghost onset/clear/supersede re-renders.
+        current.ghostText !== lastState.ghostText;
       if (changed) {
         lastPollRevision = rev;
         lastState = current;

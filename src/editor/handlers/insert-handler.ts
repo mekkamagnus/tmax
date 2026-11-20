@@ -84,6 +84,9 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
     // (minor modes) apply. With both off, insert-char is a plain buffer-insert,
     // so default insert behavior is unchanged.
     editor.executeCommand(`(insert-char "${escapedKey}")`);
+    // §8.8: offer a ghost completion after the char lands (the source
+    // decides; async — require-module needs the async loader).
+    try { await editor.executeCommandAsync("(condition-case nil (progn (require-module \"fikra/ghost\") (fikra/ghost/fikra-ghost-maybe-trigger)) (error () nil))"); } catch (_) { /* optional */ }
   }
   // Handle Enter key in insert mode with proper escaping
   else if (normalizedKey === "Enter") {
@@ -109,6 +112,15 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
     // When snippet-mode is NOT active → normal insert-tab.
     let tabHandled = false;
     try {
+      // RFC-029 §8.8: an ACTIVE ghost accepts on Tab before snippet mode.
+      const ghostActive = isTruthyResult(editor.executeCommand("(condition-case nil (progn (require-module \"fikra/ghost\") (fikra/ghost/fikra-ghost-active-p)) (error () nil))"));
+      if (ghostActive) {
+        editor.executeCommand("(fikra/ghost/fikra-ghost-accept)");
+        tabHandled = true;
+      }
+    } catch (_) { /* ghost not loaded — fall through */ }
+    if (!tabHandled) {
+    try {
       const isSnippetMode = isTruthyResult(editor.executeCommand("(minor-mode-active-p \"snippet\")"));
       if (isSnippetMode) {
         const fieldActive = isTruthyResult(editor.executeCommand("(snippet-field-active-p)"));
@@ -124,9 +136,12 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
     if (!tabHandled) {
       editor.executeCommand("(insert-tab)");
     }
+    }
   }
   // Handle Escape key to return to normal mode
   else if (normalizedKey === "Escape") {
+    // §8.8: dismiss any active ghost before leaving insert mode.
+    try { editor.executeCommand("(ghost-text-clear)"); } catch (_) { /* not loaded */ }
     // SPEC-067: record last insert position as the "^" mark for `gi`.
     // Done before SetMode while the cursor is still at the insert point.
     // Wrapped so a recording failure can never break the return to normal.
@@ -184,6 +199,12 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
         // Execute the mapped command
         try {
           editor.executeCommand(mapping.command);
+          // §8.8: after a printable insert, offer a ghost completion (the
+          // source decides; no-op when the ghost module or source is off).
+          // ASYNC like the chain path — require-module needs the async file
+          // loader (a sync exec failed the load and the condition-case
+          // swallowed it; the ghost never fired live).
+          try { await editor.executeCommandAsync("(condition-case nil (progn (require-module \"fikra/ghost\") (fikra/ghost/fikra-ghost-maybe-trigger)) (error () nil))"); } catch (_) { /* optional */ }
         } catch (error) {
           if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
             throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
