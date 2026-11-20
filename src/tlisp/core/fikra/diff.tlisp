@@ -1,6 +1,7 @@
 (defmodule fikra/diff
   (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn
           fikra-diff-restore-turn fikra-changed-paths-since-baseline
+          fikra-diff-for-paths
           fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
           fikra-revert-confirm-table fikra-revert-confirm-accept
           fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed fikra-last-completed-turn fikra-turn-diff-for)
@@ -470,13 +471,24 @@ ambiguity)."
 
 ;; The restore mechanism, separate from the confirmation gate (the gate is
 ;; read-string — interactive-only; the restore is testable/demoable).
+;; #305 B: the rm branch fires ONLY for untracked files ABSENT from the
+;; turn-begin baseline signature (turn-CREATED). An untracked file that
+;; existed BEFORE the turn is PREEXISTING — untouched (the issue's
+;; normative edge; file-kind alone could not distinguish them).
 (defun fikra-diff-restore-turn (paths)
   (let ((dir (fikra/thread/fikra-thread-working-dir))
-        (tree (fikra-baseline-tree)))
+        (tree (fikra-baseline-tree))
+        (baseline (condition-case nil (fikra/thread/fikra-thread-field "change-baseline") (error () nil))))
     (dolist (p paths)
       (if (string= (fikra-file-kind dir p) "tracked")
+        ;; Tracked (incl. tracked-dirty): restore the BASELINE TREE's
+        ;; content — the pre-turn state, byte-exact (NOT HEAD).
         (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " checkout " tree " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
-        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p))))))))
+        ;; Untracked: in the baseline signature → preexisting, UNTOUCHED;
+        ;; absent → turn-created, removed.
+        (if (and baseline (hashmap-get baseline p))
+          nil
+          (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p)))))))))
 
 ;; Paths changed since the stored baseline — the DRY computation shared
 ;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).
@@ -512,9 +524,18 @@ ambiguity)."
     (if (> (length tracked) 0)
       (setq out (concat out (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " diff " tree " --color=always -- "
                                                   (fikra-join-args (reverse tracked)) " 2>/dev/null")))))
+    ;; #305: untracked files render as NEW-FILE PATCHES (git's own
+    ;; --no-index /dev/null form — empty → header only, binary → the
+    ;; Binary-files line, odd names safe by argv construction), NOT
+    ;; full-content blobs.
     (dolist (p (reverse untracked))
-      (setq out (concat out "\n+++ new file: " p "\n"
-                        (shell-command (concat "cat " (fikra/thread/fikra-thread-shq (concat dir "/" p)) " 2>/dev/null")) "\n")))
+      (setq out (concat out
+                        (shell-command
+                          (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                                  " diff --no-color --no-index -- /dev/null "
+                                  (fikra/thread/fikra-thread-shq p)
+                                  " 2>/dev/null || true"))
+                        "\n")))
     out))
 
 (defun fikra-file-kind (dir path)
