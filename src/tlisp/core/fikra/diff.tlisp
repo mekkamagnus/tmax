@@ -249,39 +249,84 @@ ambiguity)."
   (let* ((id (fikra/thread/fikra-thread-current))
          (root (fikra/thread/fikra-thread-working-dir))
          (base (concat "refs/fikra/" id "/" (number-to-string n) "-baseline"))
+         (completion (concat "refs/fikra/" id "/" (number-to-string n)))
          (paths (fikra-diff-completed-paths root id n))
-         (failures (list)))
+         (failures (list))
+         (diverged (list)))
     (if (or (null paths) (= (length paths) 0))
       (editor-set-status (concat "Fikra: turn " (number-to-string n) " has no captured changes"))
       (progn
+        ;; SPEC-218: save divergent content BEFORE any restore runs.
+        (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
+                         (concat root "/.tmax/fikra/stash"))))
+        (shell-command
+          (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                  " diff --binary " completion " -- "
+                  (fikra-join-args paths)
+                  " > " (fikra/thread/fikra-thread-shq
+                          (concat root "/.tmax/fikra/stash/revert-" id "-" (number-to-string n) ".patch"))
+                  " 2>/dev/null || true"))
         (dolist (p paths)
-          (let ((step (fikra-diff-restore-one root base p)))
-            (if (not (string= step "ok"))
-              (setq failures (cons p failures)))))
-        (if (> (length failures) 0)
-          (editor-set-status (concat "Fikra: revert FAILED for: "
-                                     (fikra-diff-join-names (reverse failures) "")))
-          (editor-set-status (concat "Fikra: reverted turn " (number-to-string n)
-                                     " (baseline restored) — SPC a d refreshes")))))))
+          (let ((step (fikra-diff-restore-one root base completion p)))
+            (cond
+              ((string= step "ok") nil)
+              ((string-prefix-p "DIV:" step)
+                (setq diverged (cons (substring step 4 (length step)) diverged)))
+              (t (setq failures (cons p failures))))))
+        (if (> (length diverged) 0)
+          (editor-set-status
+            (concat "Fikra: revert REFUSED — changed since the turn: "
+                    (fikra-diff-join-names (reverse diverged) "")
+                    " (saved to .tmax/fikra/stash/revert-" id "-" (number-to-string n) ".patch)"))
+          (if (> (length failures) 0)
+            (editor-set-status (concat "Fikra: revert FAILED for: "
+                                       (fikra-diff-join-names (reverse failures) "")))
+            (editor-set-status (concat "Fikra: reverted turn " (number-to-string n)
+                                       " (baseline restored) — SPC a d refreshes"))))))))
 
-;; One path: "ok" or the failing path.
-(defun fikra-diff-restore-one (root base p)
+;; One path. Outcomes: "ok"; "DIV:<path>" (content diverged since the
+;; turn — SPEC-218's guard: the current content must match the turn's
+;; COMPLETION version, else the path is refused, never overwritten);
+;; else the failing path. Divergent content is saved to
+;; .tmax/fikra/stash/revert-<n>.patch before any restore runs.
+(defun fikra-diff-restore-one (root base completion p)
   (let ((in-base (string= (string-trim (shell-command
                (concat "git -C " (fikra/thread/fikra-thread-shq root)
                        " cat-file -e " base ":" (fikra/thread/fikra-thread-shq p)
-                       " 2>/dev/null && echo yes || echo no"))) "yes")))
-    (if in-base
-      (if (string-match "RESTORE-OK"
-            (string-trim (shell-command
-              (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                      " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
-                      " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
-        "ok" p)
-      (if (string-match "REMOVE-OK"
-            (string-trim (shell-command
-              (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p))
-                      " 2>&1 && echo REMOVE-OK || echo REMOVE-FAIL"))))
-        "ok" p))))
+                       " 2>/dev/null && echo yes || echo no"))) "yes"))
+        (in-completion (string= (string-trim (shell-command
+               (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                       " cat-file -e " completion ":" (fikra/thread/fikra-thread-shq p)
+                       " 2>/dev/null && echo yes || echo no"))) "yes"))
+        (same-as-completion (string= (string-trim (shell-command
+               (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                       " diff --quiet " completion " -- " (fikra/thread/fikra-thread-shq p)
+                       " 2>/dev/null && echo same || echo diff"))) "same")))
+    (if (not same-as-completion)
+      (concat "DIV:" p)
+      (if in-base
+        (if in-completion
+          ;; M: restore from the baseline (guard proved no later edits).
+          (if (string-match "RESTORE-OK"
+                (string-trim (shell-command
+                  (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                          " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
+                          " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
+            "ok" p)
+          ;; In base, not in completion: the turn DELETED it — restore.
+          (if (string-match "RESTORE-OK"
+                (string-trim (shell-command
+                  (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                          " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
+                          " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
+            "ok" p))
+        ;; Not in base: the turn ADDED it — the guard (same-as-completion)
+        ;; proved the disk still matches the completion, so remove is safe.
+        (if (string-match "REMOVE-OK"
+              (string-trim (shell-command
+                (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p))
+                        " 2>&1 && echo REMOVE-OK || echo REMOVE-FAIL"))))
+          "ok" p)))))
 
 (defun fikra-diff-join-names (items acc)
   (if (null items)

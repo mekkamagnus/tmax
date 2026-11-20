@@ -76,20 +76,23 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     ref("nav", 2, "completion", "line1\nfeature-a\nfeature-b\n");
     e(ed, '(require-module "fikra/diff")');
     e(ed, "(fikra/diff/fikra-diff-turn-step -1)"); // view turn 1
-    // r49: the confirm gate arms; the ACCEPT owns the work (the
-    // modes-test pattern — the picker itself needs a live minibuffer).
+    // r50/SPEC-218: turn 2 also touched app.txt — the content diverged
+    // from turn 1's completion, so the revert REFUSES (no overwrite of
+    // later work) and stashes the divergent content.
     e(ed, "(fikra/diff/fikra-diff-revert-turn)");
     e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
-    // Turn 1's changes restored to ITS baseline: feature-a gone...
-    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).not.toContain("feature-a");
-    // ...while turn 2's content (still on disk via ref checkout) may remain —
-    // the ASSERTION is the viewed-turn targeting: reverting from the turn-1
-    // view must checkout refs/fikra/nav/1-baseline's app.txt ("line1\n").
-    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\n");
+    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\nfeature-a\nfeature-b\n");
+    expect(existsSync(join(repoDir, ".tmax/fikra/stash/revert-nav-1.patch"))).toBe(true);
     // The cancel path leaves everything untouched.
     e(ed, "(fikra/diff/fikra-diff-revert-completed 2)");
     e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "cancel")');
-    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\n");
+    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\nfeature-a\nfeature-b\n");
+    // The LATEST turn's content matches its completion: reverting turn 2
+    // (the current view after cancel is still 1; arm via exec directly)
+    // restores turn 2's baseline == turn 1's completion.
+    e(ed, "(fikra/diff/fikra-diff-revert-completed 2)");
+    e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
+    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\nfeature-a\n");
   });
 
   test("reverting a turn that ADDED a file removes it (no baseline version)", async () => {
@@ -111,5 +114,26 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
     expect(existsSync(join(repoDir, "new-file.txt"))).toBe(false);
     expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\n");
+  });
+
+  test("a path EDITED after the turn is refused, not overwritten (SPEC-218 guard)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    ref("nav", 1, "baseline", "line1\n");
+    ref("nav", 1, "completion", "line1\nfeature-a\n");
+    // The user edits the file AFTER the turn: content no longer matches
+    // the completion ref -> the guard must refuse.
+    writeFileSync(join(repoDir, "app.txt"), "line1\nfeature-a\nLATER-EDIT\n");
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-diff-revert-completed 1)");
+    e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
+    // The later edit survives untouched.
+    expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\nfeature-a\nLATER-EDIT\n");
+    // The divergent content was stashed for manual re-application.
+    expect(existsSync(join(repoDir, ".tmax/fikra/stash/revert-nav-1.patch"))).toBe(true);
   });
 });
