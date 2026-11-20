@@ -118,6 +118,8 @@ describe("#8.1 inline ckpt marker (r63)", () => {
   test("a checkpoint following a tool-call renders INLINE on that row", async () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-init)');
     e(ed, '(defvar r63-evs nil)');
     e(ed, '(setq r63-evs (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 3) (list "backend" "replay") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "id" "ab12") (list "summary" "src/x.ts @118")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/3"))) (list) nil))');
     expect(String(e(ed, "(length r63-evs)").value)).toBe("2"); // ts + merged Edit
@@ -130,6 +132,8 @@ describe("#8.1 inline ckpt marker (r63)", () => {
   test("a checkpoint NOT following a tool-call keeps its standalone row", async () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-init)');
     e(ed, '(defvar r63-evs2 nil)');
     e(ed, '(setq r63-evs2 (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "text-delta") (list "speaker" "user") (list "text" "hi")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/2"))) (list) nil))');
     expect(String(e(ed, "(length r63-evs2)").value)).toBe("2");
@@ -140,6 +144,8 @@ describe("#8.1 inline ckpt marker (r63)", () => {
   test("edit-only + turn-bounded association (r63: reads/shell never carry it; a new turn resets)", async () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-init)');
     // A bash call + result + checkpoint: STANDALONE (not an edit tool).
     e(ed, '(defvar r64-a nil)');
     e(ed, '(setq r64-a (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "bash") (list "id" "cd34") (list "summary" "make test")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "cd34") (list "summary" "pass")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4"))) (list) nil))');
@@ -162,6 +168,8 @@ describe("#8.1 inline ckpt marker (r63)", () => {
   test("Edit→bash→checkpoint: the marker does NOT reach past the shell (r64)", async () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-init)');
     e(ed, '(defvar r65-a nil)');
     e(ed, '(setq r65-a (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "ee1") (list "summary" "src/a.ts @3")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "ee1") (list "summary" "done")) (list (list "kind" "tool-call") (list "tool" "bash") (list "id" "bb1") (list "summary" "make check")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/6"))) (list) nil))');
     // 4 events in, standalone kept (the shell is the nearer action) = 4 out.
@@ -176,6 +184,8 @@ describe("#8.1 inline ckpt marker (r63)", () => {
   test("the PRODUCTION order: baseline checkpoint-ready AFTER turn-start stays in its own turn (r64)", async () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-init)');
     // turn 1 has an Edit; turn 2's turn-start PRECEDES its baseline
     // checkpoint (the old emit order put the checkpoint first — the
     // baseline could attach to turn 1's Edit).
@@ -193,6 +203,8 @@ describe("#8.1 inline ckpt marker (r63)", () => {
   test("IDENTITY association: turn-1's checkpoint never attaches to turn-2's Edit (r66 counterexample)", async () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-init)');
     // The exact sequence: ts1 → Edit → ts2 → Edit → checkpoint(main/1).
     e(ed, '(defvar r66-a nil)');
     e(ed, '(setq r66-a (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e1") (list "summary" "a.ts @1")) (list (list "kind" "turn-start") (list "turn" 2) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e2") (list "summary" "a.ts @9")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/1"))) (list) nil))');
@@ -205,5 +217,22 @@ describe("#8.1 inline ckpt marker (r63)", () => {
     e(ed, '(defvar r66-b nil)');
     e(ed, '(setq r66-b (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e1") (list "summary" "a.ts @1")) (list (list "kind" "turn-start") (list "turn" 2) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e2") (list "summary" "a.ts @9")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/2"))) (list) nil))');
     expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 3 r66-b))").value)).toContain("[ckpt main/2 ✓]");
+  });
+
+  test("r68 hardenings: malformed refs and missing identities never attach", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/event")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-init)');
+    // A malformed ref (bogus/...): nil identity → standalone.
+    e(ed, '(defvar r68-a nil)');
+    e(ed, '(setq r68-a (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 2) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "z1") (list "summary" "a.ts @1")) (list (list "kind" "checkpoint-ready") (list "ref" "bogus/main/2"))) (list) nil))');
+    expect(String(e(ed, "(length r68-a)").value)).toBe("3");
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r68-a))").value)).not.toContain("[ckpt");
+    // No turn-start (no event identity): refuse even on a well-formed ref.
+    e(ed, '(defvar r68-b nil)');
+    e(ed, '(setq r68-b (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "z2") (list "summary" "a.ts @2")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/2"))) (list) nil))');
+    expect(String(e(ed, "(length r68-b)").value)).toBe("2");
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r68-b))").value)).not.toContain("[ckpt");
   });
 });

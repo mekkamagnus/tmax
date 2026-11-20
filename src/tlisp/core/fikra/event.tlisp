@@ -680,19 +680,22 @@ text-deltas inside the batch join into the same line."
 
 ;; "<thread>/<turn>" for the event at OUT index I: the current thread +
 ;; its turn-start's number (nil when no turn-start precedes).
+;; NO substitution (r68): a missing thread id or turn is a MISSING
+;; identity — the merge refuses the attach ("main" here would let a
+;; main/N checkpoint attach to an unidentified event).
 (defun fikra-inline-event-identity (out i)
   (if (>= i (length out))
     nil
     (let ((ev (nth i out)))
       (if (string= (fikra-event-get-str ev "kind") "turn-start")
-        (let ((tn (fikra-event-get ev "turn")))
-          (if tn
-            (concat (condition-case nil
+        (let* ((tn (fikra-event-get ev "turn"))
+               (tid (condition-case nil
                         (progn (require-module fikra/thread)
-                               (let ((tid (fikra/thread/fikra-thread-current)))
-                                 (if (and tid (> (length tid) 0)) tid "main")))
-                        (error () "main")) "/"
-                    (number-to-string tn))
+                               (let ((t0 (fikra/thread/fikra-thread-current)))
+                                 (if (and t0 (> (length t0) 0)) t0 nil)))
+                        (error () nil))))
+          (if (and tn tid)
+            (concat tid "/" (number-to-string tn))
             nil))
         (fikra-inline-event-identity out (+ i 1))))))
 
