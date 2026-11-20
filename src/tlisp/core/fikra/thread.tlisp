@@ -648,6 +648,20 @@ turn's init event); persisted on save."
       (error (concat "fikra: illegal thread transition " from " → " new-status))
       (progn
         (editor/keymaps/keymap-mutable-set! (fikra-thread-state) "status" new-status)
+        ;; #318: notify the transient layer on the display-relevant
+        ;; edges (running starts the interval; terminal stops it when
+        ;; no thread runs). Lazy require (thread→transient has no cycle
+        ;; but keep the convention).
+        (condition-case nil
+          (progn
+            (require-module fikra/transient)
+            (if (string= new-status "running")
+              (fikra/transient/fikra-transient-note-running (fikra-thread-current)))
+            (if (or (string= new-status "idle")
+                    (string= new-status "error")
+                    (string= new-status "interrupted"))
+              (fikra/transient/fikra-transient-note-terminal (fikra-thread-current))))
+          (error () nil))
         (fikra-thread-save)
         new-status))))
 

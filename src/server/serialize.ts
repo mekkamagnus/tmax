@@ -169,6 +169,10 @@ export function editorStateToJson(
     visibleLines,
     totalLines,
     bufferRevision: Date.now(),
+    // #318: the TRANSIENT revision rides the same poll response — the
+    // client compares BOTH counters independently (render on EITHER
+    // change; transient 5→6 renders while buffer-rev stays 100).
+    transientRevision: (state as unknown as { transientRevision?: number }).transientRevision,
     // #201 (BUG-84): shell-mode's PTY screen + cursor ride the wire so the
     // TUI renders terminal mode from the daemon's TerminalManager.
     terminalLines: (state as unknown as { terminalLines?: string[] }).terminalLines,

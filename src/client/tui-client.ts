@@ -239,8 +239,12 @@ Requires a running tmax daemon. Start one with:
     try {
       const current = await remote.refreshState();
       const rev = remote.lastBufferRevision;
+      // #318: BOTH counters compared independently — a transient bump
+      // (5→6) renders while the buffer revision stays put.
+      const trev = remote.lastTransientRevision;
       const changed =
         rev !== lastPollRevision ||
+        trev !== lastTransientRevision ||
         current.mode !== lastState.mode ||
         current.viewportTop !== lastState.viewportTop ||
         current.statusMessage !== lastState.statusMessage ||
@@ -255,6 +259,7 @@ Requires a running tmax daemon. Start one with:
         current.ghostText !== lastState.ghostText;
       if (changed) {
         lastPollRevision = rev;
+        lastTransientRevision = trev;
         lastState = current;
         render(current);
         await remote.sendEvent("render", { terminalSize: getDims() });
@@ -270,6 +275,7 @@ Requires a running tmax daemon. Start one with:
     }
   }, 200);
 
+  let lastTransientRevision = -1; // #318: the transient counter pair member
   let pendingInput = "";
 
   process.stdin.on("data", async (chunk: string) => {

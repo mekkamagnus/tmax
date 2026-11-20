@@ -165,6 +165,8 @@ editor-set-command-line
 editor-set-mode
 editor-set-status
 editor-status
+editor-transient-timer-start
+editor-transient-timer-stop
 enable-local-variables-p
 file-copy
 file-exists-p

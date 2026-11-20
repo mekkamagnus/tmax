@@ -69,7 +69,18 @@ export function createFramesHandlers(ctx: ServerContext): {
   clients: () => Promise<ClientsResult>;
   frames: () => Promise<FramesResult>;
 } {
-  // ── render-state (READ-ONLY: AC5.3 — never syncs) ───────────────────────
+  // #318: stamp the transient revision (same helper as the keypress path).
+function withTransientRevision<T extends object>(state: T): T {
+  try {
+    const r = (ctx.editor as unknown as { interpreter?: { execute: (s: string) => unknown } }).interpreter
+      ?.execute("(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-revision)) (error () 0))");
+    const v = r && typeof r === "object" && "value" in (r as object) ? (r as { value: unknown }).value : r;
+    if (typeof v === "number") (state as { transientRevision?: number }).transientRevision = v;
+  } catch { /* transient layer absent — no revision */ }
+  return state;
+}
+
+// ── render-state (READ-ONLY: AC5.3 — never syncs) ───────────────────────
   const renderState = async (params: RenderStateParams): Promise<RenderStateResult> => {
     if (params?.frameId) {
       const frame = ctx.getFrame(params.frameId);

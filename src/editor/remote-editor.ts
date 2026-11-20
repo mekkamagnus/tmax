@@ -22,6 +22,10 @@ export class RemoteEditor {
   /** Last `bufferRevision` seen from the daemon (issue #46). The TUI's 200ms
    *  poll diffs this instead of `JSON.stringify`-ing the whole state — O(1). */
   private _lastBufferRevision = 0;
+  /** #318: last `transientRevision` (the display-layer counter) — the
+   *  caller compares BOTH counters independently; a render fires when
+   *  EITHER changes. */
+  private _lastTransientRevision = -1;
   private _frameId: string | null = null;
   private _clientId: string | null = null;
   private workspaceId?: string;
@@ -35,6 +39,11 @@ export class RemoteEditor {
    *  signal for the TUI poll loop. */
   get lastBufferRevision(): number {
     return this._lastBufferRevision;
+  }
+
+  /** #318: the transient (display-layer) revision — O(1) pair member. */
+  get lastTransientRevision(): number {
+    return this._lastTransientRevision;
   }
 
   async start(): Promise<void> {
@@ -107,6 +116,8 @@ export class RemoteEditor {
     this.cachedState = jsonToEditorState(stateJson);
     const rev = stateJson.bufferRevision;
     this._lastBufferRevision = typeof rev === "number" ? rev : this._lastBufferRevision;
+    const trev = (stateJson as { transientRevision?: unknown }).transientRevision;
+    this._lastTransientRevision = typeof trev === "number" ? trev : this._lastTransientRevision;
   }
 
   updateTerminalSize(_width: number, _height: number): void {

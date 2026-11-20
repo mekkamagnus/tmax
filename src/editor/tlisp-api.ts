@@ -141,11 +141,31 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       name: "tmax-runtime",
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         const ops = new Map<string, TLispFunctionImpl>();
+        // #318: the transient-timer interval lives in the FACTORY CLOSURE
+        // (one per editor API instance — the factory runs per editor).
+        let transientTimer: ReturnType<typeof setInterval> | undefined;
         // (client-launch-dir) — #298: the connected client's launch
         // directory (nil for embedded editors with no client). The daemon's
         // connect-frame handler records it; fikra threads resolve their
         // project root from the CLIENT'S working context, never the daemon
         // cwd.
+        // #318: the transient-timer shell — a RAW timing primitive (start/
+        // stop an interval; the tick body is T-Lisp's fikra-transient-tick
+        // — the logic lives in T-Lisp, the timing in TS). 200ms cadence.
+        ops.set("editor-transient-timer-start", (): Either<AppError, TLispValue> => {
+          const tickExpr = "(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-tick)) (error () nil))";
+          ctx.evalTlisp?.(tickExpr); // prime the module in THIS session
+          if (transientTimer) return Either.right(createNil()); // already running
+          transientTimer = setInterval(() => { ctx.evalTlisp?.(tickExpr); }, 200);
+          return Either.right(createNil());
+        });
+        ops.set("editor-transient-timer-stop", (): Either<AppError, TLispValue> => {
+          if (transientTimer) {
+            clearInterval(transientTimer);
+            transientTimer = undefined;
+          }
+          return Either.right(createNil());
+        });
         ops.set("client-launch-dir", (): Either<AppError, TLispValue> => {
           const dir = ctx.getClientLaunchDir?.();
           return Either.right(dir ? createString(dir) : createNil());
