@@ -5,3 +5,4 @@
 {"event":"telemetry","ts":"2026-11-20T10:36:51Z","wall-minutes":null,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null,"note":"continuation context; footer unreadable — honest nulls"}
 {"event":"gate","ts":"2026-11-20T11:00:13Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"74bf007","findings-count":4}
 {"event":"gate","ts":"2026-11-20T11:37:54Z","kind":"codex-grade","verdict":"5/10","rounds":1,"reviewed-sha":"5a6f627","findings-count":3}
+{"event":"gate","ts":"2026-11-20T11:43:19Z","kind":"codex-grade","verdict":"7/10","rounds":2,"reviewed-sha":"2280c65","findings-count":2}
