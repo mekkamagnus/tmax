@@ -4,7 +4,7 @@
  * is composed declaratively through {@link registerContributions}:
  *
  * - AC7.1: the live `createEditorAPI()` inventory exactly equals the checked-in
- *   baseline (419 names — regenerated when features intentionally add APIs;
+ *   baseline (424 names — regenerated when features intentionally add APIs;
  *   asserted by `chore44-baseline-inventory` separately; here we assert count +
  *   a deterministic superset directly). A checked-in snapshot forces every API
  *   addition to surface as a reviewed diff in `api-names-static.txt`.
@@ -36,7 +36,7 @@ import type { EditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 describe("CHORE-44 Change 7 — editor API registry", () => {
   // ── AC7.1: live inventory matches the checked-in baseline ────────────
-  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (419 names)", () => {
+  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (424 names)", () => {
     const baselinePath = join(import.meta.dir, "..", "..", ".chore44-baseline", "api-names-static.txt");
     const expected = readFileSync(baselinePath, "utf8")
       .split("\n")
@@ -46,8 +46,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     const live = Array.from(createEditorAPI(createTestAPIContext()).keys()).sort();
     // #198: 419 → 421 — the #220 confirmation ops (resolver-kind +
     // set-resolve-policy) plus this cycle's regeneration.
-    // #231: 421 → 422 — the flash-region goggles primitive.
-    expect(live.length).toBe(422);
+    // #231: 421 → 424 — the flash-region goggles primitive.
+    expect(live.length).toBe(424);
     expect(live).toEqual(expected);
   });
 

@@ -26,6 +26,7 @@ auto-mode-list
 browse-doc-reference
 browse-git-github-remote
 buffer-append
+buffer-append-to
 buffer-bury
 buffer-count
 buffer-create
@@ -169,6 +170,7 @@ file-exists-p
 file-glob
 file-mkdir
 file-modtime
+file-realpath
 file-remove
 file-rename
 file-stat

@@ -78,7 +78,8 @@ describe("CHORE-44 Change 11 — Markdown module boundaries", () => {
     // #229: refrozen 2026-08-28 — +3 public table commands (markdown-tab,
     // markdown-align-tables-in-buffer, markdown-table-realign-after-newline).
     // The 17 alignment helpers are md-table-* (private, per the #227 rule).
-    expect(publicFns.length).toBe(128);
+    // 128 → 131: markdown-daily-note-init + journal-dir-set + journal-path (#270/#271).
+    expect(publicFns.length).toBe(131);
   });
 
   test("AC11.2: aggregator is a pure loader (no feature defun)", () => {

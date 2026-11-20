@@ -17,6 +17,7 @@ markdown-copy-subtree
 markdown-create-note-for
 markdown-current-subtree-range
 markdown-daily-note
+markdown-daily-note-init
 markdown-delete-line
 markdown-demote-heading
 markdown-demote-subtree
@@ -52,6 +53,8 @@ markdown-insert-heading
 markdown-insert-link
 markdown-insert-link-to-file
 markdown-insert-list-item
+markdown-journal-dir-set
+markdown-journal-path
 markdown-jump-back
 markdown-kill-subtree
 markdown-link-at-point
