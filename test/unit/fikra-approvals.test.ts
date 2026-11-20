@@ -494,11 +494,16 @@ describe("#220 L2 — capability gating (claude-first, probe-driven)", () => {
     const configPath = join(repoDir, ".tmax/fikra/mcp/main-1.json");
     const config = JSON.parse(readFileSync(configPath, "utf8")) as { mcpServers: { "tmax-confirmation": { command: string; args: string[] } } };
     expect(config.mcpServers["tmax-confirmation"].command).toBe("bun");
-    expect(config.mcpServers["tmax-confirmation"].args).toEqual(["bin/tmax-mcp-confirmation.ts", "fikra", token]);
+    // Round-34: the bridge path is ABSOLUTE (the CLI resolves args against
+    // the turn's cwd — relative paths pointed at the user project).
+    const args = config.mcpServers["tmax-confirmation"].args as string[];
+    expect(args[0]!.endsWith("/bin/tmax-mcp-confirmation.ts")).toBe(true);
+    expect(args[0]!.startsWith("/")).toBe(true);
+    expect(args.slice(1)).toEqual(["fikra", token]);
     // The turn's args reference the config + claude's MCP tool name.
-    const args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
-    expect(args).toContain("--mcp-config");
-    expect(args).toContain("mcp__tmax-confirmation__permission");
+    const argv = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(argv).toContain("--mcp-config");
+    expect(argv).toContain("mcp__tmax-confirmation__permission");
     e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "off")');
   });
 });

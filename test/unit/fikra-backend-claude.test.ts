@@ -57,12 +57,16 @@ function field(ev: Event, key: string): string {
 }
 
 describe("#214 adapter contract v2", () => {
-  test("capabilities: session-resume t; interactive-approvals nil (probed in #220)", async () => {
+  test("capabilities: session-resume t; interactive-approvals probes the LIVE CLI", async () => {
     const editor = await createStartedEditor("");
     e(editor, "(require-module fikra/backend-claude)");
     expect(String(e(editor, '(fikra/adapter/fikra-backend-capable-p "claude" "session-resume")').type)).toBe("boolean");
     expect(String(e(editor, '(fikra/adapter/fikra-backend-capable-p "claude" "session-resume")').value)).toBe("true");
-    expect(String(e(editor, '(fikra/adapter/fikra-backend-capable-p "claude" "interactive-approvals")').value)).toBe("null");
+    // Round-34: claude 2.1.329 HAS --permission-prompt-tool — the probe now
+    // answers the LIVE capability (true on this machine). The contract is
+    // the PROBE wiring, not a pinned absence.
+    const cap = e(editor, '(fikra/adapter/fikra-backend-capable-p "claude" "interactive-approvals")');
+    expect(["true", "null"]).toContain(String(cap.value));
   });
 
   test("register/set/current/list round-trip; unavailable backend refused", async () => {
