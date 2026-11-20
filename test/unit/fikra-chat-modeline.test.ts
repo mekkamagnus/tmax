@@ -55,12 +55,25 @@ describe("#8.1 modeline + checkpoint marker (r58)", () => {
     expect(line2).toContain("[ckpt fix-2/7 ✓]");
   });
 
-  test("SPC a R is bound (opens the viewer on the last turn)", async () => {
+  test("SPC a R EXECUTES: the viewer opens on the last completed turn (r58 catch)", async () => {
     const ed = await createStartedEditor("");
     e(ed, "(require-module fikra/mode)");
     e(ed, "(fikra-start)");
-    const cmd = e(ed, '(key-binding "SPC a R" "normal")');
-    expect(JSON.stringify(cmd.value)).toContain("fikra-turn-diff-for");
-    expect(JSON.stringify(cmd.value)).toContain("fikra-thread-turn-count");
+    e(ed, "(require-module fikra/adapter)");
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-set-field "turn-count" 2)');
+    // The fn the binding calls — EXECUTED, not inspected.
+    e(ed, "(require-module fikra/diff)");
+    // No captured refs in the scratch repo: the CALL resolves (the r58
+    // catch) and the no-captured-diff status is the honest outcome; the
+    // running-turn arithmetic is asserted directly.
+    e(ed, "(fikra/diff/fikra-turn-diff-for (fikra/diff/fikra-last-completed-turn))");
+    expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("2");
+    // A RUNNING turn must not be the target: count 3 mid-flight → 2.
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-turn-begin)');
+    expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("2");
   });
 });

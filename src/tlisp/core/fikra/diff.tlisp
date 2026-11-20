@@ -3,7 +3,7 @@
           fikra-diff-restore-turn fikra-changed-paths-since-baseline
           fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
           fikra-revert-confirm-table fikra-revert-confirm-accept
-          fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed)
+          fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed fikra-last-completed-turn fikra-turn-diff-for)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -89,6 +89,18 @@
       (if (> (length (string-trim (fikra-diff-turn-patch target))) 0)
         (fikra-turn-diff-for target)
         (fikra-diff-turn-scan from delta count (+ target delta))))))
+
+;; The LAST COMPLETED turn: the count bumps at turn-START, so a
+;; mid-flight turn must not be the revert target (codex r58).
+(defun fikra-last-completed-turn ()
+  (require-module fikra/thread)
+  (let ((n (fikra/thread/fikra-thread-field "turn-count"))
+        (st (fikra/thread/fikra-thread-status)))
+    (if (and (numberp n)
+             (or (string= st "running") (string= st "confirming"))
+             (> n 1))
+      (- n 1)
+      (if (numberp n) n 1))))
 
 (defun fikra-diff-turn-next () (fikra-diff-turn-step 1))
 (defun fikra-diff-turn-prev () (fikra-diff-turn-step -1))
