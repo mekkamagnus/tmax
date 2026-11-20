@@ -88,19 +88,20 @@ describe("#8.2 capture frame", () => {
     expect(JSON.stringify(kmapN.value)).toContain("history-next");
   });
 
-  test("the Context label reads the CALLING buffer, not the capture buffer (r53)", async () => {
+  test("the Context label reads the CALLING buffer's distinctive filename (r53/r56)", async () => {
     const ed = await createStartedEditor("");
     e(ed, "(require-module fikra/mode)");
     e(ed, "(fikra-start)");
     e(ed, "(require-module fikra/capture)");
     e(ed, "(require-module fikra/thread)");
-    e(ed, "(fikra-thread-set-field \"root\" \"/tmp\")");
+    e(ed, '(fikra-thread-set-field "root" "/tmp")');
+    e(ed, '(buffer-create "*caller*")');
+    e(ed, '(buffer-switch "*caller*")');
+    e(ed, '(progn (require-module "fikra/chat") (set-buffer-filename "/proj/distinctive-caller.ts"))');
     e(ed, "(fikra/capture/fikra-capture)");
-    // The ctx was captured at OPEN time (the *scratch* fixture buffer).
     const text = String(e(ed, "(buffer-text)").value);
     const toLine = text.split("\n")[0] ?? "";
-    expect(toLine).toMatch(/Context: \S+@\d+/);
-    // It is NOT the capture buffer's own name.
+    expect(toLine).toContain("Context: distinctive-caller.ts@");
     expect(toLine).not.toContain("Fikra-Capture@");
   });
 
@@ -164,5 +165,36 @@ describe("#8.2 capture frame", () => {
     const text = String(e(ed, "(buffer-text)").value);
     expect(text).not.toContain("draft two");
     expect(text).not.toContain("draft one");
+  });
+
+  test("clear-all meets the WHOLE-buffer contract for a single nonempty line (r56)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/capture)");
+    e(ed, '(buffer-create "*cap-single*")');
+    e(ed, '(buffer-switch "*cap-single*")');
+    e(ed, '(buffer-set-read-only nil)');
+    e(ed, '(buffer-insert "only line")');
+    e(ed, "(fikra/capture/fikra-buffer-clear-all)");
+    expect(String(e(ed, "(buffer-text)").value)).toBe("");
+  });
+
+  test("submit SENDS only the body end-to-end (the FAEP user turn, r56)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/mode)");
+    e(ed, "(fikra-start)");
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-set-field "root" "/tmp")');
+    e(ed, "(require-module fikra/chat)");
+    e(ed, "(fikra/chat/fikra-chat-open)");
+    e(ed, "(require-module fikra/capture)");
+    e(ed, "(fikra/capture/fikra-capture)");
+    e(ed, '(fikra/capture/fikra-capture-set-body "the sent body")');
+    e(ed, "(fikra/capture/fikra-capture-submit)");
+    // The chat transcript carries the turn: the user text is the BODY —
+    // never the To/Context header.
+    const chat = String(e(ed, '(progn (buffer-switch "*Fikra*") (buffer-text))').value);
+    expect(chat).toContain("the sent body");
+    expect(chat).not.toContain("To: thread");
   });
 });

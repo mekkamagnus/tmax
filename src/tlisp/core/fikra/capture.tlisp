@@ -64,13 +64,17 @@ body. (Mode must be active — the SPC a i binding implies it.)"
 ;; shape): (0,0)..(count-1,0) consumes every newline but the last; then
 ;; the leftover last line's text. Zero-length skips its delete.
 (defun fikra-buffer-clear-all ()
+  ;; The WHOLE-buffer contract (r56): a single nonempty line clears too.
   (let ((count (buffer-line-count)))
     (if (> count 1)
       (progn
         (buffer-delete-range 0 0 (- count 1) 0)
         (let ((l (buffer-line 0)))
           (if (> (length l) 0)
-            (buffer-delete-range 0 0 0 (length l))))))))
+            (buffer-delete-range 0 0 0 (length l)))))
+      (let ((l (buffer-line 0)))
+        (if (> (length l) 0)
+          (buffer-delete-range 0 0 0 (length l)))))))
 
 ;; The compose BODY: everything below the two header lines.
 (defun fikra-capture-body ()
