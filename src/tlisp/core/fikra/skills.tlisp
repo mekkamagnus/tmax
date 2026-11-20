@@ -30,7 +30,7 @@ is model-visible."
   (if (not (file-exists-p dir))
     (list)
     (let ((names (string-split
-                   (shell-command (concat "ls -1 '" dir "' 2>/dev/null || true"))
+                   (shell-command (concat "ls -1 " (fikra/thread/fikra-thread-shq dir) " 2>/dev/null || true"))
                    "\n"))
           (out (list)))
       (dolist (name names)

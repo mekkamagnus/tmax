@@ -7,7 +7,7 @@
           fikra-thread-set-session-id fikra-thread-save fikra-thread-field
           fikra-thread-set-field
           fikra-thread-context-dir fikra-root-from-context
-          fikra-thread-root-shell)
+          fikra-thread-root-shell fikra-thread-shq)
 
 ;; #213 (RFC-027 §D3/§D7, Phase 1 — MINIMAL subset): one implicit "main"
 ;; thread per project. State machine + persistence + reopen-after-restart +
@@ -79,6 +79,26 @@ inheritance). Fallback: DIR itself."
 (#298: every consumer runs its git steps rooted at the record's root —
 never the daemon cwd, never an independent re-resolution)."
   (shell-command cmd (fikra-thread-field "root")))
+
+;; #298 (codex r4): THE shell-quoting helper for the fikra family —
+;; single-quote with apostrophe escaping (split on ', join with the
+;; close/escape/reopen sequence). The joiner is hex-built because
+;; backslash string literals are reader-hostile (the round-22 trap).
+;; Every module-level shq helper delegates here; never hand-wrap a path
+;; in raw quotes.
+(defvar fikra-thread-sq-join (concat "'" (hex-decode "5c") "''")
+  "The shell apostrophe escape: close-quote, backslash-quote, reopen.")
+
+(defun fikra-thread-shq (s)
+  "Shell-quote S (spaces, metachars, and embedded apostrophes safe)."
+  (fikra-thread-shq-scan (string-split s "'") "" t))
+
+(defun fikra-thread-shq-scan (parts acc first)
+  (if (null parts)
+    (concat "'" acc "'")
+    (fikra-thread-shq-scan (cdr parts)
+      (concat acc (if first "" fikra-thread-sq-join) (car parts))
+      nil)))
 
 ;; #221 (RFC-027 §D7): the thread's WORKING dir — the worktree path when
 ;; in worktree mode (backend cwd + checkpoint captures run there), the
@@ -473,7 +493,8 @@ current project's NON-archived threads."
       nil)))
 
 (defun fikra-shq2 (s)
-  (concat "'" s "'"))
+  ;; #298 (codex r4): delegates to the family-safe quoting helper.
+  (fikra-thread-shq s))
 
 (defun fikra-thread-state ()
   "The focused thread's state; LAZY-INITIALIZES the main thread when absent
@@ -625,7 +646,7 @@ thread→adapter has no cycle but keep the lazy convention)."
 ;; diff detects content changes, not just existence (codex round-5 catch).
 (defun fikra-file-signature (dir path)
   (condition-case nil
-    (substring (string-trim (shell-command (concat "md5 -q '" dir "/" path "'"))) 0 10)
+    (substring (string-trim (shell-command (concat "md5 -q " (fikra-thread-shq (concat dir "/" path))))) 0 10)
     (error () "?")))
 
 (defun fikra-thread-snapshot-changes ()
@@ -635,7 +656,7 @@ thread→adapter has no cycle but keep the lazy convention)."
     (if (not (stringp dir))
       nil
       (let ((snap (hashmap)))
-        (dolist (line (string-split (shell-command (concat "git -C '" dir "' ls-files --others --exclude-standard 2>/dev/null")) "\n"))
+        (dolist (line (string-split (shell-command (concat "git -C " (fikra-thread-shq dir) " ls-files --others --exclude-standard 2>/dev/null")) "\n"))
           (if (and (> (length line) 6) (not (string= (substring line 0 6) ".tmax/")))
             (editor/keymaps/keymap-mutable-set! snap line (fikra-file-signature dir line))))
         snap))))
@@ -646,7 +667,7 @@ thread→adapter has no cycle but keep the lazy convention)."
 ;; against it later yields exactly the turn's edits even in files that were
 ;; already dirty. Clean tree → empty output → baseline is HEAD.
 (defun fikra-thread-capture-baseline-tree (dir)
-  (let ((sha (string-trim (shell-command (concat "git -C '" dir "' stash create 2>/dev/null")))))
+  (let ((sha (string-trim (shell-command (concat "git -C " (fikra-thread-shq dir) " stash create 2>/dev/null")))))
     (if (> (length sha) 0) sha "HEAD")))
 
 (defun fikra-file-change-event (path adds dels)
@@ -667,14 +688,14 @@ thread→adapter has no cycle but keep the lazy convention)."
       (let* ((btree (hashmap-get state "change-baseline-tree"))
              (tree (if (and (stringp btree) (> (length btree) 0)) btree "HEAD"))
              (rows (list)))
-        (dolist (line (string-split (shell-command (concat "git -C '" dir "' diff " tree " --numstat 2>/dev/null")) "\n"))
+        (dolist (line (string-split (shell-command (concat "git -C " (fikra-thread-shq dir) " diff " tree " --numstat 2>/dev/null")) "\n"))
           (let ((parts (string-split line "\t")))
             (if (= (length parts) 3)
               (let ((path (car (cdr (cdr parts)))))
                 (if (not (string= (substring path 0 6) ".tmax/"))
                   (setq rows
                     (cons (list path (car parts) (car (cdr parts))) rows)))))))
-        (dolist (line (string-split (shell-command (concat "git -C '" dir "' ls-files --others --exclude-standard 2>/dev/null")) "\n"))
+        (dolist (line (string-split (shell-command (concat "git -C " (fikra-thread-shq dir) " ls-files --others --exclude-standard 2>/dev/null")) "\n"))
           (if (and (> (length line) 6)
                    (not (string= (substring line 0 6) ".tmax/"))
                    ;; nil-safe: a file ABSENT from the baseline is new —
@@ -685,7 +706,7 @@ thread→adapter has no cycle but keep the lazy convention)."
             ;; New untracked file: adds = its line count (codex rounds 8-9:
             ;; "untracked-file counts remain unknown"), dels 0.
             (setq rows (cons (list line
-                                   (string-trim (shell-command (concat "wc -l < '" dir "/" line "'")))
+                                   (string-trim (shell-command (concat "wc -l < " (fikra-thread-shq (concat dir "/" line)))))
                                    "0")
                              rows))))
         (reverse rows)))))

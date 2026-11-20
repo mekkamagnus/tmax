@@ -299,15 +299,39 @@ describe("#298 client-context thread roots", () => {
     dirs.push(q);
     execFileSync("git", ["init", "-q"], { cwd: q });
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: q });
+    process.chdir(q); // the daemon-side git probes in the test run against q
     editor.setClientLaunchDir(q);
     e(editor, '(fikra/thread/fikra-thread-focus "main")');
     // Re-init discovers via the NEW context (record found under q).
     e(editor, "(fikra/thread/fikra-thread-init)");
+    e(editor, "(require-module fikra/diff)");
+    e(editor, "(require-module fikra/skills)");
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     const shaQ = e(editor, '(fikra/checkpoint/fikra-checkpoint-capture "completion")');
     expect(shaQ.type).toBe("string");
     const refsQ = String(e(editor, `(shell-command "git for-each-ref refs/fikra/" "${realpathSync(q)}")`).value).trim();
     expect(refsQ).toContain("refs/fikra/main/1");
+    // codex r4: the ± change detection (untracked signature scan) works
+    // under the apostrophe root.
+    writeFileSync(join(q, "new-file.txt"), "line1\nline2\n");
+    const rows = e(editor, "(fikra/thread/fikra-thread-compute-changes)").value as unknown[];
+    expect(Array.isArray(rows)).toBe(true);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    const row0 = (rows[0] as { value: { value: unknown }[] }).value;
+    expect(String(row0[0]!.value)).toContain("new-file.txt");
+    // The diff viewer renders the turn's patch (git -C through the quoted
+    // dir) — non-empty and names the file.
+    e(editor, "(fikra/diff/fikra-turn-diff)");
+    const viewerText = stripAnsi(bufferText(editor)).replace(/\u001b\[[0-9;]*m/g, "");
+    expect(viewerText).toContain("new-file.txt");
+    // Restore (turn-diff restore for the untracked file: the rm branch of
+    // fikra-diff-restore-turn, quoted) removes it.
+    e(editor, '(fikra/diff/fikra-diff-restore-turn (list "new-file.txt"))');
+    expect(existsSync(join(q, "new-file.txt"))).toBe(false);
+    // Skill discovery under the apostrophe root (.fikra/skills scan).
+    mkdirSync(join(q, ".fikra/skills/demo"), { recursive: true });
+    writeFileSync(join(q, ".fikra/skills/demo/SKILL.md"), "---\nvisibility: model\n---\nDo things.\n");
+    expect(Number(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe(1);
   });
 });
 

@@ -112,8 +112,9 @@ Untracked-not-in-completion files are not diff entries — untouched."
           "same"))))))
 
 (defun fikra-quote (path)
-  ;; Paths in these repos are simple; single-quote for shell safety.
-  (concat "'" path "'"))
+  ;; #298 (codex r4): delegates to the family-safe quoting helper
+  ;; (apostrophes included).
+  (fikra/thread/fikra-thread-shq path))
 
 (defun fikra-revertable-p (target completion)
   "t when both refs exist (rev-parse verifies both). #298: at the

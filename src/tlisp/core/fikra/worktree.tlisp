@@ -262,7 +262,8 @@ worktree (patch-apply-or-refuse)."
     (fikra-worktree-enter)))
 
 (defun fikra-shq (s)
-  (concat "'" s "'"))
+  ;; #298 (codex r4): delegates to the family-safe quoting helper.
+  (fikra/thread/fikra-thread-shq s))
 
 (provide "fikra-worktree")
 )

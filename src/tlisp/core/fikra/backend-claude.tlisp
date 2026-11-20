@@ -211,18 +211,9 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
 ;; commands, and embedded apostrophes must not break out (single-quote
 ;; with the close/escape/reopen join; the joiner is hex-built — backslash
 ;; literals are reader-hostile, the round-22 class).
-(defun fikra-claude-sq-join ()
-  (concat "'" (hex-decode "5c") "''"))
-
 (defun fikra-claude-shq (s)
-  (fikra-claude-shq-scan (string-split s "'") "" t))
-
-(defun fikra-claude-shq-scan (parts acc first)
-  (if (null parts)
-    (concat "'" acc "'")
-    (fikra-claude-shq-scan (cdr parts)
-      (concat acc (if first "" (fikra-claude-sq-join)) (car parts))
-      nil)))
+  ;; #298 (codex r4): delegates to the family-safe quoting helper.
+  (fikra/thread/fikra-thread-shq s))
 
 ;; The thread-root .tmax/fikra/mcp dir, shell-quoted (spaces-safe).
 (defun fikra-claude-mcp-ensure-dir ()

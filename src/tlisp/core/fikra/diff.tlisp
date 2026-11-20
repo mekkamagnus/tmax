@@ -163,8 +163,8 @@
         (tree (fikra-baseline-tree)))
     (dolist (p paths)
       (if (string= (fikra-file-kind dir p) "tracked")
-        (shell-command (concat "git -C '" dir "' checkout " tree " -- '" p "' 2>/dev/null"))
-        (shell-command (concat "rm -f '" dir "/" p "'"))))))
+        (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " checkout " tree " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
+        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p))))))))
 
 ;; Paths changed since the stored baseline — the DRY computation shared
 ;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).
@@ -198,20 +198,21 @@
         (setq tracked (cons p tracked))
         (setq untracked (cons p untracked))))
     (if (> (length tracked) 0)
-      (setq out (concat out (shell-command (concat "git -C '" dir "' diff " tree " --color=always -- "
+      (setq out (concat out (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " diff " tree " --color=always -- "
                                                   (fikra-join-args (reverse tracked)) " 2>/dev/null")))))
     (dolist (p (reverse untracked))
       (setq out (concat out "\n+++ new file: " p "\n"
-                        (shell-command (concat "cat '" dir "/" p "' 2>/dev/null")) "\n")))
+                        (shell-command (concat "cat " (fikra/thread/fikra-thread-shq (concat dir "/" p)) " 2>/dev/null")) "\n")))
     out))
 
 (defun fikra-file-kind (dir path)
-  (if (> (length (string-trim (shell-command (concat "git -C '" dir "' ls-files -- '" path "' 2>/dev/null")))) 0)
+  (if (> (length (string-trim (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " ls-files -- " (fikra/thread/fikra-thread-shq path) " 2>/dev/null")))) 0)
     "tracked" "untracked"))
 
 (defun fikra-join-args (parts)
+  ;; #298 (codex r4): family-safe quoting per path (apostrophes included).
   (if (null parts) ""
-    (concat "'" (car parts) "'" (if (cdr parts) (concat " " (fikra-join-args (cdr parts))) ""))))
+    (concat (fikra/thread/fikra-thread-shq (car parts)) (if (cdr parts) (concat " " (fikra-join-args (cdr parts))) ""))))
 
 ;; Completion table as a FUNCTION (input action) — the completing-read
 ;; contract. Candidates: revert / cancel.
