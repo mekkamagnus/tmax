@@ -724,3 +724,28 @@ The top remaining fixes are:
 4. Surface capture recipient, context and history controls in [capture.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/capture.tlisp:16); complete and demonstrate turn navigation and revert in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:44).
 
 The completed-worktree exit evidence closes the principal functional gap from round 22: work performed inside the worktree was applied to the local tree, and the local file contains `PATCHED`. All six sections now reach **7/10 or higher** on this rubric, though that is a comparison against the supplied captures, not a claim of full mockup parity. The largest remaining gaps are reviewable handoff UX, narrow-terminal readability, and live evidence for conflict refusal and revert.
+
+---
+
+# Round 24 (the confirmed live revert — the complete functional set) — 2026-11-20
+
+| Section | Score | Justification |
+|---|---:|---|
+| **8.1 Chat** | **7/10** | Live chat, tool activity, change evidence, and contextual status are present; the illustrated native agent loop and per-action checkpoints remain future work. |
+| **8.2 Capture** | **8/10** | The demonstrated compose and send flow works, with history and cancellation implemented; the illustrated recipient and context presentation is less complete. |
+| **8.3 Approval** | **7/10** | The supplied live run shows a CLI-mediated approval followed by an executed Write, but the mockup’s native per-action gate and provenance are not established. |
+| **8.4 Turn diff and revert** | **8/10** | The supplied round-trip demonstrates isolated change content, navigation, confirmation, and an actual revert; the viewer remains stale afterward and turn-to-turn navigation differs from the mockup. |
+| **8.5 Threads** | **7/10** | The demonstrated thread list provides backend, mode, location, status, and turn information, but several illustrated actions and project-level details differ. |
+| **8.6 Worktree handoff** | **6/10** | The supplied round-trip demonstrates entry, exit, and patch application; the dedicated review-and-choice screen and its summary are missing. |
+| **8.7 Skills** | **1/10** | T-Lisp workflows exist, but the proposed `.fikra/skills` discovery, visibility, and combined picker are not demonstrated or apparent in the Fikra implementation. |
+| **8.8 Ghost text** | **0/10** | The proposed inline completion and accept, partial-accept, and dismiss interactions remain unbuilt. |
+
+**Top remaining fixes**
+
+1. **Protect and accurately report revert operations.** [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:161) restores current paths without the divergence checks in [revert.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/revert.tlisp:96), and does not check shell-command success before reporting success. Guard edits made after the turn, report failures, and refresh the viewer after confirmation.
+2. **Build the handoff review surface.** [worktree.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/worktree.tlisp:132) checks and applies a patch but does not present the mockup’s summary, review, apply, and refuse choices; also verify the actual apply result before reporting success.
+3. **Complete the native loop and action-level approval model.** Extend the backend and event path in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:47), [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:101), and [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:120) to support the RFC’s native tool execution, checkpoints, and trustworthy provenance.
+4. **Finish navigation and context polish.** Add previous/next **turn** navigation in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:82), and align the thread-list actions and capture context with their mockups in [threads.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/threads.tlisp:33) and [capture.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/capture.tlisp:16).
+5. **Implement the proposed skills and completion surfaces.** Add skills discovery and presentation alongside [workflow.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/workflow.tlisp), then implement the ghost-text interaction described in 8.8.
+
+The supplied evidence closes the standing revert question: a confirmed interactive revert deleted the created file, and the subsequent daemon-side change count was zero. Together with the approval and worktree demonstrations, that makes the six established surfaces substantially more credible end to end. The full RFC target is still incomplete: native per-action execution and provenance, the handoff review UI, skills, and ghost text remain material gaps. This assessment uses the supplied live-run account and a source review; I did not independently replay those sessions or run tests in this turn.
