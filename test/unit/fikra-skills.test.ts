@@ -159,11 +159,14 @@ describe("#8.7 skills — codex r27 fixes", () => {
     expect(String(e(editor, '(hashmap-get (car (fikra/skills/fikra-skills-list)) "description")').value)).toBe("edited");
   });
 
-  test("a skill added after the first scan is picked up (add-path invalidation)", async () => {
+  test("a skill added to a POPULATED cache is picked up (stamp invalidation)", async () => {
+    writeSkill("first", "---\nname: first\n---\nscanned first\n");
     const editor = await setup();
-    expect(Number(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe(0);
+    expect(Number(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe(1);
+    // Cache is non-empty now — an empty-cache rescan cannot explain the
+    // next result; only the modtime stamp can.
     writeSkill("late", "---\nname: late\n---\nadded after the first scan\n");
-    expect(Number(e(editor, "(length (fikra/skills/fikra-skills-list))").value)).toBe(1);
+    expect(Number(e(editor, "(length (fikra/skills/fikra-skills-list))").value)).toBe(2);
   });
 
   test("an apostrophe root does not break the scan or stamp (quoting regression)", async () => {

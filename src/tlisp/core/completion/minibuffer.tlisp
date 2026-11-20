@@ -113,6 +113,9 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
               "return-mode" (editor-mode)
               "return-focus" (editor-cursor-focus)
               "accept-function" accept-function
+              ;; RFC-029 §8.7 badge: filtered/total. The unfiltered count is
+              ;; taken once at open (input "" sees every candidate).
+              "total-count" (length (completion-all-completions "" table predicate))
               "matches" (list))))
       (progn
         (editor-reset-space-prefix)

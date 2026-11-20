@@ -95,11 +95,15 @@ keystroke."
                            (if selected-candidate
                              (hashmap-get selected-candidate "value")
                              ""))
+                  ;; RFC-029 mockup badge: FILTERED/TOTAL (the selection
+                  ;; is already visible as the highlighted row; codex r25-r30
+                  ;; flagged the old position/filtered as a mockup deviation).
                   "message" (if (= (length matches) 0)
                     "No match"
-                    (if (< selected 0)
-                      (concat "prompt/" (length matches))
-                      (concat (+ selected 1) "/" (length matches)))))))))))))
+                    (let ((total (hashmap-get session "total-count")))
+                      (if (and total (> total 0))
+                        (concat (length matches) "/" total)
+                        (concat (+ selected 1) "/" (length matches))))))))))))))
 
 (defun vertico-next ()
   "Select the next completion candidate without wrapping."
