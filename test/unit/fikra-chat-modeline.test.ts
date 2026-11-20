@@ -189,4 +189,21 @@ describe("#8.1 inline ckpt marker (r63)", () => {
     expect(String(e(ed, "(length r65-b)").value)).toBe("6");
     expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 5 r65-b))").value)).toContain("main/2");
   });
+
+  test("IDENTITY association: turn-1's checkpoint never attaches to turn-2's Edit (r66 counterexample)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/event")');
+    // The exact sequence: ts1 → Edit → ts2 → Edit → checkpoint(main/1).
+    e(ed, '(defvar r66-a nil)');
+    e(ed, '(setq r66-a (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e1") (list "summary" "a.ts @1")) (list (list "kind" "turn-start") (list "turn" 2) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e2") (list "summary" "a.ts @9")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/1"))) (list) nil))');
+    // Turn 2's Edit (index 3) carries NOTHING.
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 3 r66-a))").value)).not.toContain("[ckpt");
+    // The checkpoint renders standalone (identity mismatch: turn 1 ≠ turn 2).
+    expect(String(e(ed, "(length r66-a)").value)).toBe("5");
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 4 r66-a))").value)).toContain("[ckpt main/1 ✓]");
+    // The matching identity DOES attach: same sequence but checkpoint(main/2).
+    e(ed, '(defvar r66-b nil)');
+    e(ed, '(setq r66-b (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e1") (list "summary" "a.ts @1")) (list (list "kind" "turn-start") (list "turn" 2) (list "backend" "r") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "e2") (list "summary" "a.ts @9")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/2"))) (list) nil))');
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 3 r66-b))").value)).toContain("[ckpt main/2 ✓]");
+  });
 });
