@@ -90,8 +90,17 @@ set-backend survives refocus instead of being reset)."
 (defun fikra-set-backend-forced (name)
   "Set the backend WITHOUT an availability probe — test seam: keyless
   fixture tests exercise flag translation for backends whose CLIs may not
-  be installed on the runner."
+  be installed on the runner. PERSISTS the field like set-backend (r46:
+  focus-restore would otherwise reset a forced pin mid-test)."
   (setq fikra-current-backend-name name)
+  (condition-case nil
+    (progn
+      (require-module fikra/thread)
+      (if (fikra/thread/fikra-thread-current)
+        (progn
+          (fikra/thread/fikra-thread-set-field "backend" name)
+          (fikra/thread/fikra-thread-save))))
+    (error () nil))
   name)
 
 (defun fikra-current-backend ()
