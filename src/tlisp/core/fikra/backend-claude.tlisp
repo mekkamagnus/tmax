@@ -170,6 +170,11 @@ config is written per turn by fikra-claude-write-mcp-config)."
           (fikra/thread/fikra-thread-current) "-"
           (number-to-string (fikra/thread/fikra-thread-turn-count)) ".json"))
 
+(defun fikra-claude-mcp-bridge-path ()
+  "Absolute path of the MCP bridge script. process-cwd lives in
+fikra/thread (module-private there) — re-derive it here."
+  (string-trim (shell-command "pwd")))
+
 (defun fikra-claude-write-mcp-config ()
   "Mint the turn's approval token and write the --mcp-config JSON.
 Returns the token (nil when the capability probe failed — L2 stays off)."
@@ -180,10 +185,15 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
            (token (confirmation-token-mint "fikra" scope))
            (path (fikra-claude-mcp-config-path)))
       (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-root) "/.tmax/fikra/mcp"))
+      ;; ABSOLUTE bridge path (round-34 live catch): the CLI resolves the
+      ;; MCP server's args against ITS cwd (the thread working dir), so a
+      ;; relative "bin/tmax-mcp-confirmation.ts" pointed at the user
+      ;; project — "Available MCP tools: none" and the gate dead-ends.
+      ;; Source-mode daemon runs from the tmax repo root.
       (write-file-content path
         (concat "{\"mcpServers\":{\"tmax-confirmation\":{"
                 "\"command\":\"bun\","
-                "\"args\":[\"bin/tmax-mcp-confirmation.ts\",\"fikra\",\""
+                "\"args\":[\"" (fikra-claude-mcp-bridge-path) "/bin/tmax-mcp-confirmation.ts\",\"fikra\",\""
                 token "\"]}}}"))
       ;; Best-effort 0600 (gate note): the token authorizes ORIGINATING a
       ;; mediate, never resolving — but don't leave it world-readable.
