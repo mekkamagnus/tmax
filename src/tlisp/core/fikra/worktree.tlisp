@@ -295,8 +295,8 @@ its summary are missing')."
     ;; VERIFIED generation (codex r35: a failed add/diff silently produced
     ;; an "empty" review). A failure SHORT-CIRCUITS into an error render.
     (let ((gen (string-trim (shell-command
-               (concat "git -C " (fikra-shq path) " add -N . 2>/dev/null; "
-                       "git -C " (fikra-shq path) " diff --binary " base
+               (concat "git -C " (fikra-shq path) " add -N . 2>/dev/null"
+                       " && git -C " (fikra-shq path) " diff --binary " base
                        " > " (fikra-shq patch-path) " 2>/dev/null"
                        " && echo GEN-OK || echo GEN-FAIL")))))
       (if (string-match "GEN-OK" gen)
@@ -314,7 +314,8 @@ its summary are missing')."
                     "worktree: " path "\n"
                     "re-enter worktree mode or inspect the path above.\n"))
           (buffer-set-read-only t)
-          (fikra-worktree-review-ensure-keymap)
+          ;; NO a/d/r on the failure screen (codex r36: the actions must
+          ;; not stay callable when generation failed).
           (editor-set-status "Fikra: review generation failed")
           (setq fikra-worktree-review-gen-failed t))))
     (if fikra-worktree-review-gen-failed
@@ -391,14 +392,19 @@ its summary are missing')."
   (string-trim (fikra/thread/fikra-thread-root-shell
     (concat "git apply --check --binary " (fikra-shq patch-path) " 2>&1 | head -5"))))
 
-;; Paths changed LOCALLY since the fork that the worktree also touched.
+;; Paths changed LOCALLY since the fork that the REVIEWED PATCH also
+;; touches (codex r36: read the patch's own path list — a fresh worktree
+;; diff can describe different content under concurrent edits — and an
+;; empty comm result must count as ZERO, not one split element).
 (defun fikra-worktree-review-overlap (root base path)
-  (length (string-split
-    (string-trim (shell-command
-      (concat "comm -12 "
-              "<(git -C " (fikra-shq root) " diff --name-only " base " -- 2>/dev/null | sort) "
-              "<(git -C " (fikra-shq path) " diff --name-only " base " -- 2>/dev/null | sort) 2>/dev/null || true")))
-    "\n")))
+  (let ((out (string-trim (shell-command
+    (concat "comm -12 "
+            "<(git -C " (fikra-shq root) " diff --name-only " base " -- 2>/dev/null | sort) "
+            "<(git apply --numstat " (fikra-shq (fikra-worktree-review-patch-path))
+            " 2>/dev/null | cut -f3 | sort) 2>/dev/null || true")))))
+    (if (string= out "")
+      0
+      (length (string-split out "\n")))))
 
 (defun fikra-worktree-refs-count (root id)
   (let ((out (string-trim (shell-command
