@@ -17,3 +17,7 @@
 {"event":"landing","ts":"2026-11-21T06:00:00+08:00","unit":"iter-r31","shas":["c46f633","869128d"],"files-staged-count":5,"tests-run":[{"name":"bun test test/unit/fikra-skills.test.ts test/unit/fikra-chat-ui.test.ts test/unit/server-frame-sync.test.ts test/unit/editor.test.ts","output":"0 fail\n123 expect() calls\nRan 46 tests across 4 files."}],"adr-spec":[]}
 {"event":"telemetry","ts":"2026-11-21T06:05:00+08:00","wall-minutes":365,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null}
 {"event":"gate","ts":"2026-11-21T06:30:00+08:00","kind":"codex-grade","verdict":"9/10","rounds":32,"reviewed-sha":"c46f633","findings-count":3}
+{"event":"landing","ts":"2026-11-21T07:00:00+08:00","unit":"iter-r32","shas":["bb6a1b6","e2ef5ea"],"files-staged-count":3,"tests-run":[{"name":"bun test test/unit/buffer-name-wire.test.ts","output":"0 fail\n5 expect() calls\nRan 2 tests across 1 file."},{"name":"bun test test/unit/fikra-revert.test.ts","output":"0 fail\n22 expect() calls\nRan 7 tests across 1 file."}],"adr-spec":[]}
+{"event":"unit-start","ts":"2026-11-21T07:05:00+08:00","unit":"iter-8.4-turnnav"}
+{"event":"landing","ts":"2026-11-21T07:30:00+08:00","unit":"iter-8.4-turnnav","shas":["HEAD"],"files-staged-count":1,"tests-run":[{"name":"bun test test/unit/fikra-revert.test.ts","output":"0 fail\n22 expect() calls\nRan 7 tests across 1 file."}],"adr-spec":[]}
+{"event":"telemetry","ts":"2026-11-21T07:35:00+08:00","wall-minutes":455,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null}
