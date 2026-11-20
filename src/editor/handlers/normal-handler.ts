@@ -105,6 +105,18 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   // macro-record-pending was already handled above, so reaching here means
   // we are either idle or actively recording.
   if (normalizedKey === "C-g" || normalizedKey === "Escape") {
+    // A BUFFER-LOCAL C-g binding wins over the generic cancel (#206's
+    // normative chain: buffer-local is the innermost tier — the fikra
+    // chat binds C-g to gate-abort/turn-interrupt). Escape keeps its
+    // global meaning everywhere; only C-g is overridable.
+    if (normalizedKey === "C-g") {
+      const localCg = exec(`(keymap-ref (buffer-keymap (buffer-name)) "C-g")`);
+      if (isRight(localCg) && localCg.right && (localCg.right as { type?: string }).type === "string") {
+        clearWhichKey(editor, wk);
+        await executeCommand(editor, (localCg.right as { value: string }).value);
+        return;
+      }
+    }
     wk?.deactivate();
     editor.applyUpdate({ type: "SetWhichKeyActive", active: false });
     editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: "" });

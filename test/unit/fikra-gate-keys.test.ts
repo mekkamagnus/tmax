@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
+import { confirmationService } from "../../src/editor/api/confirmation-service.ts";
 
 // The P1 interactive gate loop (mockup 8.3): a backend pause parks the
 // turn at a permission — the gate panel renders in *Fikra* — and the
@@ -99,6 +100,37 @@ describe("P1 interactive gate — pause → USER KEY → resume", () => {
     expect(String(second.value)).toBe("done");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
     expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+  });
+
+  test("a HEADLESS eval cannot approve the pause (the L2 guard covers backend pauses too)", async () => {
+    const editor = await started();
+    e(editor, '(fikra/adapter/fikra-backend-start-turn "do it")');
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    // THE THREAT: the agent eval-approves its own paused action. The daemon
+    // stamps eval dispatches headless — here we stamp the same fact directly.
+    confirmationService.resolverHint = "headless";
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-allow)").value)).toBe("null");
+    // Denied: the pause STAYS parked, the turn stays confirming.
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    // An INTERACTIVE frame (keypress dispatch) then resolves it.
+    confirmationService.resolverHint = "interactive";
+    await editor.handleKey("y");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    confirmationService.resolverHint = "interactive";
+  });
+
+  test("C-g at the gate ABORTS the parked pause (turn ends interrupted)", async () => {
+    const editor = await started();
+    e(editor, '(fikra/adapter/fikra-backend-start-turn "do it")');
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    await editor.handleKey("C-g");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+    e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(strip(bufferText(editor))).toContain("= denied");
+    // Nothing resumes afterwards: the script is exhausted.
+    expect(String(e(editor, "(fikra/backend-pausing/fikra-pausing-pump)").value)).toBe("idle");
   });
 
   test("y with nothing pending: an honest status, no crash", async () => {

@@ -225,11 +225,28 @@ resolver is DENIED and the prompt stays pending. always also writes
 thread trust (promoted to --allowedTools on later turns)."
   (require-module fikra/adapter)
   (if (fikra/adapter/fikra-backend-pending-p)
-    (fikra/adapter/fikra-backend-decide
-      (if (string= decision "allow") "y"
-        (if (string= decision "reject") "n" "a")))
+    ;; The SAME L2 guard as the mediate path (codex r77 catch 3): a
+    ;; HEADLESS eval client — the threat is an agent with Bash access
+    ;; eval-approving its own paused action — is DENIED; the pause stays
+    ;; parked. Only an interactive frame may answer.
+    (if (not (fikra-approval-resolve-guard))
+      (progn
+        (editor-set-status
+          "Fikra: approval resolve DENIED — interactive client required; prompt stays pending")
+        nil)
+      (fikra/adapter/fikra-backend-decide
+        (if (string= decision "allow") "y"
+          (if (string= decision "reject") "n" "a"))))
     (if (null fikra-approval-pending-id)
-      (progn (editor-set-status "Fikra: no pending approval") nil)
+      (progn
+        (editor-set-status
+          ;; codex r77 catch 2: confirming with nothing parked — the
+          ;; backend lacks the pause seam; say so instead of a bare
+          ;; "no pending" (the idle variant stays unchanged).
+          (if (string= (fikra/thread/fikra-thread-status) "confirming")
+            "Fikra: no pending approval — this backend cannot take approval keys"
+            "Fikra: no pending approval"))
+        nil)
     (if (not (fikra-approval-resolve-guard))
       (progn
         ;; The denial leaves the mediate PARKED (pending) — only an

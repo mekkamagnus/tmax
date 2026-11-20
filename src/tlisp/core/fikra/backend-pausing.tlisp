@@ -278,7 +278,24 @@ fikra-pausing-decide + the pump."
     (fikra/thread/fikra-thread-status-set "running"))
   (fikra/thread/fikra-thread-turn-end "completed"))
 
-(defun fikra-backend-pausing-abort () nil)
+;; C-g at the gate (codex r77 catch 5): a PARKED pause aborts — the parked
+;; request is dropped (a denial event closes it in the log), the turn ends
+;; interrupted, nothing resumes. An idle abort is nil (nothing to abort).
+(defun fikra-backend-pausing-abort ()
+  (if (not fikra-pausing-paused-at)
+    nil
+    (progn
+      (setq fikra-pausing-paused-at nil)
+      (setq fikra-pausing-pending-tool-val nil)
+      (setq fikra-pausing-pending-scope-val nil)
+      (setq fikra-pausing-decision nil)
+      (setq fikra-pausing-cursor (length fikra-pausing-script))
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "permission-denied")))
+      (if (string= (fikra/thread/fikra-thread-status) "confirming")
+        (fikra/thread/fikra-thread-status-set "running"))
+      (fikra/thread/fikra-thread-turn-end "interrupted")
+      t)))
 
 ;; The adapter's approval contract names: pending-p reports the pause;
 ;; decide records + PUMPS in one step (the interactive key handlers call
