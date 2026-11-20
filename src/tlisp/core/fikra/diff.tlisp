@@ -489,7 +489,7 @@ ambiguity)."
                  " cat-file -e " tree ":" (fikra/thread/fikra-thread-shq p)
                  " 2>/dev/null && echo yes || echo no")))) 2))
 
-(defun fikra-diff-restore-one (dir tree baseline p)
+(defun fikra-diff-restore-live-one (dir tree baseline p)
   (let ((in-baseline (or (and baseline (hashmap-get baseline p))
                          (fikra-diff-tree-contains dir tree p))))
     (cond
@@ -519,7 +519,7 @@ ambiguity)."
     (if (null baseline)
       nil
       (dolist (p paths)
-        (fikra-diff-restore-one dir tree baseline p)))))
+        (fikra-diff-restore-live-one dir tree baseline p)))))
 
 ;; Paths changed since the stored baseline — the DRY computation shared
 ;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).
