@@ -299,12 +299,20 @@ fikra-pausing-decide + the pump."
 
 ;; The adapter's approval contract names: pending-p reports the pause;
 ;; decide records + PUMPS in one step (the interactive key handlers call
-;; exactly this — pause → USER KEY → resume, no out-of-band seam).
+;; exactly this — pause → USER KEY → resume, no out-of-band seam). The
+;; guard is enforced at the ADAPTER (the service primitive); this wrapper
+;; RE-CHECKS so a direct call cannot bypass it (codex r78 catch 1). The
+;; RAW fikra-pausing-decide/pump pair stays unguarded — #303's documented
+;; out-of-band TEST seams.
 (defun fikra-backend-pausing-pending-p () (fikra-pausing-pending-p))
 
 (defun fikra-backend-pausing-decide (decision)
-  (fikra-pausing-decide decision)
-  (fikra-pausing-pump))
+  (require-module fikra/approvals)
+  (if (not (fikra/approvals/fikra-approval-resolve-guard))
+    nil
+    (progn
+      (fikra-pausing-decide decision)
+      (fikra-pausing-pump))))
 
 ;; Self-register
 (fikra/adapter/fikra-register-backend "pausing")

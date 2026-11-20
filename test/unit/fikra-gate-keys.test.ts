@@ -113,6 +113,15 @@ describe("P1 interactive gate — pause → USER KEY → resume", () => {
     // Denied: the pause STAYS parked, the turn stays confirming.
     expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    // The bypass probe (codex r78 catch 1): a headless eval calling the
+    // ADAPTER seam directly must ALSO be denied — enforcement lives at
+    // the service primitive, not one caller.
+    expect(String(e(editor, '(fikra/adapter/fikra-backend-decide "y")').value)).toBe("null");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    // ... and the backend-side contract wrapper re-checks the same guard.
+    expect(String(e(editor, '(fikra/backend-pausing/fikra-backend-pausing-decide "y")').value)).toBe("null");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
     // An INTERACTIVE frame (keypress dispatch) then resolves it.
     confirmationService.resolverHint = "interactive";
     await editor.handleKey("y");

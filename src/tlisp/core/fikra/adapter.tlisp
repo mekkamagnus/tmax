@@ -160,16 +160,32 @@ set-backend survives refocus instead of being reset)."
         (error nil)))))
 
 (defun fikra-backend-decide (decision)
-  "Deliver the user's gate DECISION (y | n | a) to the current backend."
+  "Deliver the user's gate DECISION (y | n | a) to the current backend.
+L2 ENFORCEMENT LIVES HERE (codex r78 catch 1): the decision seam is the
+service primitive — EVERY caller (the y/n/a keys, a direct eval, the
+approvals answer path) passes the interactive-resolver guard here; a
+HEADLESS eval client (an agent with Bash access approving its own
+paused action) is DENIED and the pause stays parked."
   (if (not fikra-current-backend-name)
     (progn (message "Fikra: no backend selected") nil)
-    (let ((fn-name (concat "fikra-backend-" fikra-current-backend-name "-decide")))
-      (condition-case nil
-        (funcall fn-name decision)
-        (error
-          (progn
-            (message "Fikra: backend %s cannot take approvals" fikra-current-backend-name)
-            nil))))))
+    (if (not (fikra-adapter-resolve-guard))
+      (progn
+        (editor-set-status
+          "Fikra: approval resolve DENIED — interactive client required; prompt stays pending")
+        nil)
+      (let ((fn-name (concat "fikra-backend-" fikra-current-backend-name "-decide")))
+        (condition-case nil
+          (funcall fn-name decision)
+          (error
+            (progn
+              (message "Fikra: backend %s cannot take approvals" fikra-current-backend-name)
+              nil)))))))
+
+;; The guard re-export (runtime require — approvals requires this module
+;; function-level; cycles forbid top-level).
+(defun fikra-adapter-resolve-guard ()
+  (require-module fikra/approvals)
+  (fikra/approvals/fikra-approval-resolve-guard))
 
 (defun fikra-backend-prompt ()
   "Pick a backend via completing-read over the REGISTERED backends (the
