@@ -95,7 +95,7 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     expect(log).not.toContain("allowed continuation");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
-    expect(strip(bufferText(editor))).toContain("= denied");
+    expect(strip(bufferText(editor))).toContain("= denied — the turn ended");
   });
 
   test("a persists per-thread: the NEXT matching (tool, scope) skips the pause; a non-matching pair still pauses (across save/reload)", async () => {
@@ -124,7 +124,7 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     expect(String(start2.value)).toBe("done");
     const log2 = readFileSync(join(dir, ".tmax/fikra/threads/main/events.jsonl"), "utf8");
     expect(log2).toContain("permission-allowed");
-    expect(log2).toContain("\"always\"");
+    expect(log2).toContain("\"always\":\"true\"");
     expect(log2).toContain("allowed continuation");
 
     // A NON-matching pair (different scope) still pauses.
@@ -158,12 +158,13 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     e(editor, '(fikra/backend-pausing/fikra-pausing-decide "n")');
     e(editor, "(fikra/backend-pausing/fikra-pausing-pump)");
     // THREAD-SCOPED: a sibling thread has NO allow-list (its own
-    // state.json) — the same pair pauses there.
+    // state.json) — the EXACT pair the parent allowed (Edit, src/**)
+    // still pauses there (gate r2: a different pair was vacuous — it
+    // pauses under both thread-scoped and global allow-lists).
     e(editor, '(fikra/thread/fikra-thread-new)');
     const child = String(e(editor, "(fikra/thread/fikra-thread-current)").value);
     expect(child).toBe("fix-1");
-    // Fresh script for the child turn (the parent's consumed its own).
-    e(editor, `(fikra/backend-pausing/fikra-backend-pausing-load "${join(dir, "fixture3.jsonl")}")`);
+    e(editor, `(fikra/backend-pausing/fikra-backend-pausing-load "${join(dir, "fixture.jsonl")}")`);
     const st2 = e(editor, '(fikra/adapter/fikra-backend-start-turn "child")');
     expect(String(st2.value)).toBe("paused");
   });

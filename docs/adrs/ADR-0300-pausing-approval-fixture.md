@@ -18,8 +18,8 @@ A pausing fixture backend (replay's sibling) owns the proof: stream to
 a scripted permission-request, park on an out-of-band decision seam
 (a polled variable — the pump resumes on the recorded y/n/a), stream
 the matching branch to turn-end. `a` persists a per-thread
-(tool, scope) allow-list on the thread record (state.json save/load +
-the background-session writer), exact-pair matched, tolerant of the
+(tool, scope) allow-list on the thread record (both json-encode
+writers: the main save and the background-session writer), exact-pair matched, tolerant of the
 json alist round-trip; matching pairs skip the pause. The thread state
 machine's confirming edges are honored both ways. Live-CLI mediation
 remains the fikra-native-backend arc's follow-up (stated honestly).

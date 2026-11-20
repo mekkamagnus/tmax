@@ -22,7 +22,7 @@ equality.
 - `a` persists per-thread: the thread record carries an
   `approval-allow-list` of (tool, scope) pairs — persisted in
   state.json (both json-encode writers carry it: the main save and the
-  background-session writer; the thread-list row reader is untouched)
+  background-session writer)
   and reloaded threads retain it (tolerant of the json alist round-trip).
   The NEXT matching pair SKIPS the pause; a non-matching pair (either
   field differs) still pauses — tested across a save/reload.
