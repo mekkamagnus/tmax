@@ -2,11 +2,11 @@
   (export fikra-skills-list fikra-skills-rows fikra-skills-refresh
           fikra-skill-prompt fikra-skill-accept fikra-skill-table)
 
-;; RFC-029 §8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
+;; RFC-029 section 8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
 ;; surfaced to model and user. Skills from
 ;; <thread-root>/.fikra/skills/<name>/SKILL.md — the frontmatter's
 ;; visibility tag decides model-visible vs user-only (default
-;; model-visible). Coexists with pure T-Lisp defworkflows (§9 Q3
+;; model-visible). Coexists with pure T-Lisp defworkflows (section 9 Q3
 ;; composition deferred).
 
 ;; A discovered skill row: hashmap id/path/visibility/description.
@@ -121,4 +121,5 @@ describing the skill (its SKILL.md body is the instruction)."
 (defvar fikra-skill-history nil)
 
 (provide "fikra-skills")
+)
 )
