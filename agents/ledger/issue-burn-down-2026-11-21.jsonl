@@ -30,3 +30,4 @@
 {"event":"gate","ts":"2026-11-20T20:07:20Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"6a428d2","findings-count":4}
 {"event":"gate","ts":"2026-11-20T20:19:56Z","kind":"verify-gate","verdict":"GAPS","rounds":2,"reviewed-sha":"6ee3fcd","findings-count":2}
 {"event":"gate","ts":"2026-11-20T20:42:30Z","kind":"verify-gate","verdict":"GAPS","rounds":3,"reviewed-sha":"7d8841c","findings-count":4,"note":"all landing-hygiene class; every finding applied (rebase + render assert + ADR word); canonical 3901/0 green post-fix"}
+{"event":"gate","ts":"2026-11-20T20:44:50Z","kind":"codex-grade","verdict":"8/10","rounds":1,"reviewed-sha":"1e6390a","findings-count":2}
