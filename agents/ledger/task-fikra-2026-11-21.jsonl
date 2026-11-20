@@ -2,3 +2,7 @@
 {"event":"unit-start","ts":"2026-11-21T00:00:00+08:00","unit":"iter-r29"}
 {"event":"telemetry","ts":"2026-11-21T00:00:00+08:00","wall-minutes":0,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null}
 {"event":"landing","ts":"2026-11-21T00:05:00+08:00","unit":"iter-r29","shas":["8f090b7"],"files-staged-count":2,"tests-run":[{"name":"bun test test/unit/fikra-skills.test.ts","output":"0 fail\n28 expect() calls\nRan 14 tests across 1 file."}],"adr-spec":[]}
+{"event":"gate","ts":"2026-11-21T01:20:00+08:00","kind":"codex-grade","verdict":"7.5/10","rounds":27,"reviewed-sha":"66bffff","findings-count":4}
+{"event":"gate","ts":"2026-11-21T01:50:00+08:00","kind":"codex-grade","verdict":"7/10","rounds":28,"reviewed-sha":"8f090b7","findings-count":4}
+{"event":"landing","ts":"2026-11-21T02:10:00+08:00","unit":"iter-r29","shas":["b121268"],"files-staged-count":1,"tests-run":[{"name":"bun test test/unit/fikra-backend-claude.test.ts","output":"0 fail\n50 expect() calls\nRan 15 tests across 1 file."}],"adr-spec":[]}
+{"event":"telemetry","ts":"2026-11-21T02:15:00+08:00","wall-minutes":135,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null}
