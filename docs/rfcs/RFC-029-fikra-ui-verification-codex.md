@@ -749,3 +749,24 @@ The completed-worktree exit evidence closes the principal functional gap from ro
 5. **Implement the proposed skills and completion surfaces.** Add skills discovery and presentation alongside [workflow.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/workflow.tlisp), then implement the ghost-text interaction described in 8.8.
 
 The supplied evidence closes the standing revert question: a confirmed interactive revert deleted the created file, and the subsequent daemon-side change count was zero. Together with the approval and worktree demonstrations, that makes the six established surfaces substantially more credible end to end. The full RFC target is still incomplete: native per-action execution and provenance, the handoff review UI, skills, and ghost text remain material gaps. This assessment uses the supplied live-run account and a source review; I did not independently replay those sessions or run tests in this turn.
+
+# Round 25 (skills picker live — 8.7 from 1 to 6) — 2026-11-20
+
+New evidence: the skills module (c96ae8e) — SPC a k picker over .fikra/skills with path·visibility marginalia, orderless filter, n/N count, accept → chat turn rendered with tool correlation; artifacts /tmp/skill87/{01-picker,02-filter,02b-filter-rel,04-chat-after-accept}-ansi.txt.
+
+| Section | Round 25 | One-line justification |
+|---|---:|---|
+| 8.1 Chat | 7/10 | Round-24 grade carried forward. |
+| 8.2 Capture | 8/10 | Round-24 grade carried forward. |
+| 8.3 Approval | 7/10 | Round-24 grade carried forward. |
+| 8.4 Diff + revert | 8/10 | Round-24 grade carried forward. |
+| 8.5 Threads | 7/10 | Round-24 grade carried forward. |
+| 8.6 Worktree | 6/10 | Round-24 grade carried forward. |
+| 8.7 Skills | **6/10** | Discovery, annotated picker and replay dispatch are shown; model availability and workflow candidates remain missing. |
+| 8.8 Ghost text | 0/10 | Round-24 grade carried forward. |
+
+Codex top fixes for 8.7:
+1. Feed model-visible skill metadata to the model as available workflows (user-only excluded until invoked).
+2. Add defworkflow candidates and annotations to the picker (composition stays §9 Q3).
+3. Parse the frontmatter visibility field rather than matching arbitrary body text.
+4. Capture a picker over a confirmed *Fikra* buffer, demonstrate multi-term orderless filtering and the filtered/total count, and verify a selected skill against a live backend.
