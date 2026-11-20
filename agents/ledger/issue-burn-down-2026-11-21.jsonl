@@ -7,3 +7,4 @@
 {"event":"gate","ts":"2026-11-20T11:37:54Z","kind":"codex-grade","verdict":"5/10","rounds":1,"reviewed-sha":"5a6f627","findings-count":3}
 {"event":"gate","ts":"2026-11-20T11:43:19Z","kind":"codex-grade","verdict":"7/10","rounds":2,"reviewed-sha":"2280c65","findings-count":2}
 {"event":"gate","ts":"2026-11-20T11:44:17Z","kind":"codex-grade","verdict":"9/10","rounds":3,"reviewed-sha":"5792aa5","findings-count":1}
+{"event":"landing","ts":"2026-11-20T11:49:58Z","unit":"#300","shas":["cc97e06"],"files-staged-count":6,"tests-run":[{"name":"bun run test:unit","output":"3843 pass\n0 fail\nRan 3844 tests across 306 files. [197.78s]"},{"name":"bun test test/unit/label-tracks-frame.test.ts","output":"2 pass\n0 fail"}],"adr-spec":["docs/adrs/ADR-0295-label-tracks-frame-lighter-restarts.md","docs/specs/SPEC-269-label-tracks-frame-lighter-restarts.md"]}
