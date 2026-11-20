@@ -191,4 +191,23 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     e(ed, '(require-module "fikra/diff")');
     expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("2");
   });
+
+  test("the completed-turn view carries the file-summary block (r75)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    ref("nav", 1, "baseline", "line1\n");
+    ref("nav", 1, "completion", "line1\nfeature-a\n");
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-turn-diff-for 1)");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toContain("turn 1");
+    // The summary block: 1 file, +1 −0, the ± row.
+    expect(text).toContain("1 file(s)");
+    expect(text).toContain("+1");
+    expect(text).toContain("feature-a");
+  });
 });

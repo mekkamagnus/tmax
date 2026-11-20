@@ -61,7 +61,9 @@
               " refs/fikra/" id "/" (number-to-string n) " 2>/dev/null"))))
 
 (defun fikra-turn-diff-for (n)
-  "Render completed turn N's diff in the viewer."
+  "Render completed turn N's diff in the viewer — with the LIVE view's
+file-summary block (r75: the completed view showed only the header, no
+per-file ± rows)."
   (let ((patch (fikra-diff-turn-patch n)))
     (if (or (null patch) (string= (string-trim patch) ""))
       (editor-set-status (concat "Fikra: no captured diff for turn " (number-to-string n)))
@@ -70,7 +72,39 @@
         (fikra-diff-render
           (concat "\e[1;36m── turn " (number-to-string n)
                   " (completed) · ]/[ next/prev turn · n/N file · SPC a d live view ──\e[0m\n\n"
+                  (fikra-diff-completed-summary n)
                   patch))))))
+
+;; The numstat-derived ± rows for a COMPLETED turn (the live view builds
+;; them from working state; here they come from the ref pair).
+(defun fikra-diff-completed-summary (n)
+  (let* ((id (fikra/thread/fikra-thread-current))
+         (root (fikra/thread/fikra-thread-working-dir))
+         (raw (shell-command
+                (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                        " diff --numstat refs/fikra/" id "/" (number-to-string n) "-baseline"
+                        " refs/fikra/" id "/" (number-to-string n)
+                        " 2>/dev/null")))
+         (rows (fikra-diff-numstat-rows (string-split raw "\n") (list))))
+    (if (= (length rows) 0)
+      ""
+      (concat (fikra-diff-summary n rows)
+              "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn\n\n"))))
+
+;; numstat lines ("adds\tdels\tpath") → the ((path adds dels) ...) rows the
+;; summary renderer expects (r75: paths-filter's bare strings are NOT rows —
+;; (cdr string) throws in the totals scan).
+(defun fikra-diff-numstat-rows (lines acc)
+  (if (null lines)
+    (reverse acc)
+    (fikra-diff-numstat-rows (cdr lines)
+      (let ((parts (string-split (car lines) "\t")))
+        (if (>= (length parts) 3)
+          (cons (list (nth 2 parts)
+                      (string-to-number (nth 0 parts))
+                      (string-to-number (nth 1 parts)))
+                acc)
+          acc)))))
 
 (defun fikra-diff-turn-step (delta)
   (let* ((count (fikra/thread/fikra-thread-turn-count))
