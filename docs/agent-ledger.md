@@ -235,15 +235,39 @@ These examples are invalid regardless of event kind.
 {"event":"nap","ts":"2026-11-20T12:00:00Z"}
 ```
 
-## 4. Protocol duties (summary)
+## 4. Commit trailers (`Agent-Run:`)
+
+Every agent-run commit carries a trailer naming its ledger:
+
+```
+Agent-Run: <ledger-id>
+```
+
+`<ledger-id>` is the ledger file's stem — `agents/ledger/agent-infra-2026-11-20.jsonl` ⇒
+`Agent-Run: agent-infra-2026-11-20`. With this, attribution is structural (queryable via
+`git log --grep='Agent-Run: <id>'`), not scope-guessed from commit prefixes — two tabs
+committing in the same namespace stay distinguishable. Motivation and the audit-not-hook
+decision: [ADR-0293](adrs/ADR-0293-agent-run-commit-trailers.md).
+
+The reader-side audit (`scripts/ledger-trailers.ts`) reads every commit since a ledger's
+`run-start` and flags those **missing** the trailer:
+
+- **Unattributed** is a flag, not an accusation — humans commit without trailers too. The
+  run's owner answers for the flagged commits that are theirs.
+- A trailer line must be exactly `Agent-Run: <token>`; a malformed line attributes nothing
+  (the commit surfaces as unattributed rather than being silently credited to a truncated id).
+- A commit naming a *different* ledger id is fine — that's another tab's commit in the same
+  window, precisely the disambiguation the trailer exists for.
+
+## 5. Protocol duties (summary)
 
 The full protocol amendments are RFC-036 §3.3. The ledger-enforced subset:
 
 1. **Load-checks-early** — the `gate` event records that the module-load check + relevant e2e
    ran *before* the root-cause claim.
 2. **Round receipts** — every `gate` names the exact reviewed sha and findings count.
-3. **`Agent-Run:` trailer** — every commit carries `Agent-Run: <ledger-id>` (the filename
-   stem, e.g. `agent-infra-2026-11-20`); attribution is structural, not scope-guessed.
+3. **`Agent-Run:` trailer** — every commit carries `Agent-Run: <ledger-id>` (§4);
+   attribution is structural, not scope-guessed.
 4. **Pasted output or it didn't happen** — `landing.tests-run` carries runner output.
 5. **Honest nulls, never estimates** — `telemetry` and `totals` numeric fields.
 6. **The valve is mandatory** — 5 gate rounds on one unit fires the escalation valve.
