@@ -60,6 +60,35 @@ function fitToWidthWithScroll(rawLine: string, cw: number, viewportLeft: number)
 export { getVisibleViewportTop };
 
 /**
+ * #321: the ONE wrap-aware top-advance (verify-gate: it existed twice and
+ * would desync — the exact bug class this fix removes). Advances `top`
+ * until the cursor's wrapped rows fit `visibleLines`, counting wrapped
+ * rows per logical line at wrap column `cw`. `rowsOfOverride` lets the
+ * fold-aware renderer count fold-hidden lines as zero rows (hidden lines
+ * never render); absent it counts every line (an over-advance that only
+ * pins the cursor higher — harmless for span precomputation).
+ */
+export function advanceWrappedTop(
+  getRawLine: (ln: number) => string,
+  top: number,
+  cursorLine: number,
+  totalLines: number,
+  visibleLines: number,
+  cw: number,
+  rowsOfOverride?: (ln: number) => number,
+): number {
+  if (cursorLine <= top) return top;
+  const rowsOf = rowsOfOverride ?? ((ln: number) => Math.max(1, wrapLine(getRawLine(ln), cw).length));
+  let span = 0;
+  for (let ln = top; ln <= cursorLine && ln < totalLines; ln++) span += rowsOf(ln);
+  while (span > visibleLines && top < cursorLine) {
+    span -= rowsOf(top);
+    top++;
+  }
+  return top;
+}
+
+/**
  * #321: the wrap-aware viewport top for the FOCUSED single-window view —
  * what renderSingleWindowWrapped actually renders from when word wrap is
  * on (the logical clamp otherwise leaves the cursor's wrapped row below
@@ -72,17 +101,14 @@ export function getWrappedViewportTop(state: EditorState, visibleLines: number, 
   const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
   const cw = Math.max(1, width - gw);
-  const cursorLine = state.cursorPosition.line;
-  let top = getVisibleViewportTop(state, visibleLines);
-  if (cursorLine <= top) return top;
-  const rowsOf = (ln: number) => Math.max(1, wrapLine(getLine(state, ln), cw).length);
-  let span = 0;
-  for (let ln = top; ln <= cursorLine && ln < totalLines; ln++) span += rowsOf(ln);
-  while (span > visibleLines && top < cursorLine) {
-    span -= rowsOf(top);
-    top++;
-  }
-  return top;
+  return advanceWrappedTop(
+    (ln) => getLine(state, ln),
+    getVisibleViewportTop(state, visibleLines),
+    state.cursorPosition.line,
+    totalLines,
+    visibleLines,
+    cw,
+  );
 }
 
 export function getVisibleViewportLeft(state: EditorState, contentWidth: number): number {
@@ -433,22 +459,9 @@ function renderSingleWindowWrapped(
   const lines: string[] = [];
   let screenRow = 0;
 
-  // #321 (capture-matrix catch): WRAP-AWARE top. The logical clamp can
-  // leave the cursor's wrapped row below the screen — every line may
-  // occupy multiple rows, so [top, cursorLine] can consume far more than
-  // `visibleLines` rows and the cursor + tail render below the fold (the
-  // blank/frozen tail). Advance the top until the cursor's rows fit.
-  let top = viewportTop;
-  if (isFocused && cursorLine > top) {
-    const rowsOf = (ln: number) => Math.max(1, wrapLine(getLineForBuffer(buffer, ln), cw).length);
-    let span = 0;
-    for (let ln = top; ln <= cursorLine && ln < totalLines; ln++) span += rowsOf(ln);
-    while (span > visibleLines && top < cursorLine) {
-      span -= rowsOf(top);
-      top++;
-    }
-  }
-
+  // Fold-hidden lines are decided BEFORE the top advance so the advance
+  // can count them as ZERO rows (they never render — a fold-blind advance
+  // over-advances and pins the cursor higher than needed; verify-gate r1).
   const hiddenLines = new Set<number>();
   if (foldRanges) {
     for (const [foldStart, foldEnd] of foldRanges) {
@@ -457,6 +470,23 @@ function renderSingleWindowWrapped(
       }
     }
   }
+
+  // #321 (capture-matrix catch): WRAP-AWARE top — the OPERATIVE fix. The
+  // logical clamp can leave the cursor's wrapped row below the screen
+  // (every line may occupy multiple rows, so [top, cursorLine] can consume
+  // far more than `visibleLines` rows — the cursor + tail render below the
+  // fold: the blank/frozen tail). Shared helper, fold-aware here.
+  const top = isFocused
+    ? advanceWrappedTop(
+        (ln) => getLineForBuffer(buffer, ln),
+        viewportTop,
+        cursorLine,
+        totalLines,
+        visibleLines,
+        cw,
+        (ln) => (hiddenLines.has(ln) ? 0 : Math.max(1, wrapLine(getLineForBuffer(buffer, ln), cw).length)),
+      )
+    : viewportTop;
 
   let logicalLine = top;
   while (screenRow < visibleLines && logicalLine < totalLines) {

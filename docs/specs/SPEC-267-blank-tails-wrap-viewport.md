@@ -1,4 +1,4 @@
-# SPEC-267 — blank tails on large buffers: wrap-aware wire windows + viewport (#321)
+# SPEC-267 — blank tails on large buffers: wrap-aware viewport + wire coverage (#321)
 
 ## Goal
 
@@ -7,39 +7,44 @@ tails in the TUI client. This issue is capture-first: the matrix was
 recorded in the issue BEFORE the fix (35 FAIL / 61 PASS pre-fix), the
 cause named from evidence, the fix landed, and the matrix re-ran green.
 
-## Cause (from the matrix + probe)
+## Cause (from the matrix + probe; wording corrected per verify-gate r1)
 
-Two compounding defects, both wrap-related:
+Wrap-unaware client viewport math, plus insufficient wire slack — two
+distinct windows, precisely separated:
 
-1. **Daemon wire window could exclude the cursor line entirely.** The wrap
-   expansion in `editorStateToJson` walked forward from `viewportTop`
-   accumulating estimated wrapped rows and stopped when the SCREEN was
-   covered — at ~2 wrapped rows/line that halts at `rows/2` logical lines
-   while the logical clamp places the cursor up to `rows` lines below top.
-   Probe: window `[58,69)`, cursor at 79. The `render-state` handler
-   additionally passed NO width, disabling the expansion on that path.
-2. **The client's viewport clamp is logical-only.** With wrap on, the
-   cursor's wrapped screen row can sit far below the fold and nothing
-   advances the top (`cursor 79 < top+23` → no adjustment) — the rendered
-   frame ends mid-buffer: the frozen tail.
+- **The CLIENT-RENDERED window was the failing surface.** The probe's
+  "window [58,69), cursor 79" is the range the client actually RENDERED:
+  from a logically-clamped top it fills the screen with wrapped rows and
+  stops after ~`rows/2` logical lines, while the logical clamp believes
+  the cursor (up to `rows` lines below top) is visible — nothing advances
+  the top, so the cursor and the buffer tail sit below the fold. The
+  frozen/blank tail.
+- **The WIRE window** (pre-fix `neededRows = max(rows, i)`) always carried
+  ≥ `renderHeight` logical lines, so the cursor was on the wire wherever
+  the clamp invariant held — but with ZERO slack below the cursor for the
+  client's wrap-expanded fill, and the `render-state` handler passed no
+  width at all (expansion — the fill-slack mechanism — disabled on that
+  path; width-less paths likewise sent exactly `rows`).
 
 Wrap OFF never failed on frame-sized paths — the discrimination the
 matrix demanded.
 
 ## Fix
 
-- `serialize.ts`: the expansion walk continues until the screen is
-  covered AND the cursor line is inside the window; without a width
-  (no-frame paths) the window still spans through the cursor plus screen
-  slack (bounded by the same 6× rows wire limit).
-- `frames.ts`: `render-state` passes the frame's terminal width.
-- `buffer-lines.ts`: `renderSingleWindowWrapped` advances the viewport
-  top wrap-awarely (advance until the cursor's wrapped rows fit the
-  screen, using the client's EXACT wrap + gutter math); exported
-  `getWrappedViewportTop` for the frontends.
+- **Client (operative)**: `renderSingleWindowWrapped` advances the
+  viewport top wrap-awarely — walk the cursor's wrapped-row span and
+  advance until it fits the screen, using the client's EXACT wrapLine +
+  gutter math (fold-hidden lines count zero rows). The advance lives in
+  ONE shared helper (`advanceWrappedTop`); `getWrappedViewportTop` (for
+  the frontends' span precompute) delegates to it.
+- **Wire (coverage hardening)**: the expansion walk continues until the
+  screen is covered AND past the cursor line (fill-below-cursor slack on
+  width-carrying paths); width-less paths (no-frame / no-width) span
+  through the cursor + screen slack under the same 6× wire bound.
+- **render-state** passes the frame's terminal width.
 - `tui-client.ts` + `capture-frame.ts`: syntax spans are precomputed from
-  the wrap-aware top over a 2× logical span (no color loss on the
-  advanced window).
+  the wrap-aware top over a 2× logical span (no color loss on the advanced
+  window).
 
 ## Completion criteria
 

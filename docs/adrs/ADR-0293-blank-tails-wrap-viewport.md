@@ -17,20 +17,28 @@ original fikra chat shape.
 ## Decision
 
 The matrix discriminated cleanly (wrap-off never failed on frame-sized
-paths) and a probe pinned the mechanism: the expansion's stop condition
-covered the SCREEN, not the CURSOR — the wire window could end before the
-cursor line while the client's logical-only clamp believed the cursor
-visible. Three changes, one contract:
+paths) and a probe pinned the mechanism (wording corrected per
+verify-gate r1): the CLIENT-RENDERED window was the failing surface —
+from a logically-clamped top it fills the screen with wrapped rows after
+only ~rows/2 logical lines while the logical-only clamp still believes
+the cursor visible, so nothing advances the top and the cursor + tail
+render below the fold. The wire window itself always carried ≥
+renderHeight logical lines (cursor on it via the clamp invariant) but
+with zero fill-below-cursor slack — and render-state passed no width,
+disabling the expansion there. Three changes, one contract:
 
-1. **The wire window always contains the cursor line.** The daemon's
-   expansion walks until wrapped rows cover the screen AND the window
-   includes the cursor (width known); width-less paths still span through
-   the cursor + slack under the same 6× wire bound. `render-state` now
-   passes the frame width (expansion was silently disabled there).
-2. **The client advances the viewport top wrap-awarely.**
+1. **The client advances the viewport top wrap-awarely (operative).**
    `renderSingleWindowWrapped` walks the cursor's wrapped-row span and
    advances the top until it fits — using the client's exact wrapLine +
-   gutter math, no daemon-side estimation.
+   gutter math, fold-hidden lines counted as zero rows. The advance is
+   ONE shared helper (`advanceWrappedTop`); `getWrappedViewportTop` (span
+   precompute) delegates to it — verify-gate r1 caught the duplicated
+   fold-blind copies as a desync risk.
+2. **The wire window carries fill slack.** The daemon's expansion walks
+   until wrapped rows cover the screen AND past the cursor line; width-
+   less paths span through the cursor + screen slack under the same 6×
+   wire bound. `render-state` now passes the frame width (expansion was
+   silently disabled there).
 3. **Spans follow the rendered range.** Frontends precompute syntax spans
    from `getWrappedViewportTop` over a 2× logical span so the advanced
    window keeps its colors.
