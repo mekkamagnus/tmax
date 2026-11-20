@@ -179,7 +179,9 @@ describe("#220 MCP bridge — the deferred mediate round trip", () => {
     daemon.respond({ result: { decision: "allow", scope: "fikra/main/1" } });
     const result = await shim.next();
     const content = (result.result as { content?: Array<{ type: string; text: string }> }).content!;
-    expect(content[0]!.text).toBe("allow");
+    // Round-38: claude 2.1.329's --permission-prompt-tool contract — the
+    // tool result must BE {behavior:'allow'} / {behavior:'deny',message}.
+    expect(JSON.parse(content[0]!.text)).toEqual({ behavior: "allow", updatedInput: { path: "src/x.ts", content: "x" } });
     expect((result.result as { isError?: boolean }).isError).toBeUndefined();
     shim.kill();
   });
@@ -196,8 +198,7 @@ describe("#220 MCP bridge — the deferred mediate round trip", () => {
     await shim.next();
     shim.send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "permission", arguments: { tool_name: "bash", input: { cmd: "rm -rf /" } } } });
     const rejected = await shim.next();
-    expect((rejected.result as { isError?: boolean }).isError).toBe(true);
-    expect((rejected.result as { content?: Array<{ text: string }> }).content![0]!.text).toBe("reject");
+    expect(JSON.parse((rejected.result as { content?: Array<{ text: string }> }).content![0]!.text)).toEqual({ behavior: "deny", message: expect.stringContaining("rejected") });
     shim.kill();
   });
 

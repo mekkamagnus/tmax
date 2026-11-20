@@ -152,7 +152,14 @@ async function main(): Promise<void> {
             args.tool_name ?? 'unknown',
             JSON.stringify(args.input ?? {}),
           );
-          send(toolResult(result.decision, result.decision === 'reject'));
+          // claude 2.1.329's --permission-prompt-tool contract (round-38
+          // live catch): the tool result must BE the permission decision —
+          // {behavior: 'allow'} / {behavior: 'deny', message} — not a text
+          // blob ("invalid permission result" rejected every allow).
+          const behavior = result.decision === 'allow' || result.decision === 'always'
+            ? { behavior: 'allow', updatedInput: (args.input ?? undefined) as object | undefined }
+            : { behavior: 'deny', message: `tmax user rejected (${result.decision})` };
+          send({ content: [{ type: 'text', text: JSON.stringify(behavior) }] });
         } catch (err) {
           // Bridge/daemon failure reads as a REJECTED tool call — the agent
           // proceeds on the safe side; it must never hang on a dead bridge.
