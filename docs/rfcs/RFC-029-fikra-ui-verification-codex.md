@@ -891,3 +891,13 @@ AI: DONE
 **Live run 2** (fresh daemon, new source): the target-row fix proven — `target rm -f PROBE2.txt && touch PRO…` (was the JSON blob word `{"command":"touch`); resolved via keypress; `→ ok #687e08` / `AI: DONE2` / PROBE2.txt created.
 
 **Fixes landed** (`196649b`): the flattened probe; `fikra-approval-json-command` (the "command" VALUE is the target; mode base `""` — cond's `(string= mode …)` tests throw on nil, which also cured 3 latent #220 failures). Tests: approvals 32/32 solo + the neighbor suites. Remaining named: queued-action count (P2), origin frame-id/model provenance (P2).
+
+## Rounds 82-86 — the live-mediation sub-arc (8.3: the round-8 P1 VERIFIED LIVE, then security depth)
+
+- **r82 (`196649b`)**: LIVE L2 mediation proven twice against claude 2.1.329 (park → panel with earned ✓ → headless denial → TUI keypress → resume → completion transcript), enabled by fixing the WIDTH-FRAGILE capability probe (piped help wrapping false-negatived the flag — L2 silently off) and adding JSON tool-input target extraction.
+- **r83 (`753aaf0`)**: the proof made MECHANICAL — `scripts/fikra-l2-live-e2e.sh` (15/15 from clean invocation); escaped-quote decode in the target scan; unified decision wording.
+- **r84 (`b5d76e0`, PASS 8/10)**: codex INDEPENDENTLY RAN the script — 15 ok / 0 fail. **The P1 standing since round 8 is independently verified.** Script hardening: pinned PATH, PID-scoped cleanup, tolerant attach.
+- **r85 (`9523340`, FAIL 7/10)**: queued modeline segment + honest provenance wording — but codex found the mint unrestricted and FORGED a scope-valid prompt (real P1).
+- **r86 (`96b3998`, FAIL 6/10)**: once-per-scope minting + abort-settles — codex then mapped the remaining token lifecycle: pre-mint retention, no L1 degradation on a declined mint, headless abort leaves the RPC parked, single-use tokens break per-action gating.
+
+**Sub-arc closed at cap+2.** Named follow-ups (the next sub-arc's spec): L2 token lifecycle (mint-time scope-liveness; degradation flags; denial-direction abort API; multi-use-within-scope tokens), frame-id provenance, queued-count generalization. Board: 57/80 with 8.3 live-verified at its r84 peak.
