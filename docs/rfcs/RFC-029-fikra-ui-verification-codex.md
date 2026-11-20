@@ -800,3 +800,7 @@ Also noted by codex: the modeline buffer-name shows *scratch* while Fikra conten
 # Round 28 (r27 fixes: parser +1 slice, modtime stamp, testable gate; NEW catch) — 2026-11-20
 
 8.7 = 7/10. Landed: fm-value +1-slice+trim (visibility:user fixed), shared parser, modtime-stamp invalidation, exported gate predicate, complete replay-text artifact (14-r27-replay-text.txt — the renderer's exact output ending with the full accepted-skill turn). Codex's NEW catch: the stamp's ls used literal quotes (apostrophe-root breakage/injection) — fixed in 8f090b7 with fikra-thread-shq + an add-invalidation test. Also: model-initiated skill use still not demonstrated; modeline *scratch* + count badge open.
+
+# Rounds 29-30 (r28-r29 fixes + the roster-only demo — 8.7 to 8) — 2026-11-21
+
+8.7: 7.5 (r29: quoting fixed, model-initiated attempted but roster/workflow ambiguity) → 8 (r30: preamble clarified to "file-based skills", FRESH-THREAD demo — /tmp/skill87/17-roster-only-fresh-thread-replay.txt: unnamed-skill prompt → model names fikra-skill release-notes → Reads the SKILL.md → executes its commands; add-invalidation + apostrophe-root tests tracked, codex ran them: 16 pass). Open: modeline *scratch* (#298 territory), count badge deviation, equal-timestamp invalidation, populated-cache add test, roster causal proof beyond the transcript.
