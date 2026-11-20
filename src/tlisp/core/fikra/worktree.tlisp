@@ -287,6 +287,10 @@ its summary are missing')."
          (root (fikra/thread/fikra-thread-field "root"))
          (patch-path (fikra-worktree-review-patch-path)))
     (shell-command (concat "mkdir -p " (fikra-shq (fikra-dirname patch-path))))
+    ;; Intent-to-add the worktree's untracked files so the working-tree
+    ;; diff SEES them (a plain git diff <base> covers tracked changes only
+    ;; — a brand-new agent file would vanish from the review).
+    (shell-command (concat "git -C " (fikra-shq path) " add -N . 2>/dev/null"))
     (shell-command
       (concat "git -C " (fikra-shq path) " diff --binary " base
               " > " (fikra-shq patch-path) " 2>/dev/null"))
