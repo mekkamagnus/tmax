@@ -67,10 +67,16 @@ must not end it AGAIN (double turn-end, gate catch).")
     (fikra-claude-approvals-probe-cache fikra-claude-approvals-probe-cache)
     (t
       (progn
-        ;; grep -c counts matching lines; "0" = hook absent.
+        ;; r82 live catch: the CLI WRAPS its help text to the terminal
+        ;; width — a piped (80-col) help split the flag across lines and
+        ;; the grep counted 0 on a CLI that HAS the hook (L2 silently
+        ;; off). Flatten newlines first (hex-built backslash: reader-
+        ;; hostile literal), then grep -c; "0" = hook absent.
         (setq fikra-claude-approvals-probe-cache
               (not (string= (string-trim
-                              (shell-command "claude --help 2>/dev/null | grep -c -- --permission-prompt-tool"))
+                              (shell-command
+                                (concat "claude --help 2>/dev/null | tr -d '"
+                                        (hex-decode "5c") "n' | grep -c -- --permission-prompt-tool")))
                             "0")))
         fikra-claude-approvals-probe-cache))))
 

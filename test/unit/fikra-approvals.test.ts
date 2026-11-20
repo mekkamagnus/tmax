@@ -543,3 +543,24 @@ describe("#220 L2 — capability gating (claude-first, probe-driven)", () => {
   });
 
 });
+describe("r82 — claude's JSON tool-input detail: the command IS the target", () => {
+  // The live L2 run's catch: the raw word scan grabbed the JSON blob word
+  // ('{"command":"touch') — the "command" VALUE is the actionable target.
+  // Quotes are hex-built: literal backslash escapes are reader-hostile.
+  const q = '(hex-decode "22")';
+  const detail = `(concat "Bash: {" ${q} "command" ${q} ":" ${q} "touch PROBE.txt" ${q} "," ${q} "description" ${q} ":" ${q} "Create empty PROBE.txt file" ${q} "}")`;
+
+  test("the json-command scan extracts the command value", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, "(require-module fikra/approvals)");
+    expect(String(e(editor, `(fikra/approvals/fikra-approval-json-command ${detail})`).value)).toBe("touch PROBE.txt");
+    expect(String(e(editor, `(fikra/approvals/fikra-approval-target ${detail})`).value)).toBe("touch PROBE.txt");
+  });
+
+  test("a NON-JSON detail keeps the word-scan target (paths still win)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, "(require-module fikra/approvals)");
+    expect(String(e(editor, '(fikra/approvals/fikra-approval-json-command "rm -rf src/client/.legacy-render/")').value)).toBe("null");
+    expect(String(e(editor, '(fikra/approvals/fikra-approval-target "rm -rf src/client/.legacy-render/")').value)).toBe("src/client/.legacy-render/");
+  });
+});

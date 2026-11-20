@@ -4,7 +4,7 @@
           fikra-approval-answer-always fikra-approval-resolve-guard
           fikra-set-approval-guard fikra-approval-pending-p
           fikra-approvals-ensure-bindings fikra-approval-target-rich
-          fikra-approval-baseline-ref)
+          fikra-approval-baseline-ref fikra-approval-json-command)
 
 ;; #220 (RFC-027 §D5 L2, §Security) — Fikra policy on the generic
 ;; confirmation mechanism (#210): the daemon parks a mediate from the MCP
@@ -152,8 +152,34 @@ segment reads)."
 ;; The detail's actionable TARGET: the first PATH-looking token (a word
 ;; containing "/"), else the first word (the command). Word-scanning keeps
 ;; the path whole ("src/x.ts", never "/x.ts") and skips filler.
+;; claude's permission detail carries the tool input as JSON — when a
+;; "command" key exists its VALUE is the actionable target (the raw word
+;; scan grabbed the '{"command":"touch' blob — r82 live catch).
+(defun fikra-approval-json-command (detail)
+  ;; Mode base is "" (not nil): cond's (string= mode ...) TESTS would
+  ;; throw on a nil mode before the fallback branch is reached.
+  (fikra-approval-json-scan (string-split detail "\"") ""))
+
+(defun fikra-approval-json-scan (parts mode)
+  (if (null parts)
+    nil
+    (let ((p (car parts)))
+      (cond
+        ((string= mode "want-colon")
+          (if (string= (string-trim p) ":")
+            (fikra-approval-json-scan (cdr parts) "want-value")
+            (fikra-approval-json-scan (cdr parts) nil)))
+        ((string= mode "want-value")
+          (if (> (length p) 0) p (fikra-approval-json-scan (cdr parts) "want-value")))
+        (t
+          (if (or (string= p "command") (string= (string-trim p) "{command")
+                  (string= (string-trim p) ",command"))
+            (fikra-approval-json-scan (cdr parts) "want-colon")
+            (fikra-approval-json-scan (cdr parts) "")))))))
+
 (defun fikra-approval-target (detail)
-  (fikra-approval-target-words (string-split detail " ") nil))
+  (let ((cmd (fikra-approval-json-command detail)))
+    (if cmd cmd (fikra-approval-target-words (string-split detail " ") nil))))
 
 ;; Two slots (r71): WORD — the first short non-filler word (the command
 ;; fallback); PATH — the first word containing "/". The FIRST path wins
