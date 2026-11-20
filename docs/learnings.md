@@ -157,3 +157,12 @@ When tool-call content should contain the two-character escape `\0` (backslash +
 2026-11-20: live sessions prove 243 text-deltas reach the FAEP log while the TUI's *Fikra* never grows during a turn (and after turn-end the TUI shows only the turn header). `buffer-append-to` (by-name append, committed 3e68b20) works when probed via `-e`, but the filter-context render still doesn't land in the TUI's view — AND the headless `-e` session's buffer-list shows `*Fikra-Capture*` (chat state it should never have). The buffer-sharing model between the daemon's `-e` editor and the TUI frame editor is contradictory across observations (round 9 saw sharing; this session sees divergence).
 
 **Rule:** before the next streaming-render attempt, instrument `fikra-event-emit-batch-for`'s render path to append-file its target/`buffer-append-to` result to /tmp (the condition-case currently swallows everything), and dump BOTH sessions' `*Fikra*` line counts mid-turn. Do not add more render-path variants on top of an unverified ownership model.
+
+## The frozen-streaming chase: a load failure wearing a render bug's clothes (2026-11-20, rounds 22-24)
+
+Three rounds hunted a "streaming render" failure (243 deltas logged, buffer frozen). Root cause: a round-22 edit to event.tlisp broke the file for the reader ("Expected ')' to close list") — **fikra/event silently failed to LOAD in every daemon**; nothing downstream could render. The suites stayed green because subsets passed (the failing shape only surfaces when the module loads in the daemon / full sweep), and the module loader swallows per-file errors (round-1 learning, again).
+
+**Rules:**
+1. After ANY .tlisp edit: run `bun run /tmp/eval-check.ts <file>` (interpreter.execute on the file) AND a daemon-side `(require-module ...)` smoke — parse-check alone passed on the broken file.
+2. When a runtime feature "silently stops working," grep *Messages* for module-load errors FIRST — before theorizing about the feature's own code.
+3. The `buffer-append-to` by-name primitive has a buffer-instance mismatch (returns the text while buffer-text reads empty in the same fixture) — sort the editor/ctx buffer-ownership model before revisiting named appends.
