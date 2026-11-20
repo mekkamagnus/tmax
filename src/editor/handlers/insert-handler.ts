@@ -95,6 +95,8 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
     // makes no post-newline decision itself.
     editor.executeCommand("(insert-newline)");
     editor.executeCommand("(post-newline-hook)");
+    // §8.8: the newline moved the cursor — the ghost is stale.
+    try { editor.executeCommand("(condition-case nil (progn (require-module \"fikra/ghost\") (fikra-ghost-dismiss)) (error () nil))"); } catch (_) { /* optional */ }
   }
   // Handle Backspace key in insert mode
   else if (normalizedKey === "Backspace") {
@@ -102,6 +104,8 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
       data: { key: 'Backspace' }
     });
     editor.executeCommand("(insert-backspace)");
+    // §8.8: the deletion moved the column — stale ghost.
+    try { editor.executeCommand("(condition-case nil (progn (require-module \"fikra/ghost\") (fikra-ghost-dismiss)) (error () nil))"); } catch (_) { /* optional */ }
   }
   // Handle Tab key in insert mode
   else if (normalizedKey === "Tab") {
@@ -140,8 +144,10 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
   }
   // Handle Escape key to return to normal mode
   else if (normalizedKey === "Escape") {
-    // §8.8: dismiss any active ghost before leaving insert mode.
-    try { editor.executeCommand("(ghost-text-clear)"); } catch (_) { /* not loaded */ }
+    // §8.8: dismiss through the MODULE (mirror + anchor + render — a bare
+    // ghost-text-clear left the T-Lisp mirror live: re-entering insert and
+    // pressing Tab could accept an invisible suggestion; codex r38).
+    try { editor.executeCommand("(condition-case nil (progn (require-module \"fikra/ghost\") (fikra-ghost-dismiss)) (error () (ghost-text-clear)))"); } catch (_) { /* not loaded */ }
     // SPEC-067: record last insert position as the "^" mark for `gi`.
     // Done before SetMode while the cursor is still at the insert point.
     // Wrapped so a recording failure can never break the return to normal.

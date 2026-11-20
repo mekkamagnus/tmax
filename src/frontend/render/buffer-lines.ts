@@ -561,7 +561,10 @@ export function renderBufferLines(
         // (sliceFromVisualOffset returns the suffix — viewport-scroll use).
         const head = sliceToVisualWidth(row, col);
         const ghost = sliceToVisualWidth(style(state.ghostText, { dim: true, italic: true }), cw - Math.min(col, cw));
-        rows[cursorRow] = head + ghost;
+        // Keep the text AFTER the cursor visible (codex r38: replacing the
+        // row hid a mid-line suffix); clipped to the remaining width.
+        const suffix = sliceToVisualWidth(sliceFromVisualOffset(row, col), cw - Math.min(col + stringWidth(state.ghostText), cw));
+        rows[cursorRow] = head + ghost + suffix;
       }
     }
     return rows;

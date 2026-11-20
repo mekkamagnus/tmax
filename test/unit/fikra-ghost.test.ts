@@ -62,6 +62,38 @@ describe("#8.8 ghost text", () => {
     expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
   });
 
+  test("Escape-reentry cannot accept an invisible ghost (r38)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "hello")');
+    e(editor, '(fikra/ghost/fikra-ghost-set " world")');
+    // The handler's Escape path (dismiss through the module):
+    e(editor, "(fikra/ghost/fikra-ghost-dismiss)");
+    // Re-enter insert; TAB must NOT insert anything.
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-accept) "accepted" "refused")').value)).toBe("refused");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("hello");
+  });
+
+  test("a moved cursor makes the ghost stale: accept refuses and clears", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "hello")');
+    e(editor, '(fikra/ghost/fikra-ghost-set " world")');
+    (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate({ type: "SetCursorPosition", position: { line: 0, column: 2 } });
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-accept) "accepted" "refused")').value)).toBe("refused");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("hello");
+  });
+
+  test("a multiline source sets the FIRST LINE for both display and acceptance", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "hello")');
+    e(editor, '(fikra/ghost/fikra-ghost-set " first\nsecond")');
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-text)").value)).toBe(" first");
+    e(editor, "(fikra/ghost/fikra-ghost-accept)");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("hello first");
+  });
+
   test("the default source is none: triggers are silent no-ops", async () => {
     const editor = await createStartedEditor("");
     e(editor, '(require-module "fikra/ghost")');

@@ -2,7 +2,7 @@
   (export fikra-ghost-active-p fikra-ghost-accept fikra-ghost-accept-word
           fikra-ghost-dismiss fikra-ghost-maybe-trigger fikra-ghost-set
           fikra-ghost-set-source fikra-ghost-source-local fikra-ghost-source-none
-          fikra-ghost-text)
+          fikra-ghost-text fikra-ghost-stale-dismiss)
 
 ;; RFC-029 section 8.8 (P5, round 1): inline completion at the cursor.
 ;; The EDITOR state carries the rendered text (ghost-text-set); this module
@@ -23,9 +23,24 @@ custom function name taking the line prefix and returning a string/nil.")
   (setq fikra-ghost-source-name name)
   name)
 
+(defvar fikra-ghost-anchor-line nil
+  "The line the ghost was computed for (accept refuses on a moved cursor).")
+(defvar fikra-ghost-anchor-col nil)
+
 (defun fikra-ghost-set (text)
-  (setq fikra-ghost-current text)
-  (ghost-text-set text))
+  ;; Single-line scope: the MIRROR stores the same first line the render
+  ;; shows (codex r38: a multiline source could display one thing and
+  ;; accept another).
+  (let ((first (fikra-ghost-first-line text 0)))
+    (setq fikra-ghost-current (if (> (length first) 0) first nil))
+    (setq fikra-ghost-anchor-line (cursor-line))
+    (setq fikra-ghost-anchor-col (cursor-column))
+    (if fikra-ghost-current (ghost-text-set fikra-ghost-current) (ghost-text-clear))))
+
+(defun fikra-ghost-first-line (s i)
+  (if (or (>= i (length s)) (string= (substring s i (+ i 1)) "\n"))
+    (substring s 0 i)
+    (fikra-ghost-first-line s (+ i 1))))
 
 (defun fikra-ghost-dismiss ()
   (interactive)
@@ -40,20 +55,37 @@ custom function name taking the line prefix and returning a string/nil.")
   "The active ghost text (nil when dismissed)."
   (if (fikra-ghost-active-p) fikra-ghost-current nil))
 
+(defun fikra-ghost-anchored-p ()
+  ;; The suggestion belongs to its (line, column); edits or movement past
+  ;; it make acceptance stale (codex r38).
+  (if (not (fikra-ghost-active-p))
+    nil
+    (and (= fikra-ghost-anchor-line (cursor-line))
+         (= fikra-ghost-anchor-col (cursor-column)))))
+
+(defun fikra-ghost-stale-dismiss ()
+  "Public: clear a ghost that no longer matches its context (movement)."
+  (if (fikra-ghost-anchored-p)
+    nil
+    (progn (fikra-ghost-dismiss) t)))
+
 (defun fikra-ghost-accept ()
-  "TAB: insert the whole ghost at the cursor, dismiss."
+  "TAB: insert the whole ghost at the cursor, dismiss. Refuses (and
+clears) when the cursor left the suggestion's anchor."
   (interactive)
-  (if (fikra-ghost-active-p)
+  (if (fikra-ghost-anchored-p)
     (progn
       (buffer-insert fikra-ghost-current)
       (fikra-ghost-dismiss)
       t)
-    nil))
+    (progn
+      (fikra-ghost-dismiss)
+      nil)))
 
 (defun fikra-ghost-accept-word ()
   "C-n: accept the ghost's first word only (partial accept)."
   (interactive)
-  (if (fikra-ghost-active-p)
+  (if (fikra-ghost-anchored-p)
     (progn
       (buffer-insert (fikra-ghost-word-prefix fikra-ghost-current 0 ""))
       (fikra-ghost-dismiss)
