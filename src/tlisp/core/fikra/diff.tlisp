@@ -68,7 +68,7 @@
       (buffer-switch fikra-diff-buffer-name)
       (buffer-set-read-only nil)
       (let ((count (buffer-line-count)))
-        (if (> count 1) (buffer-delete-range 0 count))))
+        (if (> count 1) (buffer-delete-range 0 0 count 0))))
     (buffer-create fikra-diff-buffer-name))
   (buffer-switch fikra-diff-buffer-name)
   (buffer-set-read-only nil)
