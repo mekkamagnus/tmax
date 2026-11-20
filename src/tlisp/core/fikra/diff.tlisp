@@ -1,6 +1,7 @@
 (defmodule fikra/diff
   (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn
-          fikra-diff-restore-turn fikra-changed-paths-since-baseline)
+          fikra-diff-restore-turn fikra-changed-paths-since-baseline
+          fikra-revert-confirm-table fikra-revert-confirm-accept)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -142,7 +143,16 @@
   (let ((paths (fikra-changed-paths-since-baseline)))
     (if (or (null paths) (= (length paths) 0))
       (editor-set-status "Fikra: nothing to revert")
-      (let ((confirm (read-string "Revert this turn's changes? type revert: ")))
+      ;; completing-read, NOT read-string (round-26 live catch): read-string
+      ;; is a STUB — it echoes the prompt and returns "" instantly, so the
+      ;; typed "revert" could never reach the comparison. The table must be
+      ;; a FUNCTION (input action) — the runtime-mode table pattern; a defvar
+      ;; list failed as "Undefined function".
+      (let ((confirm (completing-read "Revert this turn's changes? "
+                                      "fikra/diff/fikra-revert-confirm-table"
+                                      nil nil ""
+                                      "fikra-revert-confirm-history"
+                                      "fikra/diff/fikra-revert-confirm-accept")))
         (if (not (string= confirm "revert"))
           (editor-set-status "Fikra: revert cancelled")
           (progn
@@ -206,6 +216,23 @@
 (defun fikra-join-args (parts)
   (if (null parts) ""
     (concat "'" (car parts) "'" (if (cdr parts) (concat " " (fikra-join-args (cdr parts))) ""))))
+
+;; Completion table as a FUNCTION (input action) — the completing-read
+;; contract. Candidates: revert / cancel.
+(defun fikra-revert-confirm-table (input action)
+  (if (string= action "metadata")
+    (hashmap "category" "command")
+    (list
+      (list "revert" "candidate" "discard this turn's changes")
+      (list "cancel" "candidate" "keep them"))))
+
+(defvar fikra-revert-confirm-history nil
+  "Minibuffer history for the revert confirmation.")
+
+(defun fikra-revert-confirm-accept (choice)
+  "Minibuffer accept handler: the chosen CHOICE is the revert decision
+input; completing-read needs the accept fn to receive it."
+  choice)
 
 (provide "fikra-diff")
 )
