@@ -29,4 +29,4 @@ remains the fikra-native-backend arc's follow-up (stated honestly).
 - The tmax-side gate loop (pause → decide → resume) is now under test;
   the graded capture is the frame sequence from the replayed *Fikra*.
 - The thread record grows one persisted field (`approval-allow-list`)
-  on all three state.json writers.
+  on both json-encode state.json writers.

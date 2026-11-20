@@ -105,7 +105,7 @@ describe("#212 FAEP — replay rendering (RFC §D2 table)", () => {
     expect(stripAnsi(text)).toContain("? write src/x.ts"); // panel action row
     expect(stripAnsi(text)).toContain("paused");
     expect(stripAnsi(text)).toContain("  = allow\n");
-    expect(stripAnsi(text)).toContain("  ⌘ [ckpt main/1 ✓]\n");
+    expect(stripAnsi(text)).toContain("  ⌘ [ckpt main/1 ✓]"); // r58 format (main r60 also fixed the stale expectation)
   });
 
   test("tombstone invalidates the turn range; rendering CONTINUES after it", async () => {

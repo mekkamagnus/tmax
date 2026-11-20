@@ -122,6 +122,10 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     e(editor2, "(fikra/thread/fikra-thread-open)");
     const start2 = e(editor2, '(fikra/adapter/fikra-backend-start-turn "second")');
     expect(String(start2.value)).toBe("done");
+    // The ALWAYS-branch render asserted in a FRAME (gate r3: only the log
+    // payload was pinned — the renderer's conditional was untested).
+    e(editor2, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(strip(bufferText(editor2))).toContain("= allowed always for this tool+scope");
     const log2 = readFileSync(join(dir, ".tmax/fikra/threads/main/events.jsonl"), "utf8");
     expect(log2).toContain("permission-allowed");
     expect(log2).toContain("\"always\":\"true\"");
