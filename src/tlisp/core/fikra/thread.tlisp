@@ -194,7 +194,7 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count" "context-dir" "last-at" "status"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count" "context-dir" "approval-allow-list" "last-at" "status"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
@@ -241,6 +241,7 @@ history into it (daemon-restart reopen path), focus it."
       (json-encode (list
                      (list "id" (fikra-thread-field "id"))
                      (list "context-dir" (fikra-thread-field "context-dir"))
+                     (list "approval-allow-list" (fikra-thread-field "approval-allow-list"))
                      (list "backend" (fikra-thread-field "backend"))
                      (list "session-id" (fikra-thread-field "session-id"))
                      (list "runtime-mode" (fikra-thread-field "runtime-mode"))
@@ -287,6 +288,7 @@ not land under the wrong project)."
           (json-encode (list
                          (list "id" id)
                          (list "context-dir" (hashmap-get state "context-dir"))
+                         (list "approval-allow-list" (hashmap-get state "approval-allow-list"))
                          (list "backend" (hashmap-get state "backend"))
                          (list "session-id" sid)
                          (list "runtime-mode" (hashmap-get state "runtime-mode"))
@@ -524,7 +526,7 @@ current project's NON-archived threads."
 (defun fikra-thread-row-normalize (alist)
   (let ((row (hashmap)))
     (dolist (key (list "backend" "runtime-mode" "worktree" "status"
-                       "turn-count" "context-dir" "last-at" "status"))
+                       "turn-count" "context-dir" "approval-allow-list" "last-at" "status"))
       (let ((v (fikra-alist-get key alist)))
         (if (not (null v))
           (editor/keymaps/keymap-mutable-set! row key v))))

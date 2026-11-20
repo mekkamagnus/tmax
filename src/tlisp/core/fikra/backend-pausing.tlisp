@@ -1,0 +1,269 @@
+(defmodule fikra/backend-pausing
+  (export fikra-backend-pausing-available-p fikra-backend-pausing-capabilities
+          fikra-backend-pausing-load fikra-backend-pausing-start-turn
+          fikra-backend-pausing-abort
+          fikra-pausing-pump fikra-pausing-decide
+          fikra-pausing-pending-p fikra-pausing-allow-list-get fikra-pausing-allow-matches-p
+          fikra-pausing-stream-until-pause-or-end)
+
+;; #303 — the PAUSING FIXTURE BACKEND (replay's sibling): streams a
+;; scripted turn UP TO a permission-request event, then BLOCKS awaiting
+;; an out-of-band decision (a recorded variable the pump polls — NOT user
+;; keystrokes, NOT a real CLI), then streams the branch matching the
+;; decision (allow-continuation vs denial) to turn-end. This proves the
+;; gate's full loop: pause → decision → resume.
+;;
+;; Fixture script (one JSON-ish form per line, the replay-chunk idiom):
+;;   {"type":"assistant","text":"before the gate"}          → text-delta
+;;   {"type":"permission","tool":"Edit","scope":"src/**"}   → the PAUSE
+;;   {"type":"assistant","text":"allowed continuation"}     → allow branch
+;;   {"type":"denied","text":"action rejected"}             → deny branch
+;; The permission event carries EXPLICIT tool/scope fields (the fixture
+;; declares the pair; the live event format's pair absence is a
+;; live-CLI follow-up, not this fixture's).
+;;
+;; `a` (always) persists per-thread: the thread record carries an
+;; allow-list of (hashmap "tool" t "scope" s); matching = exact pair
+;; equality; a matching pair SKIPS the pause; a non-matching pair still
+;; pauses (tested across a save/reload).
+
+(require-module fikra/event)
+(require-module fikra/thread)
+(require-module fikra/backend-claude)
+
+(defvar fikra-pausing-script nil
+  "The loaded script: a T-Lisp list of parsed chunk alists.")
+(defvar fikra-pausing-cursor 0
+  "The next script index to stream.")
+(defvar fikra-pausing-paused-at nil
+  "Non-nil while a permission-request is parked awaiting a decision: the
+  script index of the pause point.")
+(defvar fikra-pausing-decision nil
+  "The out-of-band decision seam: y | n | a (set by fikra-pausing-decide).")
+
+(defun fikra-backend-pausing-available-p () t)
+
+(defun fikra-backend-pausing-capabilities ()
+  (hashmap "streaming" t "permissions" t "name" "pausing"))
+
+(defun fikra-backend-pausing-load (path)
+  "Load a pausing fixture (the replay chunk format; see the module doc)."
+  (setq fikra-pausing-script
+    (fikra-pausing-parse (string-split (read-file-content path) "\n") (list)))
+  (setq fikra-pausing-cursor 0)
+  (setq fikra-pausing-paused-at nil)
+  (setq fikra-pausing-decision nil)
+  (if fikra-pausing-script t nil))
+
+(defun fikra-pausing-parse (lines acc)
+  (if (null lines)
+    (reverse acc)
+    (let ((line (car lines)))
+      (if (> (length line) 2)
+        (fikra-pausing-parse (cdr lines)
+          (cons (json-read-from-string line) acc))
+        (fikra-pausing-parse (cdr lines) acc)))))
+
+(defun fikra-pausing-field (entry key)
+  (let ((v (fikra-alist-get key entry)))
+    (if (stringp v) v "")))
+
+(defun fikra-alist-get (key alist)
+  (let ((found nil))
+    (dolist (e alist)
+      (if (and (not found) (listp e) (= (length e) 2)
+               (string= (car e) key))
+        (setq found (car (cdr e)))))
+    found))
+
+;; ── the pause decision seam (out-of-band; the tests drive this) ─────
+(defun fikra-pausing-decide (decision)
+  "Record the out-of-band decision (y | n | a). The NEXT pump resumes."
+  (setq fikra-pausing-decision decision)
+  decision)
+
+(defun fikra-pausing-pending-p ()
+  (if fikra-pausing-paused-at t nil))
+
+;; The persisted allow-list accessor (thread-scoped; survives reload).
+(defun fikra-pausing-allow-list-get ()
+  (or (fikra/thread/fikra-thread-field "approval-allow-list") (list)))
+
+;; Tolerant pair getter: fresh entries are hashmaps; a RELOADED list
+;; comes back from json as alists of (("tool" v) ("scope" v)).
+(defun fikra-pausing-pair-field (entry key)
+  (let ((v (condition-case nil (hashmap-get entry key) (error () nil))))
+    (if (stringp v) v
+      (let ((a (fikra-alist-get key entry)))
+        (if (stringp a) a "")))))
+
+(defun fikra-pausing-allow-matches-p (tool scope)
+  (let ((hit nil) (lst (fikra-pausing-allow-list-get)))
+    (dolist (entry lst)
+      (if (and (not hit)
+               (string= (fikra-pausing-pair-field entry "tool") tool)
+               (string= (fikra-pausing-pair-field entry "scope") scope))
+        (setq hit t)))
+    hit))
+
+(defun fikra-pausing-remember-always (tool scope)
+  (fikra/thread/fikra-thread-set-field "approval-allow-list"
+    (cons (hashmap "tool" tool "scope" scope)
+          (fikra-pausing-allow-list-get)))
+  (fikra/thread/fikra-thread-save))
+
+;; ── the start-turn entry (the adapter contract) ─────────────────────
+(defun fikra-backend-pausing-start-turn (message)
+  "Stream the scripted turn. At a permission chunk: when the persisted
+allow-list matches the (tool, scope) pair the pause is SKIPPED (the
+allow branch streams); otherwise PAUSE (return 'paused) and wait for
+fikra-pausing-decide + the pump."
+  (if (not fikra-pausing-script)
+    (progn (editor-set-status "Fikra-pausing: no fixture loaded") nil)
+    (progn
+      (fikra/thread/fikra-thread-turn-begin)
+      (fikra-pausing-stream-until-pause-or-end))))
+
+;; ── the pump: streams chunks; parks at permissions; resumes on decision
+(defun fikra-pausing-pump ()
+  "Advance the script: called by the tests after a decision lands. When
+  paused and a decision is recorded, consumes it (emitting the matching
+  branch) and continues to turn-end. Returns 'done | 'paused | 'idle."
+  (cond
+    ((and fikra-pausing-paused-at fikra-pausing-decision)
+      ;; Consume the decision, stream the matching branch, continue.
+      (let ((decision fikra-pausing-decision))
+        (setq fikra-pausing-decision nil)
+        (setq fikra-pausing-paused-at nil)
+        (cond
+          ((string= decision "n")
+            (progn
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "permission-denied")))
+              (fikra-pausing-emit-branch "denied")
+              (fikra-pausing-finish)))
+          ((string= decision "a")
+            (let ((tool (fikra-pausing-pending-tool))
+                  (scope (fikra-pausing-pending-scope)))
+              (fikra-pausing-remember-always tool scope)
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "permission-allowed")
+                      (list "always" t)))
+              (fikra-pausing-emit-branch "assistant")
+              (fikra-pausing-finish)))
+          (t
+            (progn
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "permission-allowed")))
+              (fikra-pausing-emit-branch "assistant")
+              (fikra-pausing-finish))))
+        'done))
+    ((and fikra-pausing-paused-at (not fikra-pausing-decision)) 'paused)
+    (t 'idle)))
+
+;; The pending permission's declared pair (recorded at pause time).
+(defvar fikra-pausing-pending-tool-val nil)
+(defvar fikra-pausing-pending-scope-val nil)
+(defun fikra-pausing-pending-tool () fikra-pausing-pending-tool-val)
+(defun fikra-pausing-pending-scope () fikra-pausing-pending-scope-val)
+
+;; Streams script chunks until a permission pause or the script end.
+(defun fikra-pausing-stream-until-pause-or-end ()
+  (if (>= fikra-pausing-cursor (length fikra-pausing-script))
+    (progn (fikra-pausing-finish) 'done)
+    (let* ((entry (nth fikra-pausing-cursor fikra-pausing-script))
+           (type (fikra-pausing-field entry "type")))
+      (cond
+        ((string= type "permission")
+          (let ((tool (fikra-pausing-field entry "tool"))
+                (scope (fikra-pausing-field entry "scope")))
+            (if (fikra-pausing-allow-matches-p tool scope)
+              ;; Persisted always-allow: skip the pause, stream the allow
+              ;; branch to the end.
+              (progn
+                (setq fikra-pausing-cursor (+ fikra-pausing-cursor 1))
+                (fikra/event/fikra-event-emit
+                  (list (list "kind" "permission-allowed")
+                        (list "always" t)))
+                (fikra-pausing-emit-rest-as "assistant")
+                (fikra-pausing-finish)
+                'done)
+              ;; PAUSE: park at this index, emit the request event.
+              (progn
+                (setq fikra-pausing-pending-tool-val tool)
+                (setq fikra-pausing-pending-scope-val scope)
+                (setq fikra-pausing-paused-at fikra-pausing-cursor)
+                (fikra/event/fikra-event-emit
+                  (list (list "kind" "permission-request")
+                        (list "action" (concat tool ": " scope))
+                        (list "tool" tool)
+                        (list "scope" scope)
+                        (list "id" "fx-pausing")))
+                (fikra/thread/fikra-thread-status-set "confirming")
+                (editor-set-status
+                  "Fikra: approve Edit? [y] allow [n] reject [a] always")
+                'paused))))
+        (t
+          ;; A plain assistant chunk before the gate.
+          (progn
+            (fikra-pausing-emit-chunk entry)
+            (setq fikra-pausing-cursor (+ fikra-pausing-cursor 1))
+            (fikra-pausing-stream-until-pause-or-end)))))))
+
+;; Emit every remaining chunk of the given branch type (the branch after
+;; a permission: "assistant" = the allow continuation, "denied" = the
+;; denial text).
+(defun fikra-pausing-emit-branch (branch-type)
+  (setq fikra-pausing-cursor (+ fikra-pausing-cursor 1))
+  (fikra-pausing-emit-rest-as branch-type))
+
+(defun fikra-pausing-emit-rest-as (branch-type)
+  ;; Stream the matching branch: chunks of the branch type are emitted;
+  ;; the OTHER branch's chunks are SKIPPED (the decision selects which
+  ;; branch renders); "end" terminates.
+  (if (>= fikra-pausing-cursor (length fikra-pausing-script))
+    nil
+    (let* ((entry (nth fikra-pausing-cursor fikra-pausing-script))
+           (type (fikra-pausing-field entry "type")))
+      (cond
+        ((string= type "end") nil)
+        ((string= type branch-type)
+          (progn
+            (fikra-pausing-emit-chunk entry)
+            (setq fikra-pausing-cursor (+ fikra-pausing-cursor 1))
+            (fikra-pausing-emit-rest-as branch-type)))
+        (t
+          (progn
+            (setq fikra-pausing-cursor (+ fikra-pausing-cursor 1))
+            (fikra-pausing-emit-rest-as branch-type)))))))
+
+(defun fikra-pausing-emit-chunk (entry)
+  (let ((type (fikra-pausing-field entry "type")))
+    (cond
+      ((string= type "assistant")
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "text-delta")
+                (list "text" (fikra-pausing-field entry "text")))))
+      ((string= type "denied")
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "text-delta")
+                (list "text" (fikra-pausing-field entry "text")))))
+      (t nil))))
+
+(defun fikra-pausing-finish ()
+  (setq fikra-pausing-paused-at nil)
+  (setq fikra-pausing-pending-tool-val nil)
+  (setq fikra-pausing-pending-scope-val nil)
+  ;; The pause set confirming; the state machine needs running before
+  ;; turn-end can settle it to idle (confirming->running is the legal
+  ;; approval round-trip edge).
+  (if (string= (fikra/thread/fikra-thread-status) "confirming")
+    (fikra/thread/fikra-thread-status-set "running"))
+  (fikra/thread/fikra-thread-turn-end "completed"))
+
+(defun fikra-backend-pausing-abort () nil)
+
+;; Self-register
+(fikra/adapter/fikra-register-backend "pausing")
+
+(provide "fikra-backend-pausing"))
