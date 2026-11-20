@@ -211,3 +211,32 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     expect(text).toContain("feature-a");
   });
 });
+
+describe("#8.4 binary numstat (r76 — codex r75 P1)", () => {
+  test("a turn containing a BINARY file renders, counts parse as 0, no crash", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    // baseline: app.txt only; completion: text change + a binary addition.
+    ref("nav", 1, "baseline", "line1\n");
+    writeFileSync(join(repoDir, "bin.o"), Buffer.from([0x00, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    writeFileSync(join(repoDir, "app.txt"), "line1\nfeature-a\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    const tree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "bin"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1", commit], { cwd: repoDir });
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-turn-diff-for 1)");
+    const text = String(e(ed, "(buffer-text)").value);
+    // The viewer RENDERS: header, both ± rows (binary counted 0/0).
+    expect(text).toContain("turn 1");
+    expect(text).toContain("2 file(s)");
+    expect(text).toContain("bin.o");
+    expect(text).toContain("feature-a");
+    // Exactly ONE keys line (r76: the completed view doubled the hint).
+    expect(text.split("n/N: next/prev file").length - 1).toBe(1);
+  });
+});

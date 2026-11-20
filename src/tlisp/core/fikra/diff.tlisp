@@ -88,12 +88,13 @@ per-file ± rows)."
          (rows (fikra-diff-numstat-rows (string-split raw "\n") (list))))
     (if (= (length rows) 0)
       ""
-      (concat (fikra-diff-summary n rows)
-              "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn\n\n"))))
+      (fikra-diff-summary n rows))))
 
 ;; numstat lines ("adds\tdels\tpath") → the ((path adds dels) ...) rows the
 ;; summary renderer expects (r75: paths-filter's bare strings are NOT rows —
-;; (cdr string) throws in the totals scan).
+;; (cdr string) throws in the totals scan). fikra-diff-summary ends with its
+;; own keys line — nothing extra appended (r76: the completed view doubled
+;; the hint).
 (defun fikra-diff-numstat-rows (lines acc)
   (if (null lines)
     (reverse acc)
@@ -101,10 +102,15 @@ per-file ± rows)."
       (let ((parts (string-split (car lines) "\t")))
         (if (>= (length parts) 3)
           (cons (list (nth 2 parts)
-                      (string-to-number (nth 0 parts))
-                      (string-to-number (nth 1 parts)))
+                      (fikra-diff-numstat-count (nth 0 parts))
+                      (fikra-diff-numstat-count (nth 1 parts)))
                 acc)
           acc)))))
+
+;; numstat prints "-" for BINARY files' counts — parse to 0, never throw
+;; (codex r75 P1: one binary in a turn crashed the whole completed view).
+(defun fikra-diff-numstat-count (s)
+  (condition-case nil (string-to-number s) (error () 0)))
 
 (defun fikra-diff-turn-step (delta)
   (let* ((count (fikra/thread/fikra-thread-turn-count))
