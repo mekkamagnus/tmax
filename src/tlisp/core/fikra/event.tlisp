@@ -4,7 +4,7 @@
           fikra-event-turn-tools
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
-          fikra-event-inline-ckpt-merge fikra-event-render-fold)
+          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-inline-find-call fikra-inline-edit-p)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
@@ -643,6 +643,12 @@ text-deltas inside the batch join into the same line."
           (k (fikra-event-get-str (nth i out) "kind")))
       (cond
         ((string= k "turn-start") nil)
+        ;; Any intervening TOOL activity is a nearer action — an
+        ;; Edit→bash→checkpoint sequence must NOT reach past the bash
+        ;; (r64: the marker implies action-level association).
+        ((and (string= k "tool-call")
+              (not (fikra-inline-edit-p (fikra-event-get-str ev "tool"))))
+          nil)
         ((and (string= k "tool-call")
               (fikra-inline-edit-p (fikra-event-get-str ev "tool")))
           i)

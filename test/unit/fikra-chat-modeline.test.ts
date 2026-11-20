@@ -158,4 +158,35 @@ describe("#8.1 inline ckpt marker (r63)", () => {
     expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r64-c))").value)).toContain("[ckpt main/5 ✓]");
     expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r64-c))").value)).not.toContain("[ckpt");
   });
+
+  test("Edit→bash→checkpoint: the marker does NOT reach past the shell (r64)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/event")');
+    e(ed, '(defvar r65-a nil)');
+    e(ed, '(setq r65-a (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "ee1") (list "summary" "src/a.ts @3")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "ee1") (list "summary" "done")) (list (list "kind" "tool-call") (list "tool" "bash") (list "id" "bb1") (list "summary" "make check")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/6"))) (list) nil))');
+    // 4 events in, standalone kept (the shell is the nearer action) = 4 out.
+    expect(String(e(ed, "(length r65-a)").value)).toBe("4");
+    // The Edit row (index 0) carries NOTHING; the bash row (index 2) neither.
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r65-a))").value)).not.toContain("[ckpt");
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 2 r65-a))").value)).not.toContain("[ckpt");
+    // The standalone marker survives (index 3).
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 3 r65-a))").value)).toContain("[ckpt main/6 ✓]");
+  });
+
+  test("the PRODUCTION order: baseline checkpoint-ready AFTER turn-start stays in its own turn (r64)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/event")');
+    // turn 1 has an Edit; turn 2's turn-start PRECEDES its baseline
+    // checkpoint (the old emit order put the checkpoint first — the
+    // baseline could attach to turn 1's Edit).
+    e(ed, '(defvar r65-b nil)');
+    e(ed, '(setq r65-b (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "replay") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "ee9") (list "summary" "src/b.ts @1")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "ee9") (list "summary" "done")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/1")) (list (list "kind" "turn-end") (list "turn" 1) (list "status" "completed")) (list (list "kind" "turn-start") (list "turn" 2) (list "backend" "replay") (list "mode" "")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/2-baseline"))) (list) nil))');
+    const t1edit = String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r65-b))").value);
+    expect(t1edit).toContain("[ckpt main/1 ✓]");       // turn 1's OWN completion
+    expect(t1edit).not.toContain("main/2");             // never turn 2's baseline
+    // 7 events in: turn-1's checkpoint merges into its Edit (6 out); turn-2's
+    // baseline renders standalone (no edit in turn 2, boundary blocks).
+    expect(String(e(ed, "(length r65-b)").value)).toBe("6");
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 5 r65-b))").value)).toContain("main/2");
+  });
 });

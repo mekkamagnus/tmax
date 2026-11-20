@@ -698,14 +698,6 @@ thread→adapter has no cycle but keep the lazy convention)."
       (editor/keymaps/keymap-mutable-set! state "change-baseline"
         (fikra-thread-snapshot-changes))
       (error () nil))
-    ;; #217: the turn's BASELINE REF (refs/fikra/<id>/<n>-baseline) — pairs
-    ;; with the completion ref at turn-end so the diff viewer's turn
-    ;; navigation (codex r24 fix 4) and the handoff review summary have
-    ;; per-turn ground truth. Lazy require: checkpoint requires thread.
-    (condition-case nil
-      (progn (require-module fikra/checkpoint)
-             (fikra/checkpoint/fikra-checkpoint-capture "baseline"))
-      (error () nil))
     ;; #225: the turn-start records the backend ACTUALLY driving the turn
     ;; (the adapter's current selection — a mid-thread switch changes it;
     ;; the thread field alone stays stale).
@@ -718,6 +710,14 @@ thread→adapter has no cycle but keep the lazy convention)."
             (list "mode" (if (hashmap-get state "runtime-mode")
                            (hashmap-get state "runtime-mode")
                            ""))))
+    ;; #217: the turn's BASELINE REF — AFTER the turn-start (r64: the
+    ;; baseline checkpoint-ready used to precede it, so the replay's
+    ;; bounded association saw the PREVIOUS turn's Edit first and could
+    ;; attach the new baseline to it, clobbering its completion marker).
+    (condition-case nil
+      (progn (require-module fikra/checkpoint)
+             (fikra/checkpoint/fikra-checkpoint-capture "baseline"))
+      (error () nil))
     ;; Persist the bumped count (a crash before turn-end must still show
     ;; the turn happened).
     (fikra-thread-save)
