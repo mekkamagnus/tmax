@@ -33,7 +33,16 @@ body. (Mode must be active — the SPC a i binding implies it.)"
     (setq fikra-capture-ctx-label ctx))
   (buffer-set-read-only nil)
   (let ((count (buffer-line-count)))
-    (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+    (if (> count 1)
+      (let ((second-last (buffer-line (- count 2))))
+        (if (> count 2)
+          (progn
+            (buffer-delete-range 0 0 (- count 2) (length second-last))
+            (let ((l (buffer-line 0)))
+              (buffer-delete-range 0 0 0 (length l))))
+          (let ((l (buffer-line 0)))
+            (if (> (length l) 0)
+              (buffer-delete-range 0 0 0 (length l))))))))
   (cursor-move 0 0)
   (buffer-insert (concat (fikra-capture-to-line-cached) "\n"))
   (buffer-insert "--------------------------------------------------------------\n")
@@ -139,7 +148,16 @@ body. (Mode must be active — the SPC a i binding implies it.)"
   (buffer-switch fikra-capture-buffer-name)
   (buffer-set-read-only nil)
   (let ((count (buffer-line-count)))
-    (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+    (if (> count 1)
+      (let ((second-last (buffer-line (- count 2))))
+        (if (> count 2)
+          (progn
+            (buffer-delete-range 0 0 (- count 2) (length second-last))
+            (let ((l (buffer-line 0)))
+              (buffer-delete-range 0 0 0 (length l))))
+          (let ((l (buffer-line 0)))
+            (if (> (length l) 0)
+              (buffer-delete-range 0 0 0 (length l))))))))
   ;; Close window, return to chat
   (delete-window)
   (buffer-switch (fikra/thread/fikra-thread-buffer-name))
@@ -180,9 +198,26 @@ To/Context header stays)."
   ;; Delete the whole body REGION: (sl sc el ec) with el = the LAST line
   ;; (count-1, 0-based). 3+ lines: region delete; exactly 3 (one body
   ;; line): delete to the END of line 2 (col 0 → line length).
+  ;; The range end is EXCLUSIVE — deleting to (last-line, 0) leaves that
+  ;; line's text behind (codex r54: "first messagedraft two"). Delete
+  ;; through the FINAL line's length instead.
+  ;; Two in-bounds steps (a (last, len) end can sit past the buffer's
+  ;; final cursor position): delete lines 2..count-2 THROUGH the second-
+  ;; to-last line's length, then clear the (now single) last body line.
+  ;; A delete STARTING at the end-of-buffer position is out of bounds —
+  ;; a zero-length body line means there is nothing to clear (skip the
+  ;; delete; only insert).
   (let ((count (buffer-line-count)))
     (if (> count 3)
-      (buffer-delete-range 2 0 (- count 1) 0)
+      (progn
+        ;; Step 1: (2,0)..(count-1,0) — a LINE-START end is always in
+        ;; bounds and consumes the newlines of every body line but the
+        ;; last. Step 2: the leftover last line now sits at line 2 —
+        ;; clear its text.
+        (buffer-delete-range 2 0 (- count 1) 0)
+        (let ((l (buffer-line 2)))
+          (if (> (length l) 0)
+            (buffer-delete-range 2 0 2 (length l)))))
       (if (= count 3)
         (let ((l (buffer-line 2)))
           (if (> (length l) 0)

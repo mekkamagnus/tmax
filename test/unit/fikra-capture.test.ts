@@ -125,4 +125,23 @@ describe("#8.2 capture frame", () => {
     const body2 = String(e(ed, "(fikra/capture/fikra-capture-body)").value);
     expect(body2.trim()).toBe("");
   });
+
+  test("multi-line history recall REPLACES exactly (the end-exclusive catch, r54)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/mode)");
+    e(ed, "(fikra-start)");
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, "(require-module fikra/capture)");
+    e(ed, "(require-module fikra/chat)");
+    e(ed, "(fikra/chat/fikra-chat-open)");
+    e(ed, "(fikra/capture/fikra-capture)");
+    e(ed, '(fikra/capture/fikra-capture-set-body "first message")');
+    e(ed, "(fikra/capture/fikra-capture-submit)");
+    e(ed, "(fikra/capture/fikra-capture)");
+    // A MULTI-line draft body.
+    e(ed, '(fikra/capture/fikra-capture-set-body "draft one\ndraft two")');
+    e(ed, "(fikra/capture/fikra-history-prev)");
+    const body = String(e(ed, "(fikra/capture/fikra-capture-body)").value);
+    expect(body).toBe("first message"); // NOT "first messagedraft two"
+  });
 });
