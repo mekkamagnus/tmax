@@ -804,3 +804,7 @@ Also noted by codex: the modeline buffer-name shows *scratch* while Fikra conten
 # Rounds 29-30 (r28-r29 fixes + the roster-only demo — 8.7 to 8) — 2026-11-21
 
 8.7: 7.5 (r29: quoting fixed, model-initiated attempted but roster/workflow ambiguity) → 8 (r30: preamble clarified to "file-based skills", FRESH-THREAD demo — /tmp/skill87/17-roster-only-fresh-thread-replay.txt: unnamed-skill prompt → model names fikra-skill release-notes → Reads the SKILL.md → executes its commands; add-invalidation + apostrophe-root tests tracked, codex ran them: 16 pass). Open: modeline *scratch* (#298 territory), count badge deviation, equal-timestamp invalidation, populated-cache add test, roster causal proof beyond the transcript.
+
+# Round 32 (the modeline wire fix — 8.7 to 9) — 2026-11-21
+
+The with-file *scratch* modeline root-caused through five layers (state re-derivation over clones → frame exposure → serializer → deserializer → file-context swap on buffer switch) and closed (869128d, c46f633). Live: /tmp/skill87/20-modeline-fikra-ansi.txt — with-file TUI + SPC a a renders "--NORMAL-- *Fikra* ... (fikra:claude●:approval-required:t9:th:main Fill)". 8.7 arc: 1 → 6 → 7 → 7.5 → 7 → 7.5 → 8 → 8 → **9** (rounds 24-32). Withheld last point: targeted wire round-trip + switch regression tests; equal-timestamp modtime granularity; cross-turn argv/replay provenance. Overall: 52/80.
