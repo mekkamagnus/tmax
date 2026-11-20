@@ -7,7 +7,8 @@
           fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process fikra-backend-claude-adopt-pid
           fikra-backend-claude-reset-accumulator fikra-afield
           fikra-claude-approvals-probe fikra-claude-write-mcp-config
-          fikra-claude-mcp-config-path fikra-claude-trust-arg
+          fikra-claude-mcp-config-path fikra-claude-mcp-ensure-dir
+          fikra-claude-trust-arg
           fikra-claude-set-approvals-override)
 
 ;; #214 (RFC-027 §D3/§D4): Claude Code CLI adapter, agent edition.
@@ -189,9 +190,7 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
                           (number-to-string (fikra/thread/fikra-thread-turn-count))))
            (token (confirmation-token-mint "fikra" scope))
            (path (fikra-claude-mcp-config-path)))
-      ;; #298: the thread's PERSISTED root (fikra-thread-root is the legacy
-      ;; daemon-cwd resolution — wrong once client context ≠ daemon cwd).
-      (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-field "root") "/.tmax/fikra/mcp"))
+      (fikra-claude-mcp-ensure-dir)
       ;; ABSOLUTE bridge path (round-34 live catch): the CLI resolves the
       ;; MCP server's args against ITS cwd (the thread working dir), so a
       ;; relative "bin/tmax-mcp-confirmation.ts" pointed at the user
@@ -204,8 +203,24 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
                 token "\"]}}}"))
       ;; Best-effort 0600 (gate note): the token authorizes ORIGINATING a
       ;; mediate, never resolving — but don't leave it world-readable.
-      (shell-command (concat "chmod 600 " path))
+      (shell-command (concat "chmod 600 " (fikra-claude-shq path)))
       token)))
+
+;; #298 (codex r2): shell-quoting for interpolated paths — a project path
+;; containing spaces/metachars must not split the mkdir/chmod commands.
+;; Single-quote wrap (the fikra-shq convention; project roots never carry
+;; single quotes in practice).
+(defun fikra-claude-shq (s)
+  (concat "'" s "'"))
+
+;; The thread-root .tmax/fikra/mcp dir, shell-quoted (spaces-safe).
+(defun fikra-claude-mcp-ensure-dir ()
+  ;; #298: the thread's PERSISTED root (fikra-thread-root is the legacy
+  ;; daemon-cwd resolution — wrong once client context ≠ daemon cwd).
+  (shell-command
+    (concat "mkdir -p "
+            (fikra-claude-shq
+              (concat (fikra/thread/fikra-thread-field "root") "/.tmax/fikra/mcp")))))
 
 ;; ── normalization: one JSONL line → FAEP events (pure, fixture-tested) ──
 ;; Returns a LIST of events (0, 1, or more) or nil for unparseable lines.

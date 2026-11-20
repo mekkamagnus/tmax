@@ -262,6 +262,29 @@ describe("#298 client-context thread roots", () => {
     e(editor, "(require-module fikra/thread)");
     expect(String(e(editor, "(fikra/thread/fikra-thread-context-dir)").value)).toBe("/");
   });
+
+  test("mcp dir creation + config path are SPACES-safe (codex r2 fix 1)", async () => {
+    const a = makeDir("fikra-ctx-a", true);
+    // A client context whose project path contains SPACES.
+    const b = mkdtempSync(join(tmpdir(), "fikra ctx spaced "));
+    dirs.push(b);
+    execFileSync("git", ["init", "-q"], { cwd: b });
+    process.chdir(a);
+    const editor = await createStartedEditor("");
+    e(editor, "(require-module fikra/thread)");
+    e(editor, "(require-module fikra/backend-claude)");
+    editor.setClientLaunchDir(b);
+    e(editor, "(fikra/thread/fikra-thread-init)");
+    // The config path targets the spaced root...
+    const cfg = String(e(editor, "(fikra/backend-claude/fikra-claude-mcp-config-path)").value);
+    expect(cfg).toBe(join(realpathSync(b), ".tmax/fikra/mcp/main-0.json"));
+    // ...and the mkdir lands THERE (shell-quoted), not split on the space.
+    e(editor, "(fikra/backend-claude/fikra-claude-mcp-ensure-dir)");
+    expect(existsSync(join(realpathSync(b), ".tmax/fikra/mcp"))).toBe(true);
+    expect(existsSync(join(a, ".tmax"))).toBe(false);
+    // No stray split dir like "<tmp>/fikra ctx spaced" sibling artifacts:
+    expect(existsSync(join(realpathSync(b), "ctx"))).toBe(false);
+  });
 });
 
 describe("#298 connect-frame handshake (production wiring)", () => {
@@ -326,6 +349,7 @@ describe("#298 connect-frame handshake (production wiring)", () => {
       // codex r1 fix 2: two clients sharing the SAME cwd — one leaving
       // must NOT clear the other's context (value-refcounted release).
       const shared = makeDir("fikra-ctx-shared");
+      const clientsOf = (srv: unknown) => (srv as unknown as { clients: Map<string, unknown> }).clients;
       const sockA = await connectWithTimeout(socketPath);
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("connect-frame timeout A")), 10_000);
@@ -340,10 +364,54 @@ describe("#298 connect-frame handshake (production wiring)", () => {
       });
       expect(editor.getClientLaunchDir()).toBe(shared);
       sockA.destroy(); // first sharer leaves — the value SURVIVES
-      await new Promise((r) => setTimeout(r, 150)); // let the close land
+      // SYNCHRONIZED on the server actually processing the disconnect
+      // (clients map drops A) — no fixed sleep (codex r2 fix 2).
+      const countBefore = clientsOf(server).size;
+      await until(() => clientsOf(server).size < countBefore, "server processed sockA close");
       expect(editor.getClientLaunchDir()).toBe(shared);
       sockB.destroy(); // last sharer leaves — now it clears
       await until(() => editor.getClientLaunchDir() === undefined, "last sharer clear");
+
+      // codex r2 fix 2: a degenerate SAME-CONNECTION re-handshake (raw
+      // JSON-RPC surface) — release-then-set keeps the refcount exact, so
+      // the value still clears after ONE disconnect.
+      const reSock = await connectWithTimeout(socketPath);
+      const reHandshake = (id: number, cwd: string) =>
+        new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`re-handshake timeout ${id}`)), 10_000);
+          reSock.on("data", (d) => { clearTimeout(timer); resolve(); });
+          reSock.write(request(id, "connect-frame", { clientType: "tui", clientName: "re", clientCwd: cwd }));
+        });
+      await reHandshake(5, shared);
+      await reHandshake(6, shared); // same dir, twice, ONE connection
+      expect(editor.getClientLaunchDir()).toBe(shared);
+      reSock.destroy();
+      await until(() => editor.getClientLaunchDir() === undefined, "re-handshake single release");
+      // And a dir CHANGE mid-connection orphans no count: first dir's
+      // refcount must not trap a future single client's release.
+      const reSock2 = await connectWithTimeout(socketPath);
+      const reHandshake2 = (id: number, cwd: string) =>
+        new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`re-handshake timeout ${id}`)), 10_000);
+          reSock2.on("data", (d) => { clearTimeout(timer); resolve(); });
+          reSock2.write(request(id, "connect-frame", { clientType: "tui", clientName: "re2", clientCwd: cwd }));
+        });
+      const otherDir2 = makeDir("fikra-ctx-other2");
+      await reHandshake2(7, shared);
+      await reHandshake2(8, otherDir2); // dir CHANGE on one connection
+      expect(editor.getClientLaunchDir()).toBe(otherDir2);
+      reSock2.destroy();
+      await until(() => editor.getClientLaunchDir() === undefined, "changed-dir release");
+      // The orphaned first dir (shared) must clear for a future client:
+      const sockC = await connectWithTimeout(socketPath);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("connect-frame timeout C")), 10_000);
+        sockC.on("data", (d) => { clearTimeout(timer); resolve(); });
+        sockC.write(request(9, "connect-frame", { clientType: "tui", clientName: "c", clientCwd: shared }));
+      });
+      expect(editor.getClientLaunchDir()).toBe(shared);
+      sockC.destroy();
+      await until(() => editor.getClientLaunchDir() === undefined, "orphan-free future release");
     } finally {
       await forceShutdown(server);
     }
