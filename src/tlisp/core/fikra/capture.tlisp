@@ -11,6 +11,9 @@
 (defvar fikra-input-history '()
   "List of previously sent messages.")
 
+(defvar fikra-capture-ctx-label ""
+  "The CALLING buffer's context label, captured before any switch.")
+
 (defvar fikra-history-index -1
   "Current position in input history (-1 = not browsing).")
 
@@ -19,16 +22,20 @@
 ride the top; the compose body starts at line 3; submit sends only the
 body. (Mode must be active — the SPC a i binding implies it.)"
   (interactive)
-  (if (not (member fikra-capture-buffer-name (buffer-list)))
-    (buffer-create fikra-capture-buffer-name)
-    nil)
-  (split-window "horizontal")
-  (buffer-switch fikra-capture-buffer-name)
+  ;; The calling context FIRST — any buffer switch would make the
+  ;; filename/cursor/selection read the CAPTURE buffer instead (codex r53).
+  (let ((ctx (fikra-capture-context-label)))
+    (if (not (member fikra-capture-buffer-name (buffer-list)))
+      (buffer-create fikra-capture-buffer-name)
+      nil)
+    (split-window "horizontal")
+    (buffer-switch fikra-capture-buffer-name)
+    (setq fikra-capture-ctx-label ctx))
   (buffer-set-read-only nil)
   (let ((count (buffer-line-count)))
     (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
   (cursor-move 0 0)
-  (buffer-insert (concat (fikra-capture-to-line) "\n"))
+  (buffer-insert (concat (fikra-capture-to-line-cached) "\n"))
   (buffer-insert "--------------------------------------------------------------\n")
   (cursor-move 2 0)
   (let ((kmap (editor/keymaps/buffer-keymap fikra-capture-buffer-name)))
@@ -59,6 +66,16 @@ body. (Mode must be active — the SPC a i binding implies it.)"
     (if (string= (substring s from (+ from 1)) "\n")
       from
       (fikra-str-index-of s (+ from 1)))))
+
+(defun fikra-capture-to-line-cached ()
+  (require-module fikra/adapter)
+  (require-module fikra/thread)
+  (let ((tid (fikra/thread/fikra-thread-current)))
+    (concat "To: thread " (if (and tid (> (length tid) 0)) tid "main")
+            " (" (fikra/adapter/fikra-current-backend) ")"
+            "   Context: " (if (> (length fikra-capture-ctx-label) 0)
+                             fikra-capture-ctx-label
+                             (fikra-capture-context-label)))))
 
 ;; "To: thread fix-scroll (ollama)   Context: tui-client.ts @112-124"
 (defun fikra-capture-to-line ()
@@ -157,11 +174,23 @@ To/Context header stays)."
   ;; spans lines 2..count-1. Delete from line 2 to the LAST line.
   (buffer-switch fikra-capture-buffer-name)
   (buffer-set-read-only nil)
+  ;; Clear the body REGION (lines 2..end) even when it is one line: move
+  ;; to line 2, select to the end, delete — then insert (codex r53: the
+  ;; >3 guard left a single-line body stacking recalled messages).
+  ;; Delete the whole body REGION: (sl sc el ec) with el = the LAST line
+  ;; (count-1, 0-based). 3+ lines: region delete; exactly 3 (one body
+  ;; line): delete to the END of line 2 (col 0 → line length).
   (let ((count (buffer-line-count)))
     (if (> count 3)
-      (buffer-delete-range 2 0 (- count 1) 0)))
-  (cursor-move 2 0)
-  (buffer-insert text))
+      (buffer-delete-range 2 0 (- count 1) 0)
+      (if (= count 3)
+        (let ((l (buffer-line 2)))
+          (if (> (length l) 0)
+            (buffer-delete-range 2 0 2 (length l))))
+        nil))
+    (cursor-move 2 0)
+    (buffer-insert text)))
+
 
 (defun fikra-capture-hint ()
   (editor-set-status (concat "C-c C-c send   C-c C-k cancel   M-p/M-n history   "

@@ -87,4 +87,42 @@ describe("#8.2 capture frame", () => {
     const kmapN = e(ed, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-Capture*") "M-n")');
     expect(JSON.stringify(kmapN.value)).toContain("history-next");
   });
+
+  test("the Context label reads the CALLING buffer, not the capture buffer (r53)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/mode)");
+    e(ed, "(fikra-start)");
+    e(ed, "(require-module fikra/capture)");
+    e(ed, "(require-module fikra/thread)");
+    e(ed, "(fikra-thread-set-field \"root\" \"/tmp\")");
+    e(ed, "(fikra/capture/fikra-capture)");
+    // The ctx was captured at OPEN time (the *scratch* fixture buffer).
+    const text = String(e(ed, "(buffer-text)").value);
+    const toLine = text.split("\n")[0] ?? "";
+    expect(toLine).toMatch(/Context: \S+@\d+/);
+    // It is NOT the capture buffer's own name.
+    expect(toLine).not.toContain("Fikra-Capture@");
+  });
+
+  test("history recall REPLACES a single-line body exactly (r53)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/mode)");
+    e(ed, "(fikra-start)");
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, "(require-module fikra/capture)");
+    e(ed, "(require-module fikra/chat)");
+    e(ed, "(fikra/chat/fikra-chat-open)");
+    e(ed, "(fikra/capture/fikra-capture)");
+    e(ed, '(fikra/capture/fikra-capture-set-body "first message")');
+    e(ed, "(fikra/capture/fikra-capture-submit)");
+    e(ed, "(fikra/capture/fikra-capture)");
+    e(ed, '(fikra/capture/fikra-capture-set-body "typed draft")');
+    e(ed, "(fikra/capture/fikra-history-prev)");
+    const body = String(e(ed, "(fikra/capture/fikra-capture-body)").value);
+    expect(body.trim()).toBe("first message");
+    // M-n returns to empty (the draft is replaced, not stacked).
+    e(ed, "(fikra/capture/fikra-history-next)");
+    const body2 = String(e(ed, "(fikra/capture/fikra-capture-body)").value);
+    expect(body2.trim()).toBe("");
+  });
 });
