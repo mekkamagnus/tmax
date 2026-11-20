@@ -1,5 +1,5 @@
 (defmodule fikra/thread
-  (export fikra-thread-load-row fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
+  (export fikra-thread-load-row fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-emit-file-changes fikra-thread-compute-changes
@@ -261,6 +261,11 @@ not land under the wrong project)."
 
 ;; #222 gate round-2: record a session id on ANOTHER thread (a background
 ;; turn's resume handle) without stealing focus.
+(defun fikra-thread-session-id-for (id)
+  "The recorded backend session id for thread ID (nil when none)."
+  (let ((state (hashmap-get fikra-threads id)))
+    (if state (hashmap-get state "session-id") nil)))
+
 (defun fikra-thread-set-session-id-for (id sid)
   (let ((state (hashmap-get fikra-threads id)))
     (if state

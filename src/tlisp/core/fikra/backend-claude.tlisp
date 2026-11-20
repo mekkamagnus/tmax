@@ -505,6 +505,20 @@ scope names THIS turn) and BEFORE the spawn (args reference the path)."
         (editor/keymaps/keymap-mutable-set! fikra-claude-pid-thread (number-to-string pid) thread-id)
         pid))))
 
+(defun fikra-claude-drop-stale-session (thread-id events)
+  (fikra-claude-drop-session-scan events (fikra/thread/fikra-thread-session-id-for thread-id) (list)))
+
+(defun fikra-claude-drop-session-scan (events sid out)
+  (if (null events)
+    (reverse out)
+    (let ((e (car events)))
+      (fikra-claude-drop-session-scan (cdr events) sid
+        (if (and (string= (fikra-afield e "kind") "session")
+                 sid
+                 (string= (fikra-afield e "id") sid))
+          out
+          (cons e out))))))
+
 (defun fikra-backend-claude-filter (pid output)
   "Serialized per-process (#208): normalize complete lines from this chunk
 and emit them as ONE FAEP batch (per-chunk coalescing). #222 gate catch:
@@ -513,7 +527,13 @@ records on that thread, and switching focus mid-stream cannot bleed the
 chunks into another thread's log."
   (let* ((thread-id (hashmap-get fikra-claude-pid-thread (number-to-string pid)))
          (events (if thread-id
-                   (fikra-backend-claude-line-events-for thread-id output)
+                   ;; Session spam guard: the CLI re-prints its init line
+                   ;; around tool rounds; a session event whose id already
+                   ;; matches the thread's record is a no-op (live catch:
+                   ;; one short turn logged 11k+ duplicate session events).
+                   (fikra-claude-drop-stale-session
+                     thread-id
+                     (fikra-backend-claude-line-events-for thread-id output))
                    nil)))
     ;; Gate round-2: an UNKNOWN pid is DROPPED, never assumed focused —
     ;; a straggler chunk must not bleed into whatever the user views.
