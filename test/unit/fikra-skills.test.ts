@@ -159,7 +159,30 @@ describe("#8.7 skills — codex r27 fixes", () => {
     expect(String(e(editor, '(hashmap-get (car (fikra/skills/fikra-skills-list)) "description")').value)).toBe("edited");
   });
 
-  test("the picker gate is testable: workflows-only passes, nothing fails", async () => {
+  test("a skill added after the first scan is picked up (add-path invalidation)", async () => {
+    const editor = await setup();
+    expect(Number(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe(0);
+    writeSkill("late", "---\nname: late\n---\nadded after the first scan\n");
+    expect(Number(e(editor, "(length (fikra/skills/fikra-skills-list))").value)).toBe(1);
+  });
+
+  test("an apostrophe root does not break the scan or stamp (quoting regression)", async () => {
+    // A root whose path contains a single quote — the old literal-quote ls
+    // broke (and could inject); shq must survive it.
+    const quoted = mkdtempSync(join(tmpdir(), "fikra-sk'quote-"));
+    execFileSync("git", ["init", "-q"], { cwd: quoted });
+    writeFileSync(join(quoted, ".gitignore"), ".tmax/\n");
+    mkdirSync(join(quoted, ".fikra", "skills", "q"), { recursive: true });
+    writeFileSync(join(quoted, ".fikra", "skills", "q", "SKILL.md"), "---\nname: q\n---\nquoted root\n");
+    const editor = await setup();
+    e(editor, `(fikra/thread/fikra-thread-set-field "root" "${quoted}")`);
+    expect(Number(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe(1);
+    expect(String(e(editor, '(hashmap-get (car (fikra/skills/fikra-skills-list)) "id")').value)).toBe("fikra-skill q");
+    // The stamp path runs the same quoted ls — a second list call exercises it.
+    expect(Number(e(editor, "(length (fikra/skills/fikra-skills-list))").value)).toBe(1);
+  });
+
+  test("the picker gate is testable: workflows-only passes", async () => {
     const editor = await setup();
     e(editor, "(require-module fikra/workflow)");
     e(editor, '(fikra/workflow/fikra-register-workflow "solo" "x")');
