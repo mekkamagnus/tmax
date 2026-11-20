@@ -658,3 +658,25 @@ Fikra now looks substantially closer to the existing chat and review surfaces in
 4. Make the modeline more legible at narrow widths in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:94), retaining the important state while avoiding the wrapped, compressed segment string.
 
 The approval evidence is a substantial improvement: the supplied capture shows the mid-turn Write preview and approval panel, and I verified that `/tmp/fikra-demo/gate44.txt` exists with `LIVE-44`. The capture itself ends while the panel is displayed, so it does not independently show the `y` keypress or recorded allow response; I accept those as the supplied session account rather than a fresh replay. Against the mockup, the main remaining gap is presentation at the captured terminal width and explicit, readable provenance—not the absence of a live approval gate.
+
+---
+
+# Round 21 (all-sections grading) — 2026-11-20
+
+| Section | Grade | One-line justification |
+|---|---:|---|
+| **8.1 Chat** | **7/10** | The live turn shows narration, inline Bash previews and correlated results; the narrow modeline wraps heavily, and the native-loop checkpoint presentation remains unverified. |
+| **8.2 Capture** | **6/10** | The live split composer opens in INSERT mode with text present, but lacks the mockup’s recipient/context header and visible history controls. |
+| **8.3 Approval** | **6/10** | The earlier mediated Write demonstrates execution after approval, but the supplied narrow capture still shows wrapped borders, truncated actions and an incomplete panel. |
+| **8.4 Diff + revert** | **Not graded** | No current diff capture is supplied, so the mockup’s summary, hunks and revert controls cannot be visually verified this round. |
+| **8.5 Threads** | **6/10** | The live list shows a selected thread and its backend, mode, location, status and turns, but columns wrap and the mockup’s compact summary and action hints are absent. |
+| **8.6 Worktree handoff** | **Not graded** | No fresh handoff capture is supplied; the source has patch-apply-or-refuse logic, but that does not establish the mockup’s visible review flow. |
+
+The highest-priority remaining fixes are:
+
+1. Make the approval panel fit the **actual content width**, including the gutter. [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:117) fixes the panel at 44 columns, but `/tmp/r45-gate.txt` is 45 columns wide **including** the gutter: its border wraps onto continuation lines and the bottom of the panel is not visible. The artifact therefore does not substantiate the claimed clean narrow presentation.
+2. Compact the modeline and threads list for narrow panes. The captured modeline takes three rows; its Fikra segment is assembled in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:94). The fixed-width thread columns in [threads.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/threads.tlisp:30) wrap each row; a compact layout would preserve readability.
+3. Bring the composer closer to the mockup with visible recipient/context and history hints in [capture.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/capture.tlisp:16). Verify history remains editable: the history navigation currently sets the buffer read-only.
+4. Capture and assess actual diff/revert and worktree handoff screens. [worktree.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/worktree.tlisp:130) applies a checked patch directly and reports status; the mockup calls for a reviewable handoff with explicit choices.
+
+The new captures establish that chat, composition and thread listing are live surfaces, and the earlier mediated approval proof supports the execution claim. Visual fidelity remains uneven at the captured width: the approval panel still breaks across lines, the modeline consumes several rows, and the threads table wraps. Diff and worktree handoff need live visual evidence before they can receive comparable grades.
