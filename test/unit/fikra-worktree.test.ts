@@ -215,6 +215,34 @@ describe("#221 modeline + binding", () => {
   test("SPC a w is registered (the toggle entry point)", async () => {
     const a = await setupThread("a");
     e(a, "(require-module fikra/mode)");
-    expect(JSON.stringify(e(a, '(key-binding "SPC a w" "normal")').value)).toContain("fikra-worktree-toggle");
+    // Mockup 8.6: SPC a w opens the REVIEW screen in worktree mode (the
+    // toggle's local->enter half is unchanged; the direct handoff moved
+    // behind the screen's `a`).
+    expect(JSON.stringify(e(a, '(key-binding "SPC a w" "normal")').value)).toContain("fikra-worktree-review");
+  });
+
+
+  // Mockup 8.6 (codex r24 fix 2): the review-and-choice screen.
+  test("SPC a w in worktree mode opens the review screen with summary + keymap", async () => {
+    const editor = await setupThread("r");
+    e(editor, "(require-module fikra/adapter)");
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    // Enter worktree mode on a clean tree.
+    e(editor, "(fikra/worktree/fikra-worktree-enter)");
+    // A tracked change INSIDE the worktree so the summary has rows.
+    const wt = String(e(editor, '(fikra/thread/fikra-thread-field "worktree")').value);
+    writeFileSync(join(wt, "f.txt"), "changed in worktree\n");
+    execFileSync("git", ["add", "-A"], { cwd: wt });
+    execFileSync("git", ["commit", "-q", "-m", "wt change"], { cwd: wt });
+    const buf = String(e(editor, "(fikra/worktree/fikra-worktree-review)").value ?? "nil");
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*Fikra-worktree*");
+    const text = String(e(editor, "(buffer-text)").value);
+    expect(text).toContain("1 file(s)");
+    expect(text).toContain("turns");
+    expect(text).toContain("apply patch");
+    expect(text).toContain("refuse + keep worktree");
+    // The apply/refuse keys are bound buffer-locally.
+    const kmap = e(editor, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-worktree*") "a")');
+    expect(JSON.stringify(kmap.value)).toContain("review-apply");
   });
 });

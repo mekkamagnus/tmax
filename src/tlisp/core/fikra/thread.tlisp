@@ -623,6 +623,14 @@ thread→adapter has no cycle but keep the lazy convention)."
       (editor/keymaps/keymap-mutable-set! state "change-baseline"
         (fikra-thread-snapshot-changes))
       (error () nil))
+    ;; #217: the turn's BASELINE REF (refs/fikra/<id>/<n>-baseline) — pairs
+    ;; with the completion ref at turn-end so the diff viewer's turn
+    ;; navigation (codex r24 fix 4) and the handoff review summary have
+    ;; per-turn ground truth. Lazy require: checkpoint requires thread.
+    (condition-case nil
+      (progn (require-module fikra/checkpoint)
+             (fikra/checkpoint/fikra-checkpoint-capture "baseline"))
+      (error () nil))
     ;; #225: the turn-start records the backend ACTUALLY driving the turn
     ;; (the adapter's current selection — a mid-thread switch changes it;
     ;; the thread field alone stays stale).
@@ -744,11 +752,19 @@ thread→adapter has no cycle but keep the lazy convention)."
   ;; turn in plan interaction offers the y/e/n approval. Lazy require
   ;; (plan requires thread; the cycle forbids top-level).
   (if (string= status "completed")
-    (condition-case nil
-      (progn
-        (require-module fikra/plan)
-        (fikra/plan/fikra-plan-offer-approval))
-      (error () nil))
+    (progn
+      ;; #217: the COMPLETION ref (refs/fikra/<id>/<n>). Async — the
+      ;; process exit is the authoritative turn end; the capture follows.
+      (condition-case nil
+        (progn
+          (require-module fikra/checkpoint)
+          (fikra/checkpoint/fikra-checkpoint-capture-async "completion"))
+        (error () nil))
+      (condition-case nil
+        (progn
+          (require-module fikra/plan)
+          (fikra/plan/fikra-plan-offer-approval))
+        (error () nil)))
     nil)
   ;; Map the event status onto the thread state machine.
   (fikra-thread-status-set

@@ -1,7 +1,9 @@
 (defmodule fikra/worktree
   (export fikra-worktree-path fikra-worktree-enter fikra-worktree-handoff
           fikra-worktree-close fikra-worktree-active-p
-          fikra-worktree-toggle fikra-worktree-latest-ref)
+          fikra-worktree-toggle fikra-worktree-latest-ref
+          fikra-worktree-review fikra-worktree-review-apply
+          fikra-worktree-review-diff fikra-worktree-review-refuse)
 
 ;; #221 (RFC-027 §D7): worktree isolation per thread. SIBLING checkout at
 ;; <repo>.fikra-<thread-id>/ on branch fikra/<thread-id> (the adw SPEC-065
@@ -244,6 +246,159 @@ Returns t when fully closed."
                              " > " (fikra-shq (concat dir "/" i ".patch"))
                              " 2>/dev/null || true"))
       (fikra-worktree-export-loop id dir (+ i 1) n))))
+
+;; ── handoff review screen (mockup 8.6: review-and-choice) ───────────
+;; SPC a w in worktree mode opens *Fikra-worktree*: the summary, the
+;; clean-apply check, and a/d/r. The APPLY keeps the existing
+;; patch-apply-or-refuse handoff; nothing merges implicitly.
+(defvar fikra-worktree-review-buffer "*Fikra-worktree*")
+(defvar fikra-worktree-review-snapshot nil
+  "The snapshot ref the current review screen was rendered from.")
+
+(defun fikra-worktree-review ()
+  "SPC a w: enter worktree mode when local; OPEN THE REVIEW SCREEN when
+the thread is in worktree mode (the direct handoff moves behind the
+screen's `a' — codex r24: 'the dedicated review-and-choice screen and
+its summary are missing')."
+  (interactive)
+  (if (fikra-worktree-active-p)
+    (fikra-worktree-review-render)
+    (fikra-worktree-enter)))
+
+(defun fikra-worktree-review-snapshot-ref ()
+  ;; Snapshot the worktree NOW so the summary and the apply check describe
+  ;; the same state the apply would ship.
+  (let ((sha (fikra/checkpoint/fikra-checkpoint-capture "completion")))
+    (setq fikra-worktree-review-snapshot (fikra-worktree-latest-ref))
+    fikra-worktree-review-snapshot))
+
+(defun fikra-worktree-review-render ()
+  (let* ((id (fikra/thread/fikra-thread-current))
+         (path (fikra/thread/fikra-thread-field "worktree"))
+         (base (fikra/thread/fikra-thread-field "worktree-base"))
+         (snap (or (fikra-worktree-review-snapshot-ref) base))
+         (root (fikra/thread/fikra-thread-field "root"))
+         (patch-path (fikra-worktree-patch-path)))
+    ;; Materialize the patch FIRST — the clean-check reads it (live catch:
+    ;; the check ran before the write and always reported a missing file).
+    (shell-command (concat "mkdir -p " (fikra-shq (fikra-dirname patch-path))))
+    (fikra/thread/fikra-thread-root-shell
+      (concat "git diff --binary " base " " snap " > " (fikra-shq patch-path)))
+    ;; let* — conflicts reads clean (a parallel let leaves it unbound).
+    (let* ((stat (fikra-worktree-review-stat root base snap))
+           (clean (fikra-worktree-review-clean-p root patch-path))
+           (conflicts (if clean "" (fikra-worktree-review-conflicts root patch-path)))
+           (overlap (fikra-worktree-review-overlap root base path)))
+    (if (not (member fikra-worktree-review-buffer (buffer-list)))
+      (buffer-create fikra-worktree-review-buffer))
+    (buffer-switch fikra-worktree-review-buffer)
+    (buffer-set-read-only nil)
+    (let ((count (buffer-line-count)))
+      (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+    (cursor-move 0 0)
+    (buffer-insert
+      (concat "\e[1;36m" id " \e[0m\e[2m→ main tree\e[0m\n\n"
+              "thread " id " lives in worktree " path "\n"
+              (fikra-worktree-review-summary-line root id base snap) "\n"
+              (if clean
+                "\e[32m✓ patch applies cleanly against main\e[0m\n"
+                (concat "\e[1;31m✗ patch does NOT apply cleanly\e[0m\n"
+                        "conflicts: " conflicts "\n"))
+              "files touched by others since fork: " (number-to-string overlap) "\n\n"
+              "\e[1m a\e[0m apply patch  \e[1m d\e[0m review diff first  \e[1m r\e[0m refuse + keep worktree\n"))
+    (buffer-set-read-only t)
+    (cursor-move 0 0)
+    (fikra-worktree-review-ensure-keymap)
+    (editor-set-status (concat "Fikra: worktree review — " id)))))
+
+;; "9 files · +214 −96 · 12 turns · checkpoints 12/12 retained"
+(defun fikra-worktree-review-summary-line (root id base snap)
+  (let ((stat (fikra-worktree-review-stat root base snap)))
+    (concat (number-to-string (hashmap-get stat "files")) " file(s) · +"
+            (number-to-string (hashmap-get stat "adds")) " −"
+            (number-to-string (hashmap-get stat "dels")) " · "
+            (number-to-string (fikra/thread/fikra-thread-turn-count)) " turns · checkpoints "
+            (number-to-string (fikra-worktree-refs-count root id)) "/"
+            (number-to-string (fikra/thread/fikra-thread-turn-count)) " retained")))
+
+;; numstat aggregate: files / +adds / −dels over base..snap.
+(defun fikra-worktree-review-stat (root base snap)
+  (let ((raw (fikra/thread/fikra-thread-root-shell
+               (concat "git diff --numstat " base " " snap " 2>/dev/null"))))
+    (fikra-wt-stat-scan (string-split raw "\n") 0 0 0)))
+
+(defun fikra-wt-stat-scan (lines files adds dels)
+  (if (null lines)
+    (hashmap "files" files "adds" adds "dels" dels)
+    (let ((cols (string-split (car lines) "\t")))
+      (if (< (length cols) 3)
+        (fikra-wt-stat-scan (cdr lines) files adds dels)
+        (fikra-wt-stat-scan (cdr lines)
+          (+ files 1)
+          (+ adds (string-to-number (car cols)))
+          (+ dels (string-to-number (nth 1 cols))))))))
+
+(defun fikra-worktree-review-clean-p (root patch-path)
+  (string-match "APPLY-OK"
+    (string-trim (fikra/thread/fikra-thread-root-shell
+      (concat "git apply --check --binary " (fikra-shq patch-path)
+              " 2>&1 && echo APPLY-OK || echo APPLY-CONFLICT")))))
+
+(defun fikra-worktree-review-conflicts (root patch-path)
+  (string-trim (fikra/thread/fikra-thread-root-shell
+    (concat "git apply --check --binary " (fikra-shq patch-path) " 2>&1 | head -5"))))
+
+;; Paths changed LOCALLY since the fork that the worktree also touched.
+(defun fikra-worktree-review-overlap (root base path)
+  (length (string-split
+    (string-trim (shell-command
+      (concat "comm -12 "
+              "<(git -C " (fikra-shq root) " diff --name-only " base " -- 2>/dev/null | sort) "
+              "<(git -C " (fikra-shq path) " diff --name-only " base " -- 2>/dev/null | sort) 2>/dev/null || true")))
+    "\n")))
+
+(defun fikra-worktree-refs-count (root id)
+  (let ((out (string-trim (shell-command
+    (concat "git -C " (fikra-shq root) " for-each-ref --format='%(refname)' refs/fikra/" id "/ 2>/dev/null | grep -v baseline | wc -l")))))
+    (string-to-number out)))
+
+;; ── review actions ──────────────────────────────────────────────────
+(defun fikra-worktree-review-apply ()
+  (interactive)
+  ;; The handoff reports its own outcome; no buffer switch first (a bogus
+  ;; "default" switch aborted the apply before it ran — live catch).
+  (fikra-worktree-handoff))
+
+(defun fikra-worktree-review-diff ()
+  "Show the cumulative patch under the summary (toggle)."
+  (interactive)
+  (buffer-set-read-only nil)
+  (let ((count (buffer-line-count)))
+    (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+  (cursor-move 0 0)
+  (buffer-insert
+    (concat "\e[1;36m" (fikra/thread/fikra-thread-current) " → main tree — cumulative patch\e[0m\n\n"
+            (shell-command (concat "head -400 " (fikra-shq (fikra-worktree-patch-path)) " 2>/dev/null"))))
+  (buffer-set-read-only t)
+  (cursor-move 0 0)
+  (editor-set-status "Fikra: patch preview — a applies, r refuses"))
+
+(defun fikra-worktree-review-refuse ()
+  (interactive)
+  (buffer-switch "*scratch*")
+  (editor-set-status
+    (concat "Fikra: kept worktree " (fikra/thread/fikra-thread-current) " — no patch applied")))
+
+(defun fikra-worktree-review-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap fikra-worktree-review-buffer)))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "fikra-worktree-review"))
+        (editor/keymaps/keymap-set-key kmap "a" "(fikra/worktree/fikra-worktree-review-apply)")
+        (editor/keymaps/keymap-set-key kmap "d" "(fikra/worktree/fikra-worktree-review-diff)")
+        (editor/keymaps/keymap-set-key kmap "r" "(fikra/worktree/fikra-worktree-review-refuse)")
+        (editor/keymaps/buffer-set-keymap fikra-worktree-review-buffer kmap))))
+  t)
 
 ;; ── lighter + binding ───────────────────────────────────────────────
 (defun fikra-refresh-worktree-lighter ()
