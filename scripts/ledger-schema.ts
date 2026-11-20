@@ -8,7 +8,7 @@
  *   (scripts/ledger-report.ts, scripts/ledger-spotcheck.ts).
  */
 
-/** The minimum-viable event set (RFC-036 §3.1). */
+/** The minimum-viable event set (RFC-036 §3.1; `spotcheck` added by #325). */
 export const LEDGER_EVENT_KINDS = [
   'run-start',
   'unit-start',
@@ -17,6 +17,7 @@ export const LEDGER_EVENT_KINDS = [
   'landing',
   'escalation',
   'run-end',
+  'spotcheck',
 ] as const;
 export type LedgerEventKind = (typeof LEDGER_EVENT_KINDS)[number];
 
@@ -27,6 +28,10 @@ export type GateKind = (typeof GATE_KINDS)[number];
 /** `escalation.reason` — the four escalation classes (RFC-036 §3.1). */
 export const ESCALATION_REASONS = ['stalled', 'valve-fired', 'ctx<25%', 'blocked'] as const;
 export type EscalationReason = (typeof ESCALATION_REASONS)[number];
+
+/** `spotcheck.verdict` — a re-run claim comparison (RFC-036 #325). */
+export const SPOTCHECK_VERDICTS = ['match', 'mismatch', 'error'] as const;
+export type SpotcheckVerdict = (typeof SPOTCHECK_VERDICTS)[number];
 
 export type ValidationOk = { ok: true };
 export type ValidationErr = { ok: false; errors: string[] };
@@ -151,6 +156,14 @@ const KIND_FIELDS: Record<LedgerEventKind, Record<string, Check>> = {
     'units-accepted': isNonNegInt,
     'units-blocked': isNonNegInt,
     totals: checkTotals,
+  },
+  spotcheck: {
+    unit: isNonEmptyStr,
+    sha: isNonEmptyStr,
+    command: isNonEmptyStr,
+    verdict: oneOf(SPOTCHECK_VERDICTS, 'a spotcheck verdict'),
+    expected: isNonEmptyStr,
+    actual: isNonEmptyStr,
   },
 };
 

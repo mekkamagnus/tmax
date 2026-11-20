@@ -50,8 +50,14 @@ export type Scorecard = {
     perUnit: { unit: string; rounds: number }[];
     flagged: { unit: string; rounds: number }[];
   };
-  /** 3. landings with verified tests-run ÷ all landings — N/A until #325 */
-  claimVerification: { rate: number | null; status: 'pending'; note: string };
+  /** 3. landings whose pasted output reproduced under spot-check ÷ spot-checked landings */
+  claimVerification: {
+    rate: number | null;
+    status: 'pending' | 'measured';
+    checkedLandings: number;
+    verifiedLandings: number;
+    note: string;
+  };
   /** 4. first stall signal → first escalation after it */
   escalationLatency: {
     state: 'no-stall-signal' | 'never-escalated' | 'escalated-pre-signal' | 'measured';
@@ -203,14 +209,45 @@ export const computeScorecard = (
   }
 
   // --- 3. Claim verification rate ------------------------------------------
-  // formula: landings whose tests-run output matches a re-run ÷ all landings.
-  // The spot-checker (issue #325) performs the re-runs; until it lands this
-  // prints N/A rather than a self-claimed rate.
+  // formula: landings whose pasted tests-run output REPRODUCED under
+  // spot-check ÷ landings spot-checked. The spot-checker (issue #325,
+  // scripts/ledger-spotcheck.ts) appends `spotcheck` events; a landing is
+  // verified when all its spotchecks matched. No spotchecks → pending, never
+  // a self-claimed rate. Mismatches and errors are alarm rows.
+  const spotchecks = events.filter((e) => e['event'] === 'spotcheck');
+  const checkedUnits = new Set<string>();
+  const mismatchUnits = new Set<string>();
+  for (const sc of spotchecks) {
+    const unit = str(sc as LedgerEvent, 'unit');
+    if (!unit) continue;
+    checkedUnits.add(unit);
+    if (str(sc as LedgerEvent, 'verdict') === 'mismatch') mismatchUnits.add(unit);
+  }
+  const verifiedLandings = [...checkedUnits].filter((u) => !mismatchUnits.has(u)).length;
   const claimVerification = {
-    rate: null,
-    status: 'pending' as const,
-    note: 'N/A — spot-checker lands in #325',
+    rate: checkedUnits.size > 0 ? round1((100 * verifiedLandings) / checkedUnits.size) : null,
+    status: (checkedUnits.size > 0 ? 'measured' : 'pending') as 'pending' | 'measured',
+    checkedLandings: checkedUnits.size,
+    verifiedLandings,
+    note:
+      checkedUnits.size > 0
+        ? `${verifiedLandings}/${checkedUnits.size} spot-checked landings reproduced`
+        : 'N/A — no spotcheck events yet (run scripts/ledger-spotcheck.ts)',
   };
+  for (const sc of spotchecks) {
+    const v = str(sc as LedgerEvent, 'verdict');
+    if (v === 'mismatch') {
+      alarms.push({
+        benchmark: 'claims',
+        detail: `unit ${str(sc as LedgerEvent, 'unit')} @ ${str(sc as LedgerEvent, 'sha')}: pasted "${str(sc as LedgerEvent, 'expected')}" but re-run gave "${str(sc as LedgerEvent, 'actual')}" (${str(sc as LedgerEvent, 'command')})`,
+      });
+    } else if (v === 'error') {
+      alarms.push({
+        benchmark: 'claims',
+        detail: `unit ${str(sc as LedgerEvent, 'unit')} @ ${str(sc as LedgerEvent, 'sha')}: spot-check could not verify (${str(sc as LedgerEvent, 'actual')})`,
+      });
+    }
+  }
 
   // --- 4. Escalation latency -----------------------------------------------
   // formula: first escalation ts − first stall-signal ts, in minutes.
@@ -362,7 +399,7 @@ export const renderHuman = (s: Scorecard): string => {
     L.push(`   per-unit: ${s.rework.perUnit.map((u) => `${u.unit}=${u.rounds}${u.rounds >= 4 ? ' ⚠' : ''}`).join(', ')}`);
   }
   L.push('3. Claim verification rate');
-  L.push(`   ${s.claimVerification.note}`);
+  L.push(`   ${s.claimVerification.note}${s.claimVerification.rate === null ? '' : ` = ${s.claimVerification.rate}%`}`);
   L.push('4. Escalation latency');
   if (s.escalationLatency.state === 'measured') {
     L.push(`   first stall signal ${s.escalationLatency.firstSignalTs} → escalated ${s.escalationLatency.firstEscalationTs} (${s.escalationLatency.minutes} min)`);

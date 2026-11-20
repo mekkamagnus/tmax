@@ -78,7 +78,24 @@ describe('computeScorecard — the five benchmarks (hand-computed fixture)', () 
   test('3. claim verification prints N/A pending the #325 spot-checker', () => {
     expect(s.claimVerification.rate).toBeNull();
     expect(s.claimVerification.status).toBe('pending');
-    expect(s.claimVerification.note).toContain('#325');
+    expect(s.claimVerification.note).toContain('no spotcheck events yet');
+  });
+
+  test('3b. spotcheck events measure the rate and mismatch raises an alarm', () => {
+    const withChecks = computeScorecard(
+      [
+        ...FIXTURE,
+        ev('spotcheck', '2026-11-20T14:00:00Z', { unit: '#A', sha: 'aaaa111', command: 'bun test t', verdict: 'match', expected: '2 pass / 0 fail', actual: '2 pass / 0 fail' }),
+        ev('spotcheck', '2026-11-20T14:01:00Z', { unit: '#B', sha: 'eeee555', command: 'bun test t', verdict: 'mismatch', expected: '9 pass / 0 fail', actual: '7 pass / 2 fail' }),
+      ],
+      { ledgerId: 'test-run-2026-11-20' },
+    );
+    expect(withChecks.claimVerification.status).toBe('measured');
+    expect(withChecks.claimVerification.checkedLandings).toBe(2);
+    expect(withChecks.claimVerification.verifiedLandings).toBe(1);
+    expect(withChecks.claimVerification.rate).toBe(50);
+    const alarmText = withChecks.alarms.map((a) => a.detail).join('\n');
+    expect(alarmText).toContain('pasted "9 pass / 0 fail" but re-run gave "7 pass / 2 fail"');
   });
 
   test('4. escalation latency: first GAPS gate 10:10 → escalation 11:10 = 60 min', () => {
@@ -187,7 +204,7 @@ describe('renderHuman', () => {
     expect(out).toContain('2. Rework ratio');
     expect(out).toContain('3 rounds/unit');
     expect(out).toContain('#B=4 ⚠');
-    expect(out).toContain('N/A — spot-checker lands in #325');
+    expect(out).toContain('N/A — no spotcheck events yet');
     expect(out).toContain('(60 min)');
     expect(out).toContain('1 disciplined, 0 late');
     expect(out).toContain('⚠ [rework]');

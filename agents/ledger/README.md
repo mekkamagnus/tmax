@@ -36,3 +36,6 @@ The stem is the ledger id — the value carried in `Agent-Run:` commit trailers.
    repo. Stage it like any other artifact (it is never gitignored). A `landing` event names
    the shas of the commit it describes, so append it *after* that commit exists — it rides
    with the next landing, and the run's final flush rides with `run-end`.
+7. **`spotcheck` events are machine-written.** `scripts/ledger-spotcheck.ts` appends them
+   after re-running a sampled landing's tests in a clean checkout — never hand-write or
+   edit one.

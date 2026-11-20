@@ -136,6 +136,11 @@ const good = {
     event: 'run-end', ts: '2026-11-20T18:40:00Z', 'units-accepted': 5, 'units-blocked': 0,
     totals: { 'wall-minutes': 577 },
   },
+  spotcheck: {
+    event: 'spotcheck', ts: '2026-11-20T12:00:00Z', unit: '#322', sha: '2b37dcd',
+    command: 'bun test test/unit/agent-ledger-schema.test.ts', verdict: 'match',
+    expected: '23 pass / 0 fail', actual: '23 pass / 0 fail',
+  },
 } as const;
 
 const errorsOf = (raw: unknown): string => {

@@ -219,6 +219,34 @@ Tab conclusion. Closes the run.
 {"event":"run-end","ts":"2026-11-20T18:40:00Z","units-accepted":5,"units-blocked":0,"totals":{"wall-minutes":"9ish hours"}}
 ```
 
+### `spotcheck`
+
+Appended by `scripts/ledger-spotcheck.ts` (#325) — never hand-written. The spot-checker
+re-runs a sampled landing's `tests-run` commands in a clean checkout of the recorded sha
+and appends the comparison as history (append-only: the result is the record). Mismatches
+surface as alarm rows in `ledger-report.ts` and drive the claim-verification benchmark.
+
+| field | type | rule |
+|---|---|---|
+| `unit` | string | the landing's unit |
+| `sha` | string | the sha the re-run checked out (the landing's last sha) |
+| `command` | string | the `tests-run` entry name that was re-run |
+| `verdict` | string | `match` \| `mismatch` \| `error` |
+| `expected` | string | pass/fail counts extracted from the pasted output |
+| `actual` | string | pass/fail counts extracted from the re-run output |
+
+**Valid:**
+
+```json
+{"event":"spotcheck","ts":"2026-11-20T12:00:00Z","unit":"#322","sha":"2b37dcd","command":"bun test test/unit/agent-ledger-schema.test.ts","verdict":"match","expected":"23 pass / 0 fail","actual":"23 pass / 0 fail"}
+```
+
+**Invalid — `verdict` is not a comparison result:**
+
+```json
+{"event":"spotcheck","ts":"2026-11-20T12:00:00Z","unit":"#322","sha":"2b37dcd","command":"bun test x.test.ts","verdict":"probably-fine","expected":"23 pass / 0 fail","actual":"23 pass / 0 fail"}
+```
+
 ### Common-field violations
 
 These examples are invalid regardless of event kind.
