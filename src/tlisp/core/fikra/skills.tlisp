@@ -2,7 +2,7 @@
   (export fikra-skills-list fikra-skills-rows fikra-skills-refresh
           fikra-skills-dir fikra-skill-prompt fikra-skill-accept
           fikra-skill-table fikra-skill-annotator fikra-skill-name-of
-          fikra-skill-visibility fikra-skill-fm-value fikra-skills-model-roster)
+          fikra-skill-visibility fikra-skill-fm-value fikra-skills-model-roster fikra-skills-any-rows-p)
 
 ;; RFC-029 section 8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
 ;; surfaced to model and user. Skills from
@@ -29,6 +29,8 @@ is model-visible."
   (let ((dir (fikra-skills-dir)))
     (setq fikra-skills-cache-root dir)
     (setq fikra-skills-cache (fikra-skills-scan dir))
+    (setq fikra-skills-cache-stamp
+      (fikra-skills-dir-stamp dir (fikra-skills-dir-names dir)))
     (length fikra-skills-cache)))
 
 (defun fikra-skills-scan (dir)
@@ -70,7 +72,10 @@ is model-visible."
 (defun fikra-skill-fm-value (line field)
   (if (string= (substring line 0 (min (length line) (+ (length field) 1)))
                (concat field ":"))
-    (string-trim (substring line (+ (length field) 2) (length line)))
+    ;; +1 (after the colon); trim absorbs the optional space — the old +2
+    ;; slice read "visibility:user" as "ser" (codex r27).
+    (let ((v (string-trim (substring line (+ (length field) 1) (length line)))))
+      (if (> (length v) 0) v nil))
     nil))
 
 (defun fikra-skill-fm-field-scan (lines field phase)
@@ -83,10 +88,10 @@ is model-visible."
           "")
         (if (string= line "---")
           ""
-          (if (string= (substring line 0 (min (length line) (+ (length field) 1)))
-                       (concat field ":"))
-            (string-trim (substring line (+ (length field) 2) (length line)))
-            (fikra-skill-fm-field-scan (cdr lines) field 1)))))))
+          (let ((v (fikra-skill-fm-value line field)))
+            (if v
+              v
+              (fikra-skill-fm-field-scan (cdr lines) field 1))))))))
 
 (defun fikra-skill-first-body-line (lines phase)
   (if (null lines)
@@ -129,12 +134,46 @@ is model-visible."
               hit
               (let ((v (fikra-skill-fm-value line "visibility"))) (if v (string= v "user") nil)))))))))
 
+(defvar fikra-skills-cache-stamp nil
+  "Modtime stamp of the scanned skills at cache time (codex r27: edits
+within a root invalidate the cache too, not just root switches).")
+
+(defun fikra-skills-dir-stamp (dir names)
+  "Concatenated name+modtime of every skill directory's SKILL.md —
+changes when a skill is added, removed, or edited."
+  (if (null names)
+    ""
+    (concat (car names) ":"
+            ;; file-modtime: ISO string, nil when missing.
+            (let ((m (file-modtime (concat dir "/" (car names) "/SKILL.md"))))
+              (if m m "-"))
+            ";"
+            (fikra-skills-dir-stamp dir (cdr names)))))
+
+(defun fikra-skills-dir-names (dir)
+  ;; Non-empty names only — ls's trailing newline yields a phantom "".
+  (fikra-skills-dir-names-filter
+    (if (not (file-exists-p dir))
+      (list)
+      (string-split (shell-command (concat "ls -1 '" dir "' 2>/dev/null || true")) "\n"))
+    (list)))
+
+(defun fikra-skills-dir-names-filter (names out)
+  (if (null names)
+    (reverse out)
+    (fikra-skills-dir-names-filter (cdr names)
+      (if (> (length (car names)) 0) (cons (car names) out) out))))
+
 (defun fikra-skills-cache-stale-p ()
-  ;; Empty cache, or the thread root moved since the last scan.
+  ;; Empty cache, root moved, OR any SKILL.md changed on disk (codex r27).
   (if (= (length fikra-skills-cache) 0)
     t
-    (not (string= (if fikra-skills-cache-root fikra-skills-cache-root "")
-                  (let ((dir (fikra-skills-dir))) (if dir dir ""))))))
+    (let ((dir (fikra-skills-dir)))
+      (if (not (string= (if fikra-skills-cache-root fikra-skills-cache-root "")
+                        (if dir dir "")))
+        t
+        (not (string= (if fikra-skills-cache-stamp fikra-skills-cache-stamp "")
+                      (fikra-skills-dir-stamp dir (fikra-skills-dir-names dir))))))))
 
 (defun fikra-skills-list ()
   (if (fikra-skills-cache-stale-p)
@@ -147,6 +186,14 @@ is model-visible."
     (progn (require-module fikra/workflow)
            (fikra/workflow/fikra-registered-workflows))
     (error () (list))))
+
+(defun fikra-skills-any-rows-p ()
+  "t when the picker has anything to show: skills OR registered
+defworkflows (refreshes first, so it reflects current disk state)."
+  (fikra-skills-refresh)
+  (if (> (length fikra-skills-cache) 0)
+    t
+    (> (length (fikra-skills-workflow-names)) 0)))
 
 (defun fikra-skills-rows ()
   "Rows for the completion table (display + metadata for the annotator):
@@ -251,9 +298,9 @@ T-Lisp workflow by name (mockup 8.7; composition is section 9 Q3)."
   (interactive)
   (fikra-skills-refresh)
   ;; codex r26 fix 1: registered defworkflows count too — a workflow-only
-  ;; project still opens the picker.
-  (if (and (= (length fikra-skills-cache) 0)
-           (= (length (fikra-skills-workflow-names)) 0))
+  ;; project still opens the picker (the gate is fikra-skills-any-rows-p,
+  ;; unit-testable headless).
+  (if (not (fikra-skills-any-rows-p))
     (editor-set-status "Fikra: no skills in .fikra/skills/ and no registered workflows")
     (progn
       (require-module fikra/thread)

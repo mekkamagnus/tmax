@@ -138,6 +138,35 @@ describe("#8.7 skills — codex r26 fixes", () => {
   });
 });
 
+describe("#8.7 skills — codex r27 fixes", () => {
+  test("fm-value parses 'visibility:user' (no space) as user, not 'ser'", async () => {
+    const editor = await setup();
+    expect(String(e(editor, '(fikra/skills/fikra-skill-fm-value "visibility:user" "visibility")').value)).toBe("user");
+    expect(String(e(editor, '(fikra/skills/fikra-skill-fm-value "visibility:   user " "visibility")').value)).toBe("user");
+    expect(String(e(editor, '(if (fikra/skills/fikra-skill-fm-value "visibility:" "visibility") "X" "NIL")').value)).toBe("NIL");
+  });
+
+  test("a skill edit invalidates the cache (modtime stamp)", async () => {
+    writeSkill("mut", "---\nname: mut\n---\noriginal\n");
+    const editor = await setup();
+    expect(Number(e(editor, "(fikra/skills/fikra-skills-refresh)").value)).toBe(1);
+    expect(String(e(editor, '(hashmap-get (car (fikra/skills/fikra-skills-list)) "description")').value)).toBe("original");
+    // Edit the SKILL.md on disk (same root) — the cache must not serve stale.
+    writeFileSync(join(repoDir, ".fikra", "skills", "mut", "SKILL.md"), "---\nname: mut\ndescription: edited\n---\nchanged\n");
+    const { utimesSync } = await import("node:fs");
+    const later = new Date(Date.now() + 3000);
+    utimesSync(join(repoDir, ".fikra", "skills", "mut", "SKILL.md"), later, later);
+    expect(String(e(editor, '(hashmap-get (car (fikra/skills/fikra-skills-list)) "description")').value)).toBe("edited");
+  });
+
+  test("the picker gate is testable: workflows-only passes, nothing fails", async () => {
+    const editor = await setup();
+    e(editor, "(require-module fikra/workflow)");
+    e(editor, '(fikra/workflow/fikra-register-workflow "solo" "x")');
+    expect(String(e(editor, "(fikra/skills/fikra-skills-any-rows-p)").value)).toBe("true");
+  });
+});
+
 describe("#8.7 skills — model roster (codex r25 fix 1)", () => {
   test("model-visible only; user-only excluded", async () => {
     writeSkill("pub", "---\nname: pub\ndescription: Public skill\n---\nbody\n");
