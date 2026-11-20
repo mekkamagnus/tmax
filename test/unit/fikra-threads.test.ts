@@ -93,7 +93,12 @@ describe("#222 lifecycle — create / switch / archive", () => {
     // RESETS on switch (the parent's replay must not bleed); main keeps
     // its own persisted choice (set-backend persists the field).
     e(editor, "(fikra/chat/fikra-refresh-lighter)");
-    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toContain("none");
+    // r54 isolation semantics: a FRESH thread (never chose) adopts the
+    // session's selection — replay stands; switching to main (the same
+    // persisted choice after start's adoption) keeps it too. Isolation
+    // fires on a DIFFERENT saved choice (the sibling test below).
+    e(editor, "(fikra/chat/fikra-refresh-lighter)");
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toContain("replay");
     e(editor, '(fikra/thread/fikra-thread-switch "main")');
     e(editor, "(fikra/chat/fikra-refresh-lighter)");
     expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toContain("replay");
@@ -238,6 +243,10 @@ describe("#8.5 threads — backend isolation + crash display (r45)", () => {
     e(a, '(fikra/thread/fikra-thread-focus "r")');
     e(a, '(fikra/adapter/fikra-set-backend-forced "replay")');
     e(a, '(fikra/thread/fikra-thread-set-field "backend" "replay")');
+    e(a, '(fikra/thread/fikra-thread-focus "s")');
+    e(a, '(fikra/thread/fikra-thread-set-field "backend" "none")');
+    e(a, '(fikra/thread/fikra-thread-save)');
+    e(a, '(fikra/thread/fikra-thread-focus "r")');
     e(a, '(fikra/thread/fikra-thread-focus "s")');
     expect(String(e(a, "(fikra/adapter/fikra-current-backend)").value)).not.toBe("replay");
     e(a, '(fikra/thread/fikra-thread-focus "r")');

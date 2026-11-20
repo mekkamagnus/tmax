@@ -70,7 +70,25 @@ With 0 or negative number, disable."
   ;; a workflow's start clobbered the chosen backend).
   (if (and (not backend)
            (not (string= (fikra-current-backend) "none")))
-    (message "Fikra mode started (%s)" (fikra-current-backend))
+    (progn
+      ;; The ACTIVE selection stands — but the CURRENT thread's saved
+      ;; field must match it (r46's isolation reset was reading a field
+      ;; the seam never persisted: active=replay + field=nil → the first
+      ;; focus/new reset the adapter to none and the workflow turns died
+      ;; with no backend).
+      (condition-case nil
+        (progn
+          (require-module fikra/thread)
+          ;; A fresh thread's seeded "none" is not a CHOICE — adopt the
+          ;; active selection over nil OR none.
+          (let ((fld (hashmap-get (fikra/thread/fikra-thread-state) "backend")))
+            (if (and (fikra/thread/fikra-thread-current)
+                     (or (not fld) (string= fld "none")))
+              (progn
+                (fikra/thread/fikra-thread-set-field "backend" (fikra-current-backend))
+                (fikra/thread/fikra-thread-save)))))
+        (error () nil))
+      (message "Fikra mode started (%s)" (fikra-current-backend)))
   (let ((target (if backend backend fikra-default-backend)))
     (if (fikra-backend-available-p target)
       (fikra-set-backend target)

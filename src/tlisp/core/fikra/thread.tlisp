@@ -168,7 +168,12 @@ history into it (daemon-restart reopen path), focus it."
                          "root" root
                          "context-dir" ctxdir
                          "legacy" nil
-                         "backend" "none"
+                         ;; nil, not "none": a fresh thread NEVER CHOSE —
+                         ;; the ambient/parent selection may adopt it
+                         ;; (the seeded "none" read as an explicit choice
+                         ;; and the isolation reset killed fresh threads'
+                         ;; backends — the workflow suites regression).
+                         "backend" nil
                          "session-id" nil
                          ;; runtime-mode stays nil until set — #219's
                          ;; fikra/modes owns the default (defvar + setter
@@ -323,13 +328,22 @@ not land under the wrong project)."
     (progn
       (require-module fikra/adapter)
       (let ((saved (hashmap-get (fikra-thread-state) "backend")))
-        (if (and saved
-                 (not (string= saved "none"))
-                 (not (string= saved ""))
-                 (fikra/adapter/fikra-backend-available-p saved))
-          (fikra/adapter/fikra-set-backend-forced saved)
-          ;; ACTIVE-only reset — the thread's SAVED choice survives (r47).
-          (fikra/adapter/fikra-reset-backend-active))))
+        (cond
+          ;; An explicit SAVED choice: restore it (isolation).
+          ((and saved
+                (not (string= saved "none"))
+                (not (string= saved ""))
+                (fikra/adapter/fikra-backend-available-p saved))
+            (fikra/adapter/fikra-set-backend-forced saved))
+          ;; EXPLICIT none: reset the active selection (the saved field
+          ;; survives — r47's active-only reset).
+          ((and saved (string= saved "none"))
+            (fikra/adapter/fikra-reset-backend-active))
+          ;; NO field at all: the thread never chose — the AMBIENT active
+          ;; selection stands (a fresh thread inherits the session's
+          ;; choice; the r46 reset here is what killed the workflow
+          ;; suites' replay turns).
+          (t nil))))
     (error () nil)))
 
 ;; ── #222: creation / switching / archive / listing ─────────────────
@@ -369,7 +383,16 @@ it and opens its chat buffer. Returns the id."
   (interactive)
   ;; let*: the id binding READS root — parallel let would see an unbound
   ;; symbol (probe catch).
-  (let* ((parent-mode (if fikra-current-thread-id (fikra-thread-field "runtime-mode") nil))
+  ;; The AMBIENT active selection is the other inheritance source: a
+  ;; seam can set the ADAPTER without any thread existing (no field to
+  ;; inherit) — the child still deserves the session's choice.
+  (let* ((ambient-backend (condition-case nil
+                              (progn (require-module fikra/adapter)
+                                     (let ((a (fikra/adapter/fikra-current-backend)))
+                                       (if (or (string= a "none") (string= a "")) nil a)))
+                              (error () nil)))
+         (parent-backend (if fikra-current-thread-id (fikra-thread-field "backend") ambient-backend))
+         (parent-mode (if fikra-current-thread-id (fikra-thread-field "runtime-mode") nil))
          (parent-ctx (if fikra-current-thread-id (fikra-thread-field "context-dir") nil))
          (parent-legacy (if fikra-current-thread-id (fikra-thread-field "legacy") nil))
          (root (progn (if (not fikra-current-thread-id) (fikra-thread-init))
@@ -390,9 +413,16 @@ it and opens its chat buffer. Returns the id."
         (progn
           (editor/keymaps/keymap-mutable-set! state "context-dir" nil)
           (editor/keymaps/keymap-mutable-set! state "legacy" t)))
-      ;; Child threads inherit the parent's runtime mode (#219).
+      ;; Child threads inherit the parent's runtime mode (#219) AND its
+      ;; backend (the r46 isolation reset otherwise blanks a fresh
+      ;; thread's adapter — the workflow suites' replay turns died with
+      ;; no backend the moment the labeled thread opened).
       (if parent-mode
-        (editor/keymaps/keymap-mutable-set! state "runtime-mode" parent-mode)))
+        (editor/keymaps/keymap-mutable-set! state "runtime-mode" parent-mode))
+      (if (and parent-backend
+               (not (string= parent-backend "none"))
+               (not (string= parent-backend "")))
+        (editor/keymaps/keymap-mutable-set! state "backend" parent-backend)))
     ;; mkdir + FAEP wiring under the PARENT root (the state's own source).
     (let ((dir (concat root "/.tmax/fikra/threads/" id)))
       (file-mkdir dir)
