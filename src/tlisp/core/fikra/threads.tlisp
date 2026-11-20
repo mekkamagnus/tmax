@@ -56,7 +56,12 @@ L<level>, worktree/main-tree, last activity), and the key-hint row."
                   (fikra-threads-pad (if (hashmap-get row "backend") (hashmap-get row "backend") "-") 8)
                   "T" (fikra-threads-pad (if (hashmap-get row "turns") (hashmap-get row "turns") 0) 3)
                   (fikra-threads-pad (fikra-threads-level-of (hashmap-get row "mode")) 4)
-                  (if (string= (if (hashmap-get row "location") (hashmap-get row "location") "") "worktree") "worktree ✓" "main-tree   ")
+                  ;; #298: the legacy label must stay visible in the 8.5
+                  ;; list (the rewrite regressed it — main went red).
+                  (cond
+                    ((string= (if (hashmap-get row "location") (hashmap-get row "location") "") "worktree") "worktree ✓")
+                    ((if (hashmap-get row "legacy") t nil) "legacy      ")
+                    (t "main-tree   "))
                   "  last: " (fikra-threads-last-ago (hashmap-get row "last-at"))
                   "\n"))
         (setq i (+ i 1))))

@@ -270,3 +270,22 @@ modelToEditorState (#253) already resolves currentBufferName from the LIVE model
 ## Ghost text arc (8.8, rounds 38-42): the recurring lessons, compact
 
 1. Transient render state (ghostText/ghostAnchor/flashSpans/currentBufferName) must ride model → Frame → wire → deserializer EXPLICITLY — each hop silently drops unknown fields; a "working" typecheck proves nothing about the chain. 2. Sync `executeCommand` of forms requiring `(require-module ...)` fails the module load (async loader) and any condition-case swallows it — ALL such hooks must be executeCommandAsync (bit me twice in one arc). 3. The printable-char fast-path in insert-handler is a DIFFERENT branch than the registry else — hooks must go where the keys actually flow. 4. Coordinate-only anchors re-arm after move-away-and-back; the principled invariant is (line, column, line-prefix-at-anchor) with suffix edits deliberately allowed (the insertion contract) — state the boundary, don't overclaim. 5. Bun-version portability: Bun.sliceAnsi/stringWidth are 1.4 APIs — feature-detect + a unit-gated fallback (the first fallback's escape scanner corrupted ANSI; codex on 1.3.9 caught it — export fallback internals and gate them directly). 6. tmux/TUI/daemon lifecycle during live captures: daemons die with frames, cwd resets spawn the WRONG binary (relative ./dist/tmax) — always `cd` the worktree inside the SAME command as spawn+test.
+
+## Callback-context state — the verified (narrowed) model (#306)
+
+The 2026-11-20 dropped-turn-end incident was blamed on "setq invisible to
+filter callbacks, mutations shared." A minimal make-process fixture
+(test/unit/callback-context-state.test.ts) DISPROVED the setq half within
+one editor session: the filter sees the main session's setq AND the
+mutations. The incident's real mechanism was the daemon's
+separate-editor-session split (each evalTlisp bound to its spawning
+session — the round-27/28 streaming root cause). The regression now pins
+the same-session contract; the cross-session behavior is architecture
+(documented in src/tlisp/CLAUDE.md's callback-context section).
+
+**Rule:** for state that process callbacks must see, prefer
+mutation-shared carriers (keymap-mutable-set! hashmaps) or thread-record
+fields; explicit-path emitters for events. A lint over "defvars read
+inside filter-called functions" was considered and DEFERRED — static
+analysis of T-Lisp call graphs is its own project (recorded with this
+issue).
