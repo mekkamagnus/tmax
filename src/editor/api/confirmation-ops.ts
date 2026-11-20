@@ -89,7 +89,13 @@ export function createConfirmationOps(deps: ConfirmationOpsDeps): Map<string, TL
     if (Either.isLeft(sourceE)) return Either.left(sourceE.left);
     const scopeE = stringArg(args, 1, "confirmation-token-mint");
     if (Either.isLeft(scopeE)) return Either.left(scopeE.left);
-    return Either.right(createString(confirmationService.mintToken(sourceE.right, scopeE.right)));
+    // Once-per-scope (first mint wins): a second mint for a live scope
+    // yields NIL — the T-Lisp caller branches (codex r85 P1: unrestricted
+    // re-mint made the approval prompt forgeable by any eval caller).
+    const token = confirmationService.mintToken(sourceE.right, scopeE.right);
+    return token === null
+      ? Either.right(createNil())
+      : Either.right(createString(token));
   });
 
   // (confirmation-resolve id "allow"|"reject"|"always") → t if this call

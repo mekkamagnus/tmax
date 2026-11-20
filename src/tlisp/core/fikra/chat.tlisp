@@ -77,8 +77,14 @@ The adapter drives everything after this (turn-begin, stream, turn-end)."
       (fikra/adapter/fikra-backend-start-turn message))))
 
 (defun fikra-turn-interrupt ()
-  "Cancel the in-progress turn (backend abort; guard prevents double-end)."
+  "Cancel the in-progress turn (backend abort; guard prevents double-end).
+A parked MEDIATE settles as rejected (r86, codex r85 P2): the bridge
+unblocks and no approval state outlives the turn."
   (fikra/adapter/fikra-backend-abort)
+  (condition-case nil
+    (progn (require-module fikra/approvals)
+           (fikra/approvals/fikra-approval-abort-pending))
+    (error () nil))
   (fikra-refresh-lighter))
 
 (defun fikra-turn-status ()

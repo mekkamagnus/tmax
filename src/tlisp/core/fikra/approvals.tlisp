@@ -4,7 +4,8 @@
           fikra-approval-answer-always fikra-approval-resolve-guard
           fikra-set-approval-guard fikra-approval-pending-p
           fikra-approvals-ensure-bindings fikra-approval-target-rich
-          fikra-approval-baseline-ref fikra-approval-json-command)
+          fikra-approval-baseline-ref fikra-approval-json-command
+          fikra-approval-abort-pending)
 
 ;; #220 (RFC-027 §D5 L2, §Security) — Fikra policy on the generic
 ;; confirmation mechanism (#210): the daemon parks a mediate from the MCP
@@ -293,14 +294,15 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
               ;; r81: the ✓ is EARNED — the verified baseline ref name, or
               ;; "" (the panel then says revert unavailable).
               (list "checkpoint" (fikra-approval-baseline-ref))
-              ;; r85 (codex r82/r84 P2): honest provenance — the scope
-              ;; liveness check IS the not-prompt-forged proof (the token
-              ;; was adapter-minted and names THIS live thread+turn).
+              ;; r86 reword (codex r85 P1): the scope check proves the
+              ;; token names a live thread+turn — with once-per-scope
+              ;; minting the token cannot be re-obtained, so a fabricated
+              ;; prompt needs the adapter's own token.
               (list "origin" (concat "model="
                               (condition-case nil
                                 (fikra/adapter/fikra-current-backend)
                                 (error () "?"))
-                              " · token scope " scope " verified (not prompt-forged)"))))
+                              " · token scope " scope " live (mint-locked)"))))
       ;; running → confirming (checked transition — an illegal enqueue
       ;; errors rather than corrupting thread state).
       (fikra/thread/fikra-thread-status-set "confirming")
@@ -313,6 +315,24 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
       (editor-set-status
         ;; Mockup 8.3 key labels (r80); y/n remain bound as aliases.
         (concat "Fikra: approve " kind "? a Allow · r Reject · A Always · C-g abort"))
+      t)))
+
+;; Abort settles a parked mediate as REJECTED (r86, codex r85 P2): the
+;; turn is dead — the bridge must unblock and the pending state clear.
+;; Denial direction: safe regardless of resolver kind.
+(defun fikra-approval-abort-pending ()
+  (if (null fikra-approval-pending-id)
+    nil
+    (progn
+      (let ((id fikra-approval-pending-id))
+        (setq fikra-approval-pending-id nil)
+        (setq fikra-approval-pending-kind nil)
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "permission-response")
+                (list "decision" "reject")))
+        (confirmation-resolve id "reject"))
+      (if (string= (fikra/thread/fikra-thread-status) "confirming")
+        (fikra/thread/fikra-thread-status-set "running"))
       t)))
 
 ;; ── answering ────────────────────────────────────────────────────────

@@ -75,6 +75,11 @@ export class ConfirmationService {
   private nextId = 1;
   private handlers = new Map<string, HandlerFn>();
   private tokens = new Map<string, TokenBinding>();
+  /** scope → the ONE token ever minted for it (codex r85 P1: an
+   * unrestricted re-mint let a headless caller fabricate a scope-valid
+   * token and forge the approval prompt. First mint wins — the adapter
+   * mints at turn-start, before any model action can run). */
+  private mintedScopes = new Map<string, string>();
   private pending = new Map<number, PendingEntry>();
   /** Bounded log of settled resolutions (first-resolver-wins evidence). */
   private resolutions = new Map<number, ResolutionRecord>();
@@ -93,6 +98,7 @@ export class ConfirmationService {
     this.pending.clear();
     this.handlers.clear();
     this.tokens.clear();
+    this.mintedScopes.clear();
     this.resolutions.clear();
     this.nextId = 1;
     this.resolverHint = "unknown";
@@ -106,11 +112,14 @@ export class ConfirmationService {
   /** Mint an opaque one-time token bound to source+scope. The token is the
    * PRIMARY auth control: a schema-valid mediate with a guessed, stale
    * (single-use), or cross-scope token is rejected BEFORE any prompt. */
-  mintToken(source: string, scope: string): string {
+  mintToken(source: string, scope: string): string | null {
+    const key = `${source}::${scope}`;
+    if (this.mintedScopes.has(key)) return null; // first mint wins
     const token = Array.from(crypto.getRandomValues(new Uint8Array(24)))
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
     this.tokens.set(token, { source, scope, used: false });
+    this.mintedScopes.set(key, token);
     return token;
   }
 

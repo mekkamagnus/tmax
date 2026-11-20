@@ -583,3 +583,35 @@ describe("r83 — escaped quotes in the JSON command survive the target scan", (
       .toBe('echo \"hi\" there');
   });
 });
+
+describe("r86 — once-per-scope minting + abort settles the parked mediate", () => {
+  beforeEach(() => { confirmationService.reset(); });
+
+  test("a SECOND mint for a live scope is denied — the forge path is closed (codex r85 P1)", async () => {
+    const editor = await l2setup();
+    // The adapter mints at turn-start...
+    const first = e(editor, '(confirmation-token-mint "fikra" "forge/1")');
+    expect(first.value).toBeTruthy();
+    // ...a headless caller minting the SAME scope afterwards gets NIL —
+    // no token to fabricate a prompt with.
+    expect(String(e(editor, '(confirmation-token-mint "fikra" "forge/1")').value)).toBe("null");
+    // A DIFFERENT scope still mints (turns keep working).
+    expect(String(e(editor, '(confirmation-token-mint "fikra" "forge/2")').value)).not.toBe("null");
+  });
+
+  test("C-g (turn-interrupt) settles a parked mediate as rejected — no approval state outlives the turn (codex r85 P2)", async () => {
+    const editor = await l2setup();
+    e(editor, "(require-module fikra/chat)");
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    const parked = mediate(token, "bash", "rm -rf /tmp/abort-probe");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(editor, "(fikra/chat/fikra-turn-interrupt)");
+    // Pending cleared; the parked RPC settled as reject.
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+    const settled = await parked;
+    expect(settled.decision).toBe("reject");
+    e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(String(e(editor, "(buffer-text)").value)).toContain("rejected");
+  });
+});
