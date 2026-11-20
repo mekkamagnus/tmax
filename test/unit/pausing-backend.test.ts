@@ -182,7 +182,7 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     expect(pauseFrame).toContain("Edit");
     expect(pauseFrame).toContain("src/**");
     expect(pauseFrame).toContain("allow");
-    expect(pauseFrame).toContain("always");
+    expect(pauseFrame).toContain("Always"); // the current panel keys row (a Allow / A Always)
     // Frame 2 — the RESUMED frame (decision + continuation + completion).
     e(editor, '(fikra/backend-pausing/fikra-pausing-decide "y")');
     e(editor, "(fikra/backend-pausing/fikra-pausing-pump)");
