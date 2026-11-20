@@ -219,12 +219,15 @@
 
 ;; Completion table as a FUNCTION (input action) — the completing-read
 ;; contract. Candidates: revert / cancel.
+(defun fikra-revert-confirm-candidate (name annotation)
+  (hashmap "value" name "display" name "annotation" annotation "metadata" (hashmap)))
+
 (defun fikra-revert-confirm-table (input action)
   (if (string= action "metadata")
     (hashmap "category" "command")
     (list
-      (list "revert" "candidate" "discard this turn's changes")
-      (list "cancel" "candidate" "keep them"))))
+      (fikra-revert-confirm-candidate "revert" "discard this turn's changes")
+      (fikra-revert-confirm-candidate "cancel" "keep them"))))
 
 (defvar fikra-revert-confirm-history nil
   "Minibuffer history for the revert confirmation.")
