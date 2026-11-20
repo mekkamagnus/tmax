@@ -327,6 +327,7 @@ describe("#220 L2 — live enqueue drives the prompt UI headlessly", () => {
     expect(replayed).toContain("write-file"); // the tool row
     expect(replayed).toContain("target  src/x.ts"); // the target row (whole path)
     expect(replayed).toContain("write-file"); // tool row (write-file not in the risk table — empty tag)
+    expect(replayed).toContain("action  write-file: write to src/x.ts"); // the COMPLETE action row
     expect(replayed).toContain("paused (approval-required)");
     // Answer allow → the parked daemon RPC settles allow.
     expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-allow)").value)).toBe("true");
@@ -519,7 +520,7 @@ describe("#220 L2 — capability gating (claude-first, probe-driven)", () => {
     // First PATH wins over the command word and later paths.
     expect(P("t", '(fikra/approvals/fikra-approval-target "cp src/a.ts dst/b.ts")')).toBe("src/a.ts");
     // A long PATH still qualifies (the cap is the word-fallback's).
-    expect(P("t", '(fikra/approvals/fikra-approval-target "cat src/very/deeply/nested/path/that/exceeds/the/cap/x.ts")')).toContain("nested");
+    expect(P("t", '(fikra/approvals/fikra-approval-target "cat src/very/deeply/nested/path/that/exceeds/the/cap/x.ts")')).toBe("src/very/deeply/nested/path/that/exceeds/the/cap/x.ts");
     // No path → the first word (the command).
     expect(P("t", '(fikra/approvals/fikra-approval-target "make test")')).toBe("make");
     // Downcased destructive detail matches.

@@ -169,7 +169,10 @@ round-12 approvals catch)."
                          " — holds until you answer")
                  (concat "[y] allow  [n] reject  [a] always (trusts)")
                  (if (string= cp "") "" (concat "ckpt " cp " · r reverts"))
-                 (if (string= org "") "" (concat "origin: " org)))))
+                 (if (string= org "") "" (concat "origin: " org))
+                 ;; The COMPLETE action (r72: the derived target/risk are
+                 ;; heuristics — the reviewer must always see the full text).
+                 (concat "action  " (fikra-event-get-str event "action")))))
     (concat
       (fikra-face "\e[1;33m" (fikra-box-line "┌" "─" title "┐")) "\n"
       (fikra-face "\e[1;33m"
