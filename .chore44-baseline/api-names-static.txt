@@ -373,6 +373,8 @@ syntax-tokenize-line
 terminal-height-get
 terminal-width-get
 text-object-region
+tmax-mcp-bridge-path
+tmax-root
 ts-capitalize-word
 ts-downcase-word
 ts-open-external

@@ -171,9 +171,11 @@ config is written per turn by fikra-claude-write-mcp-config)."
           (number-to-string (fikra/thread/fikra-thread-turn-count)) ".json"))
 
 (defun fikra-claude-mcp-bridge-path ()
-  "Absolute path of the MCP bridge script. process-cwd lives in
-fikra/thread (module-private there) — re-derive it here."
-  (string-trim (shell-command "pwd")))
+  "Absolute path of the L2 confirmation bridge (round-34/35): source mode
+→ the repo's bin/; compiled mode → the primitive EXTRACTS the embedded
+asset to ~/.cache/tmax (an external bun process cannot read $bunfs —
+the virtual path was the last failure)."
+  (tmax-mcp-bridge-path))
 
 (defun fikra-claude-write-mcp-config ()
   "Mint the turn's approval token and write the --mcp-config JSON.

@@ -15,7 +15,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../tlisp/values.ts";
 import { renameSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { TextBuffer } from "../core/contracts/buffer.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
@@ -135,6 +135,46 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
  */
 function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
   return [
+    // ── tmax runtime ───────────────────────────────────────────────────
+    {
+      name: "tmax-runtime",
+      factory: (): Map<string, TLispFunctionImpl> => {
+        const ops = new Map<string, TLispFunctionImpl>();
+        // (tmax-root) — the tmax installation root (round-34 L2 seam):
+        // source mode resolves from this module's location (the
+        // exec-target.ts pattern); a compiled binary exposes $bunfs
+        // (callers extract embedded assets from there).
+        ops.set("tmax-root", (): Either<AppError, TLispValue> =>
+          Either.right(createString(
+            import.meta.dir.startsWith("/$bunfs")
+              ? "/$bunfs/root"
+              : resolve(import.meta.dir, "../.."),
+          )));
+        // (tmax-mcp-bridge-path) — absolute path to the L2 confirmation
+        // bridge the CLI spawns EXTERNALLY (round-34/35: $bunfs is virtual
+        // — an out-of-process bun cannot read it, so compiled mode EXTRACTS
+        // the embedded asset to ~/.cache/tmax/ once; source mode points at
+        // the repo's bin/).
+        ops.set("tmax-mcp-bridge-path", (): Either<AppError, TLispValue> => {
+          try {
+            if (import.meta.dir.startsWith("/$bunfs")) {
+              const cacheDir = resolve(process.env.HOME ?? "~", ".cache", "tmax");
+              mkdirSync(cacheDir, { recursive: true });
+              const out = resolve(cacheDir, "tmax-mcp-confirmation.ts");
+              if (!existsSync(out)) {
+                const asset = readFileSync("/$bunfs/root/bin/tmax-mcp-confirmation.ts", "utf8");
+                writeFileSync(out, asset, { mode: 0o600 });
+              }
+              return Either.right(createString(out));
+            }
+            return Either.right(createString(resolve(import.meta.dir, "../../bin/tmax-mcp-confirmation.ts")));
+          } catch (e) {
+            return Either.left(createValidationError("FormatError", `tmax-mcp-bridge-path: ${e instanceof Error ? e.message : String(e)}`));
+          }
+        });
+        return ops;
+      },
+    },
     // ── buffer ──────────────────────────────────────────────────────────
     {
       name: "buffer",

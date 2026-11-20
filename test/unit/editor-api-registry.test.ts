@@ -36,7 +36,7 @@ import type { EditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 describe("CHORE-44 Change 7 — editor API registry", () => {
   // ── AC7.1: live inventory matches the checked-in baseline ────────────
-  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (424 names)", () => {
+  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (426 names)", () => {
     const baselinePath = join(import.meta.dir, "..", "..", ".chore44-baseline", "api-names-static.txt");
     const expected = readFileSync(baselinePath, "utf8")
       .split("\n")
@@ -47,7 +47,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // #198: 419 → 421 — the #220 confirmation ops (resolver-kind +
     // set-resolve-policy) plus this cycle's regeneration.
     // #231: 421 → 424 — the flash-region goggles primitive.
-    expect(live.length).toBe(424);
+    // Round-34: 424 → 426 — tmax-root + tmax-mcp-bridge-path (the L2 seam).
+    expect(live.length).toBe(426);
     expect(live).toEqual(expected);
   });
 
