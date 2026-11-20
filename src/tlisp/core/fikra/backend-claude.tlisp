@@ -308,7 +308,7 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
                           (list "tool" (hashmap-get fikra-claude-tool-names rid))
                           (list "id" rid)
                           (list "summary" (if content-v content-v "")))
-                    out)))))))
+                    out))))))))
 
 ;; tool_use block → tool-call event with a per-tool summary.
 (defvar fikra-claude-tool-names (hashmap)
