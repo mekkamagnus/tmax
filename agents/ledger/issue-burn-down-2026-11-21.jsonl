@@ -19,3 +19,5 @@
 {"event":"gate","ts":"2026-11-20T13:42:46Z","kind":"verify-gate","verdict":"PASS","rounds":3,"reviewed-sha":"5cfab48","findings-count":0}
 {"event":"gate","ts":"2026-11-20T13:42:46Z","kind":"codex-grade","verdict":"9/10","rounds":1,"reviewed-sha":"5cfab48","findings-count":1}
 {"event":"landing","ts":"2026-11-20T13:42:46Z","unit":"#304","shas":["6e3829e"],"files-staged-count":6,"tests-run":[{"name":"bun run test:unit","output":"3853 pass\n0 fail (pre-merge); merged tree 3865 pass + baseline refreeze follow-up 3867-equivalent green"}],"adr-spec":["docs/adrs/ADR-0297-id-based-ending-dedupe.md","docs/specs/SPEC-271-id-based-ending-dedupe.md"]}
+{"event":"unit-start","ts":"2026-11-20T15:20:10Z","unit":"#306"}
+{"event":"telemetry","ts":"2026-11-20T15:20:10Z","wall-minutes":null,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null,"note":"footer unreadable — honest nulls"}
