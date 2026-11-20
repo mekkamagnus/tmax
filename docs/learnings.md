@@ -166,3 +166,7 @@ Three rounds hunted a "streaming render" failure (243 deltas logged, buffer froz
 1. After ANY .tlisp edit: run `bun run /tmp/eval-check.ts <file>` (interpreter.execute on the file) AND a daemon-side `(require-module ...)` smoke — parse-check alone passed on the broken file.
 2. When a runtime feature "silently stops working," grep *Messages* for module-load errors FIRST — before theorizing about the feature's own code.
 3. The `buffer-append-to` by-name primitive has a buffer-instance mismatch (returns the text while buffer-text reads empty in the same fixture) — sort the editor/ctx buffer-ownership model before revisiting named appends.
+
+## Streaming render — narrowed to the first-batch-only pattern (round 26)
+
+With the module-load repair live: the FIRST streamed batch renders ("AI: 1. Terminal editors are text-editing" appears in the daemon-side *Fikra*), then later batches stop landing while all 138 deltas reach the log. Daemon-side *Fikra* has 6 lines at turn end; buffer-current in the eval context reads *Fikra* throughout. So the `(string= (buffer-current) target-buffer)` gate passes but only early appends land — suspect the RENDER TEXT is empty for later batches (the text-run state machine: `fikra-text-open` threading in emit-batch-for's per-chunk batches — deltas 2..N join an OPEN run and render "" when open... check `fikra-event-render-batch`: with `fikra-text-open`=t, subsequent delta-only batches render the text but NO prefix — text should still flow. Next: instrument render-batch's returned length per batch in the filter.
