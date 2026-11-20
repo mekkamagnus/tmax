@@ -101,16 +101,16 @@ describe("#216 modeline via dynamic lighters (#211)", () => {
     // #219: the lighter is mode-aware — backend + state char + effective
     // mode (+ degradation star). Default mode = approval-required. No
     // turns yet → no turn segment.
-    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:replay●:approval-required:th:main");
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:replay●:approval-required:L2:th:main");
     // After a turn (send → replay completes synchronously) still idle, and
     // the modeline gains the turn count (mockup thread context: tN).
     e(editor, '(fikra/chat/fikra-turn-send "q")');
     e(editor, "(fikra/chat/fikra-refresh-lighter)");
-    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:replay●:approval-required:t1:th:main");
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:replay●:approval-required:L2:t1:th:main");
     // Running state shows ◉ (turn 2 in flight).
     e(editor, '(fikra/thread/fikra-thread-turn-begin)');
     e(editor, "(fikra/chat/fikra-refresh-lighter)");
-    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:replay◉:approval-required:t2:th:main");
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:replay◉:approval-required:L2:t2:th:main");
   });
 });
 

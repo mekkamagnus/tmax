@@ -104,6 +104,9 @@ context flakiness)."
     (concat "fikra:" (fikra/adapter/fikra-current-backend)
             (fikra/modes/fikra-lighter-state-char)
             ":" (fikra/modes/fikra-effective-mode)
+            ;; Mockup 8.1 modeline: the L-level rides after the mode
+            ;; ("L2") — the security tier, the threads-list mapping.
+            (fikra-lighter-level-segment)
             (fikra/modes/fikra-mode-star)
             ;; Turn count (mockup modeline: thread context): t9-style,
             ;; omitted before the first turn.
@@ -115,6 +118,15 @@ context flakiness)."
             (fikra-lighter-thread-segment)
             ;; #221: the wt:<id> segment appears only in worktree mode.
             (fikra-worktree-segment))))
+
+(defun fikra-lighter-level-segment ()
+  (require-module fikra/modes)
+  (let ((lvl (condition-case nil
+                 (progn (require-module fikra/threads)
+                        (fikra/threads/fikra-threads-level-of
+                          (fikra/modes/fikra-effective-mode)))
+                 (error () "-"))))
+    (if (and lvl (> (length lvl) 1)) (concat ":" lvl) "")))
 
 (defun fikra-lighter-tools-segment ()
   (require-module fikra/event)

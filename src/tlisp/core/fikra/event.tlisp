@@ -91,6 +91,28 @@
         (setq found (car (cdr entry)))))
     found))
 
+
+;; refs/fikra/<id>/<n>[-baseline] -> "<id>/<n>" (the mockup's short form).
+(defun fikra-ckpt-short (ref)
+  (fikra-ckpt-segments (string-split ref "/") (list)))
+
+;; Collect the segments AFTER "fikra" (id then turn), dropping -baseline.
+(defun fikra-ckpt-segments (segs acc)
+  (if (null segs)
+    (let ((kept acc)) ;; kept = (id turn) — already in order.
+      (if (>= (length kept) 2)
+        (concat (nth 1 kept) "/" (fikra-ckpt-tail (nth 0 kept)))
+        (if (>= (length kept) 1) (nth 0 kept) "")))
+    (fikra-ckpt-segments (cdr segs)
+      (if (or (string= (car segs) "refs") (string= (car segs) "fikra"))
+        acc
+        (cons (car segs) acc)))))
+
+(defun fikra-ckpt-tail (seg)
+  (if (string-suffix-p "-baseline" seg)
+    (substring seg 0 (- (length seg) 9))
+    seg))
+
 (defun fikra-event-get-str (event key)
   (let ((v (fikra-event-get event key)))
     (if v v "")))
@@ -267,7 +289,12 @@ round-12 approvals catch)."
                   "\n")))
       ((string= kind "checkpoint-start") "")
       ((string= kind "checkpoint-ready")
-        (concat (fikra-face "\e[36m" (concat "  ⌘ checkpoint " (fikra-event-get-str event "ref"))) "\n"))
+        ;; Mockup 8.1: the marker shape "[ckpt <short-ref> ✓]" — the ⌘
+        ;; keeps the checkpoint identity, the ✓ + short ref match the
+        ;; inline edit markers.
+        (concat (fikra-face "\e[36m"
+                  (concat "  ⌘ [ckpt " (fikra-ckpt-short (fikra-event-get-str event "ref")) " ✓]"))
+                "\n"))
       ((string= kind "checkpoint-error")
         (concat (fikra-face "\e[1;31m" (concat "  ⌘ checkpoint-error: " (fikra-event-get-str event "reason"))) "\n"))
       ((string= kind "checkpoint-reverted")
