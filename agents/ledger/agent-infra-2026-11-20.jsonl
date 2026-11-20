@@ -1,0 +1,2 @@
+{"event":"run-start","ts":"2026-11-20T08:38:00Z","label":"agent-infra","goal":"land RFC-036 agent-run benchmarking issues #322-#326","model":"glm-5.3","order-file-ref":"docs/rfcs/RFC-036-agent-run-benchmarking.md"}
+{"event":"unit-start","ts":"2026-11-20T08:41:00Z","unit":"#322"}

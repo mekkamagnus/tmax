@@ -85,8 +85,11 @@ __pycache__/
 # Patch-review working state (gather bundles + verdicts)
 .patch-reviews/
 
-# adw-plan agent state (per-run dispatcher + planner logs)
-agents/
+# adw-plan agent state (per-run dispatcher + planner logs).
+# agents/ledger/ (RFC-036 run ledgers) is the committed durable record —
+# explicitly re-included below; everything else under agents/ stays local.
+agents/*
+!agents/ledger/
 
 # Codex CLI local state (skills cache — tooling cruft, not project config)
 .codex/
