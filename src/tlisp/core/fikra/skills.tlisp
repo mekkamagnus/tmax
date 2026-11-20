@@ -1,7 +1,7 @@
 (defmodule fikra/skills
   (export fikra-skills-list fikra-skills-rows fikra-skills-refresh
           fikra-skills-dir fikra-skill-prompt fikra-skill-accept
-          fikra-skill-table fikra-skill-name-of)
+          fikra-skill-table fikra-skill-annotator fikra-skill-name-of)
 
 ;; RFC-029 section 8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
 ;; surfaced to model and user. Skills from
@@ -58,21 +58,28 @@ is model-visible."
   fikra-skills-cache)
 
 (defun fikra-skills-rows ()
-  "Rows for the completion table (id/display/annotation)."
+  "Rows for the completion table (display + metadata for the annotator)."
   (mapcar
     (lambda (s)
       (hashmap "value" (hashmap-get s "id")
                "display" (hashmap-get s "id")
-               "annotation" (concat (hashmap-get s "path")
-                                    " · " (hashmap-get s "visibility"))
-               "metadata" (hashmap)))
+               "metadata" (hashmap "path" (hashmap-get s "path")
+                                   "visibility" (hashmap-get s "visibility"))))
     (fikra-skills-list)))
 
-;; The completion table (FUNCTION contract — input action).
+;; The completion table (FUNCTION contract — input action). The custom
+;; "fikra-skill" category routes marginalia to our annotator below (the
+;; built-in "command" annotator overwrites the row annotation with blanks).
 (defun fikra-skill-table (input action)
   (if (string= action "metadata")
-    (hashmap "category" "command")
+    (hashmap "category" "fikra-skill")
     (fikra-skills-rows)))
+
+(defun fikra-skill-annotator (candidate)
+  "Marginalia: the skill's path and visibility tag."
+  (let ((details (hashmap-get candidate "metadata")))
+    (concat "  " (hashmap-get details "path")
+            " · " (hashmap-get details "visibility"))))
 
 (defun fikra-skill-accept (choice)
   "Accept: run the chosen skill — the mockup's model-visible skills are
@@ -100,7 +107,7 @@ describing the skill (its SKILL.md body is the instruction)."
     (fikra-skill-name-scan s (+ i 1)
       (if (and (not acc) (string= (substring s i (+ i 1)) " "))
         " "
-        (if acc (concat acc (substring s i (+ i 1))) nil))))
+        (if acc (concat acc (substring s i (+ i 1))) nil)))))
 
 (defun fikra-skill-name-strip (s)
   (substring s 1 (length s)))
@@ -121,6 +128,8 @@ describing the skill (its SKILL.md body is the instruction)."
 
 (defvar fikra-skill-history nil)
 
+(require-module editor/completion/marginalia)
+(marginalia-register-annotator "fikra-skill" "fikra/skills/fikra-skill-annotator")
+
 (provide "fikra-skills")
-)
 )
