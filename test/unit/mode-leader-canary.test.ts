@@ -28,7 +28,7 @@ const MODES: { file: string; content: string; expectMode: RegExp }[] = [
   { file: "a.ts", content: "const x: number = 1;\n", expectMode: /typescript/ },
   { file: "a.md", content: "# Title\n\nbody\n", expectMode: /markdown/ },
   { file: "a.lisp", content: "(defun f () 1)\n", expectMode: /lisp/ },
-  { file: "a.txt", content: "plain text\n", expectMode: /fundamental|text/ },
+  { file: "a.txt", content: "plain text\n", expectMode: /text/ }, // strict: a text-mode load failure falls back to fundamental and turns this row red
   { file: "a.go", content: "package main\n", expectMode: /go/ },
   { file: "a.py", content: "x = 1\n", expectMode: /python/ },
   { file: "a.json", content: "{\"k\": 1}\n", expectMode: /json/ },
