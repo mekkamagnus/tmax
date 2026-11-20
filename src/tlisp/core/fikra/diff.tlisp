@@ -114,8 +114,16 @@
     (progn
       (buffer-switch fikra-diff-buffer-name)
       (buffer-set-read-only nil)
-      (let ((count (buffer-line-count)))
-        (if (> count 1) (buffer-delete-range 0 0 count 0))))
+      ;; Rewrite defensively: the cached line count can exceed the live
+      ;; bounds (live catch: "Line 11 out of bounds (0-10)" killed every
+      ;; turn-nav re-render — the header stayed on the previous turn).
+      (condition-case nil
+        (let ((count (buffer-line-count)))
+          (if (> count 1) (buffer-delete-range 0 0 count 0)))
+        (error ()
+          (condition-case nil
+            (buffer-delete-range 0 0 (- (buffer-line-count) 1) 0)
+            (error () nil)))))
     (buffer-create fikra-diff-buffer-name))
   (buffer-switch fikra-diff-buffer-name)
   (buffer-set-read-only nil)
