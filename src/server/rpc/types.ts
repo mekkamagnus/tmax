@@ -204,6 +204,8 @@ export interface SerializedEditorState {
   commandLine: string;
   mxCommand: string;
   currentFilename?: string;
+  /** #253 wire: the named buffer the modeline should show (*Fikra*, *Help*). */
+  currentBufferName?: string | null;
   currentMajorMode: string;
   activeMinorModes: string[];
   activeMinorModeLighters: string[];

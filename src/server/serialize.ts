@@ -154,6 +154,10 @@ export function editorStateToJson(
     commandLine: state.commandLine,
     mxCommand: state.mxCommand,
     currentFilename: state.currentFilename,
+    // #253 wire gap: the modeline names named buffers (*Fikra*, *Help*) —
+    // this field was never serialized, so every client rendered the
+    // filename-or-*scratch* fallback over a named buffer (fikra modeline).
+    currentBufferName: state.currentBufferName,
     currentMajorMode: state.currentMajorMode ?? "fundamental",
     activeMinorModes: state.activeMinorModes ?? [],
     activeMinorModeLighters: state.activeMinorModeLighters ?? [],
@@ -273,6 +277,7 @@ export function jsonToEditorState(json: SerializedEditorState | Record<string, u
     commandLine: record.commandLine as string,
     mxCommand: record.mxCommand as string,
     currentFilename: record.currentFilename as string | undefined,
+    currentBufferName: record.currentBufferName as string | undefined,
     currentMajorMode: (record.currentMajorMode as string | undefined) ?? "fundamental",
     activeMinorModes: (record.activeMinorModes as string[] | undefined) ?? [],
     activeMinorModeLighters: (record.activeMinorModeLighters as string[] | undefined) ?? [],
