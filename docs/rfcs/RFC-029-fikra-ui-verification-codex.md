@@ -844,3 +844,22 @@ The r62 named follow-up — the ckpt marker INLINE on the edit row — landed an
 # Rounds 70-74 (8.3 approval-panel arc — capped at 7) — 2026-11-22
 
 The mockup 8.3 panel's context rows landed over five rounds (7→7→6→7→7): the APPROVE ACTION title (thread + turn), the tool row with the case-insensitive risk tag (destructive/shell/file-edit; rm -rf variants, push --force, reset --hard, drop table), the target row (first-path-wins whole-path scan — 'src/x.ts', never '/x.ts'; the command word as fallback), the COMPLETE action row (the derived fields are summaries, the full text always present), and row WRAPPING (a 37-char head + '… ' continuations — a long action never loses its decisive tail). r74's named follow-ups: the native per-action gate (P1), file-count/size context, the long-title width, wrap-chunk coverage, and the r68 guard regression (restored post-cap: the namespace check was lost in a rename). Board: 8.1 7, 8.2 7, 8.3 7, 8.4 6, 8.5 7, 8.6 6, 8.7 9, 8.8 6 = 55/80.
+
+## Round 75 — 8.4 re-grade: the completed view's file-summary block (6/10 FAIL → fixed r76)
+
+Landed `63608f2`: `fikra-turn-diff-for` renders the live view's ± per-file summary for COMPLETED turns, derived from the turn's own ref-pair numstat via the new `fikra-diff-numstat-rows`. Codex caught the P1: numstat prints `-` for BINARY files — `string-to-number "-"` threw and killed the whole completed view — plus a duplicated keys-hint line (P3).
+
+## Round 76 — 8.4 re-grade: binary counts parse as 0; single hint (7/10 PASS)
+
+Landed `bfa6f65`: `fikra-diff-numstat-count` (condition-case → 0) guards both count columns; the duplicated hint dropped. Codex independently verified an all-binary turn (two `+0 -0` rows, one hint) and a rename row (`old.txt => new.txt`). 8.4 closes at 7. Named follow-ups: M/A status letters + tool-count header (P2); the mockup shortcut map (P2); compact file separators vs raw git headers (P2).
+
+## Rounds 77-81 — the interactive gate sub-arc (8.3: 7 → 8, closed at the 5-round cap)
+
+The P1 slice every receipt named — the native per-action gate's interactive loop:
+- **r77 (`2099d82`, FAIL 6)**: the loop itself — adapter `fikra-backend-pending-p`/`fikra-backend-decide` (the start-turn funcall contract extended), the pausing backend's contract wrappers, the chat's y/n/a keys (real keystrokes through handleKey), the pause emit carrying the full r70 field set. Codex verified the loop and the neighbors; caught the confirming-status honesty gap, the missing abort, and the mediate-guard bypass.
+- **r78 (`fd23e3d`, FAIL 6)**: the L2 resolve-guard wraps the backend branch; `fikra-backend-pausing-abort` makes C-g end the turn interrupted; the enabling TS fix — normal-mode C-g was an unconditional cancel running BEFORE keymap lookup, so a buffer-local C-g binding could never fire (now it wins, per #206's chain). Codex's catch: the exported `fikra-backend-decide` STILL bypassed the guard — a headless eval returned `done`.
+- **r79 (`ca0f5c6`, PASS 8)**: enforcement moved INTO the adapter seam (the service primitive) + re-checked in the backend wrapper; the raw decide/pump pair stays unguarded as #303's documented test seams.
+- **r80 (`d0a3adf`, FAIL 7)**: the mockup's key labels (a Allow · r Reject · A Always · C-g abort; y/n aliases; `a`'s semantic change regression-tested), the named ckpt ref, the blast-radius target row. Codex caught the overclaims: the ckpt ✓ was synthesized (no ref verified), bare-dir and absolute targets missed enrichment, the prompt hardcoded Edit.
+- **r81 (`21baba6`, PASS 8)**: every claim earned — `fikra-approval-baseline-ref` verifies the baseline ref at emit (truthful `none yet — revert unavailable` row otherwise), complete blast-radius coverage, tool-aware prompt.
+
+**Named follow-ups**: live-CLI native mediation (P1 — backend-claude drives a real permission pause through the guarded seam); queued-action count in the modeline (P2); origin frame-id + model provenance (P2). Board: 8.1 7, 8.2 7, 8.3 8, 8.4 7, 8.5 7, 8.6 6, 8.7 9, 8.8 6 = 57/80.
