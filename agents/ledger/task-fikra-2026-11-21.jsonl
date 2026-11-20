@@ -1,0 +1,4 @@
+{"event":"run-start","ts":"2026-11-21T00:00:00+08:00","label":"task-fikra","goal":"fikra UI vs RFC-029 mockups until codex 9+ (loop); current unit: skills 8.7 grade iterations","model":"glm-5.3","order-file-ref":"docs/rfcs/RFC-029-fikra-ui-verification-codex.md","note":"mid-flight amendment: ledger duty starts at the protocol message; rounds 25-28 receipts live in docs/rfcs/RFC-029-fikra-ui-verification-codex.md and the learnings entries — per no-retro-fabrication"}
+{"event":"unit-start","ts":"2026-11-21T00:00:00+08:00","unit":"iter-r29"}
+{"event":"telemetry","ts":"2026-11-21T00:00:00+08:00","wall-minutes":0,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null}
+{"event":"landing","ts":"2026-11-21T00:05:00+08:00","unit":"iter-r29","shas":["8f090b7"],"files-staged-count":2,"tests-run":[{"name":"bun test test/unit/fikra-skills.test.ts","output":"0 fail\n28 expect() calls\nRan 14 tests across 1 file."}],"adr-spec":[]}
