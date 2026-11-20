@@ -174,15 +174,16 @@ modeline)."
 ;; b: switch the SELECTED thread's backend (focus it, open the backend
 ;; picker, return to the refreshed list).
 (defun fikra-threads-backend ()
-  "b: pick the selected thread's backend."
+  "b: pick the selected thread's backend. Focus it and OPEN the picker —
+  the ACCEPT does the work (sets the adapter selection AND this thread's
+  persisted field); completing-read never returns the choice to us (the
+  r28 lesson; the r44 catch treated it as synchronous)."
   (let ((id (fikra-threads-selected-id)))
     (if id
       (progn
         (fikra/thread/fikra-thread-focus id)
         (require-module fikra/adapter)
-        (fikra-set-backend (fikra-backend-prompt))
-        (setq fikra-threads-selected 0)
-        (fikra-threads-render)
+        (fikra-backend-prompt)
         id))))
 
 ;; w: worktree for the selected thread — local enters worktree mode, an
@@ -209,6 +210,8 @@ modeline)."
       ;; mockup 8.5 keys: k kill (the archive alias), b backend, w worktree.
       (editor/keymaps/keymap-set-key kmap "k" "(fikra/threads/fikra-threads-archive-selected)")
       (editor/keymaps/keymap-set-key kmap "n" "(fikra/threads/fikra-threads-new-thread)")
+      ;; The mockup's hint row shows "t new" — bind it too.
+      (editor/keymaps/keymap-set-key kmap "t" "(fikra/threads/fikra-threads-new-thread)")
       (editor/keymaps/keymap-set-key kmap "b" "(fikra/threads/fikra-threads-backend)")
       (editor/keymaps/keymap-set-key kmap "w" "(fikra/threads/fikra-threads-worktree)")
       (editor/keymaps/buffer-set-keymap fikra-threads-buffer-name kmap)))

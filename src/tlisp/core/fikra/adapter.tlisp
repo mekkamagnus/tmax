@@ -148,11 +148,15 @@ agnostic). Refuses unavailable backends."
             acc))))
 
 (defun fikra-backend-accept (choice)
-  ;; completing-read's accept DOES the work (the runtime-mode pattern):
-  ;; set the adapter selection AND the thread's persisted backend field.
+  ;; completing-read's accept DOES THE WORK (the r28 lesson — the caller
+  ;; never sees the choice): set the ADAPTER selection AND the CURRENT
+  ;; thread's persisted backend field, then save.
   (if (and choice (> (length choice) 0))
     (progn
       (fikra-set-backend choice)
+      (require-module fikra/thread)
+      (fikra/thread/fikra-thread-set-field "backend" choice)
+      (fikra/thread/fikra-thread-save)
       (editor-set-status (concat "Fikra: backend " choice)))
     nil))
 

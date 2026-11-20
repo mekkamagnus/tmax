@@ -189,10 +189,14 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count" "context-dir"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count" "context-dir" "last-at" "status"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
+            ;; A persisted "running" is a CRASH artifact — the process died
+            ;; with the daemon (#213: status is runtime-only on load).
+            (if (string= (if (hashmap-get state "status") (hashmap-get state "status") "") "running")
+              (editor/keymaps/keymap-mutable-set! state "status" "idle"))
             ;; #298 root resolution FROM THE RECORD. The persisted alist is
             ;; the authority (an overlaid nil would be indistinguishable
             ;; from absent): context-dir present → re-resolve; absent →
@@ -287,7 +291,9 @@ not land under the wrong project)."
                          (list "archived" (hashmap-get state "archived"))
                          (list "interaction" (hashmap-get state "interaction"))
                          (list "workflow" (hashmap-get state "workflow"))
-                         (list "turn-count" (hashmap-get state "turn-count")))))
+                         (list "turn-count" (hashmap-get state "turn-count"))
+                         (list "last-at" (hashmap-get state "last-at"))
+                         (list "status" (hashmap-get state "status")))))
         sid)
       nil)))
 
