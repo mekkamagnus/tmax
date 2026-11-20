@@ -223,26 +223,55 @@ describe("#221 modeline + binding", () => {
 
 
   // Mockup 8.6 (codex r24 fix 2): the review-and-choice screen.
-  test("SPC a w in worktree mode opens the review screen with summary + keymap", async () => {
+  test("SPC a w in worktree mode opens the review screen; a applies the reviewed patch", async () => {
     const editor = await setupThread("r");
     e(editor, "(require-module fikra/adapter)");
     e(editor, '(fikra/adapter/fikra-set-backend-forced "replay")');
-    // Enter worktree mode on a clean tree.
+    // A change INSIDE the worktree ONLY (an ADD patch — nothing local can
+    // conflict), mirroring the isolation suite's proven pattern.
     e(editor, "(fikra/worktree/fikra-worktree-enter)");
-    // A tracked change INSIDE the worktree so the summary has rows.
     const wt = String(e(editor, '(fikra/thread/fikra-thread-field "worktree")').value);
-    writeFileSync(join(wt, "f.txt"), "changed in worktree\n");
+    writeFileSync(join(wt, "feature.txt"), "changed in worktree\n");
     execFileSync("git", ["add", "-A"], { cwd: wt });
     execFileSync("git", ["commit", "-q", "-m", "wt change"], { cwd: wt });
-    const buf = String(e(editor, "(fikra/worktree/fikra-worktree-review)").value ?? "nil");
+    e(editor, "(fikra/worktree/fikra-worktree-review)");
     expect(String(e(editor, "(buffer-name)").value)).toBe("*Fikra-worktree*");
     const text = String(e(editor, "(buffer-text)").value);
     expect(text).toContain("1 file(s)");
-    expect(text).toContain("turns");
+    expect(text).toContain("+1");
     expect(text).toContain("apply patch");
     expect(text).toContain("refuse + keep worktree");
-    // The apply/refuse keys are bound buffer-locally.
     const kmap = e(editor, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-worktree*") "a")');
     expect(JSON.stringify(kmap.value)).toContain("review-apply");
+    const kmapD = e(editor, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-worktree*") "d")');
+    expect(JSON.stringify(kmapD.value)).toContain("review-diff");
+    const kmapR = e(editor, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-worktree*") "r")');
+    expect(JSON.stringify(kmapR.value)).toContain("review-refuse");
+    // Clean apply: the reviewed patch lands in the LOCAL tree.
+    expect(existsSync(join(process.cwd(), "feature.txt"))).toBe(false);
+    e(editor, "(fikra/worktree/fikra-worktree-review-apply)");
+    expect(existsSync(join(process.cwd(), "feature.txt"))).toBe(true);
+    expect(readFileSync(join(process.cwd(), "feature.txt"), "utf8")).toBe("changed in worktree\n");
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*scratch*");
+  });
+
+  test("review apply refuses when the tree moved since the review", async () => {
+    const editor = await setupThread("c");
+    e(editor, "(require-module fikra/adapter)");
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    execFileSync("git", ["add", "-A"], { cwd: process.cwd() });
+    try { execFileSync("git", ["commit", "-q", "-m", "local file"], { cwd: process.cwd() }); } catch { /* clean */ }
+    e(editor, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = String(e(editor, '(fikra/thread/fikra-thread-field "worktree")').value);
+    writeFileSync(join(wt, "g.txt"), "conflicty\n");
+    execFileSync("git", ["add", "-A"], { cwd: wt });
+    execFileSync("git", ["commit", "-q", "-m", "wt2"], { cwd: wt });
+    e(editor, "(fikra/worktree/fikra-worktree-review)");
+    // Dirty the LOCAL tree so the reviewed patch no longer applies.
+    writeFileSync(join(process.cwd(), "g.txt"), "local diverged first line\nsecond line\n");
+    e(editor, "(fikra/worktree/fikra-worktree-review-apply)");
+    const status = String(e(editor, "(buffer-text)").value);
+    // Refused: the file keeps the LOCAL content (patch not applied).
+    expect(readFileSync(join(process.cwd(), "g.txt"), "utf8")).toContain("local diverged");
   });
 });

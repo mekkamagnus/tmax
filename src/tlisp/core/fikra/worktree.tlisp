@@ -267,10 +267,17 @@ its summary are missing')."
 
 (defun fikra-worktree-review-snapshot-ref ()
   ;; Snapshot the worktree NOW so the summary and the apply check describe
-  ;; the same state the apply would ship.
-  (let ((sha (fikra/checkpoint/fikra-checkpoint-capture "completion")))
-    (setq fikra-worktree-review-snapshot (fikra-worktree-latest-ref))
-    fikra-worktree-review-snapshot))
+  ;; the same state the apply ships. The REVIEW kind gets its own ref —
+  ;; it must never overwrite a turn's completion checkpoint (codex r33),
+  ;; and `a` applies the MATERIALIZED patch from exactly this snapshot.
+  (let ((sha (fikra/checkpoint/fikra-checkpoint-capture "review")))
+    (if (not sha)
+      nil
+      (progn
+        (setq fikra-worktree-review-snapshot
+          (concat "refs/fikra/" (fikra/thread/fikra-thread-current) "/"
+                  (number-to-string (fikra/thread/fikra-thread-turn-count)) "-review"))
+        fikra-worktree-review-snapshot))))
 
 (defun fikra-worktree-review-render ()
   (let* ((id (fikra/thread/fikra-thread-current))
@@ -286,7 +293,8 @@ its summary are missing')."
       (concat "git diff --binary " base " " snap " > " (fikra-shq patch-path)))
     ;; let* — conflicts reads clean (a parallel let leaves it unbound).
     (let* ((stat (fikra-worktree-review-stat root base snap))
-           (clean (fikra-worktree-review-clean-p root patch-path))
+           (empty (= (hashmap-get stat "files") 0))
+           (clean (if empty t (fikra-worktree-review-clean-p root patch-path)))
            (conflicts (if clean "" (fikra-worktree-review-conflicts root patch-path)))
            (overlap (fikra-worktree-review-overlap root base path)))
     (if (not (member fikra-worktree-review-buffer (buffer-list)))
@@ -300,10 +308,12 @@ its summary are missing')."
       (concat "\e[1;36m" id " \e[0m\e[2m→ main tree\e[0m\n\n"
               "thread " id " lives in worktree " path "\n"
               (fikra-worktree-review-summary-line root id base snap) "\n"
-              (if clean
-                "\e[32m✓ patch applies cleanly against main\e[0m\n"
-                (concat "\e[1;31m✗ patch does NOT apply cleanly\e[0m\n"
-                        "conflicts: " conflicts "\n"))
+              (if empty
+                "\e[2mno changes to hand off — nothing to apply\e[0m\n"
+                (if clean
+                  "\e[32m✓ patch applies cleanly against main\e[0m\n"
+                  (concat "\e[1;31m✗ patch does NOT apply cleanly\e[0m\n"
+                          "conflicts: " conflicts "\n")))
               "files touched by others since fork: " (number-to-string overlap) "\n\n"
               "\e[1m a\e[0m apply patch  \e[1m d\e[0m review diff first  \e[1m r\e[0m refuse + keep worktree\n"))
     (buffer-set-read-only t)
@@ -364,24 +374,47 @@ its summary are missing')."
 
 ;; ── review actions ──────────────────────────────────────────────────
 (defun fikra-worktree-review-apply ()
+  "Apply EXACTLY the reviewed patch (the materialized base..snapshot diff
+— never a re-snapshot, so reviewed == applied; codex r33). Re-checked at
+apply time: if the tree moved since the review, refuse and ask for a
+re-review."
   (interactive)
-  ;; The handoff reports its own outcome; no buffer switch first (a bogus
-  ;; "default" switch aborted the apply before it ran — live catch).
-  (fikra-worktree-handoff))
+  (let ((patch-path (fikra-worktree-patch-path)))
+    (if (not (file-exists-p patch-path))
+      (editor-set-status "Fikra: no reviewed patch — re-open the review (SPC a w)")
+      (let ((check (string-trim (fikra/thread/fikra-thread-root-shell
+                   (concat "git apply --check --binary " (fikra-shq patch-path)
+                           " 2>&1 && echo APPLY-OK || echo APPLY-CONFLICT")))))
+        (if (not (string-match "APPLY-OK" check))
+          (editor-set-status "Fikra: tree changed since review — re-open SPC a w")
+          (progn
+            (fikra/thread/fikra-thread-root-shell
+              (concat "git apply --binary " (fikra-shq patch-path)))
+            (buffer-switch "*scratch*")
+            (editor-set-status
+              (concat "Fikra: applied " (fikra/thread/fikra-thread-current)
+                      " review patch to local — worktree kept (close via M-x fikra-worktree-close)"))))))))
 
 (defun fikra-worktree-review-diff ()
-  "Show the cumulative patch under the summary (toggle)."
+  "Preview the reviewed patch BELOW the summary; a truncation marker
+names exactly what was cut (codex r33 — a silent 400-line cap is not a
+review). SPC a w re-renders the summary."
   (interactive)
-  (buffer-set-read-only nil)
-  (let ((count (buffer-line-count)))
-    (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
-  (cursor-move 0 0)
-  (buffer-insert
-    (concat "\e[1;36m" (fikra/thread/fikra-thread-current) " → main tree — cumulative patch\e[0m\n\n"
-            (shell-command (concat "head -400 " (fikra-shq (fikra-worktree-patch-path)) " 2>/dev/null"))))
-  (buffer-set-read-only t)
-  (cursor-move 0 0)
-  (editor-set-status "Fikra: patch preview — a applies, r refuses"))
+  (let ((patch-path (fikra-worktree-patch-path)))
+    (buffer-set-read-only nil)
+    (let ((count (buffer-line-count)))
+      (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+    (cursor-move 0 0)
+    (buffer-insert
+      (concat "\e[1;36m" (fikra/thread/fikra-thread-current) " → main tree — reviewed patch\e[0m\n\n"
+              (shell-command (concat "head -400 " (fikra-shq patch-path) " 2>/dev/null"))
+              (if (> (length (string-trim (shell-command (concat "sed -n '401,800p' " (fikra-shq patch-path) " 2>/dev/null")))) 0)
+                "\n\e[2m… preview truncated at 400 lines — full patch: "
+                (fikra-shq patch-path) "\e[0m\n"
+                "")))
+    (buffer-set-read-only t)
+    (cursor-move 0 0)
+    (editor-set-status "Fikra: patch preview — a applies, r refuses, SPC a w summary")))
 
 (defun fikra-worktree-review-refuse ()
   (interactive)

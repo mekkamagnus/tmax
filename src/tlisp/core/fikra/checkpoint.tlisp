@@ -99,10 +99,16 @@ thread's persisted root (root-shell cwd), never the daemon cwd."
     "echo REF:$commit || echo CAPTURE-FAILED"))
 
 (defun fikra-checkpoint-ref (kind)
-  "The refs/fikra/<thread>/<turn>[-baseline] ref name for this capture."
+  "The refs/fikra/<thread>/<turn><suffix> ref name for this capture.
+Completion refs stay bare (turn N's ground truth); baseline and REVIEW
+snapshots get distinct suffixes — a review capture must never overwrite
+a turn's completion checkpoint (codex r33)."
   (concat "refs/fikra/" (fikra/thread/fikra-thread-field "id") "/"
           (fikra/thread/fikra-thread-turn-count)
-          (if (string= kind "baseline") "-baseline" "")))
+          (cond
+            ((string= kind "baseline") "-baseline")
+            ((string= kind "review") "-review")
+            (t ""))))
 
 (defun fikra-checkpoint-tail (output)
   "Extract the REF:<sha> marker from capture output, or nil.
