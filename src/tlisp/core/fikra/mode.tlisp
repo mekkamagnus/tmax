@@ -55,6 +55,11 @@ With 0 or negative number, disable."
   ;; seeding ever registered one.
   (require-module fikra/backend-claude)
   (require-module fikra/backend-codex)
+  ;; Round-38 live catch: approvals registers the L2 mediate HANDLER at
+  ;; module load (confirmation-handler-register). Nothing on the plain
+  ;; SPC a a path loaded it — the CLI's permission mediate arrived, hit
+  ;; "no-handler-registered", and rejected. Load it with the rest.
+  (require-module fikra/approvals)
   ;; Discover and set the default backend — but NEVER override an explicit
   ;; selection (SPC a b / a test seam choosing first; #225 probe catch:
   ;; a workflow's start clobbered the chosen backend).
