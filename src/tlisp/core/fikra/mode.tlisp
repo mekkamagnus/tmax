@@ -55,6 +55,9 @@ With 0 or negative number, disable."
   ;; seeding ever registered one.
   (require-module fikra/backend-claude)
   (require-module fikra/backend-codex)
+  ;; Skills (8.7): the SPC a k picker's module must be LOADED for the
+  ;; binding to resolve (the approvals lesson, round 38).
+  (require-module fikra/skills)
   ;; Round-38 live catch: approvals registers the L2 mediate HANDLER at
   ;; module load (confirmation-handler-register). Nothing on the plain
   ;; SPC a a path loaded it — the CLI's permission mediate arrived, hit
