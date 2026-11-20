@@ -707,7 +707,13 @@ text-deltas inside the batch join into the same line."
 ;; "<thread>/<turn>" from refs/fikra/<id>/<n>[-baseline] — the FULL
 ;; identity (nil when unparseable).
 (defun fikra-inline-ref-identity (ref)
-  (fikra-inline-ref-id-scan (string-split ref "/") (list)))
+  ;; Namespace-validated (r68): only refs/fikra/<id>/<n>[-baseline]
+  ;; parses — anything else is nil (a "bogus/main/2" must NOT match a
+  ;; real identity; the guard was lost in the r71 segment rename —
+  ;; codex r74's solo-rerun catch).
+  (if (not (string-prefix-p "refs/fikra/" (if ref ref "")))
+    nil
+    (fikra-inline-ref-id-scan (string-split ref "/") (list))))
 
 (defun fikra-inline-ref-id-scan (segs acc)
   (if (null segs)
