@@ -213,9 +213,16 @@ fikra-pausing-decide + the pump."
                                         (fikra/modes/fikra-effective-mode)
                                         (error () "")))
                         (list "checkpoint" (fikra/approvals/fikra-approval-baseline-ref))
-                        (list "origin" "backend-pause")))
+                        (list "origin" (concat "model=" (fikra/adapter/fikra-current-backend)
+                                        " (fixture seam · no live token"))))
 
                 (fikra/thread/fikra-thread-status-set "confirming")
+                ;; The emit's refresh hook ran BEFORE this transition —
+                ;; the queued modeline segment needs one more beat (r85).
+                (condition-case nil
+                  (progn (require-module fikra/chat)
+                         (fikra/chat/fikra-refresh-lighter))
+                  (error () nil))
                 (editor-set-status
                   (concat "Fikra: approve " tool
                           "? a Allow · r Reject · A Always · C-g abort"))

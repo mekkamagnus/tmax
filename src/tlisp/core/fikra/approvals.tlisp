@@ -293,11 +293,23 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
               ;; r81: the ✓ is EARNED — the verified baseline ref name, or
               ;; "" (the panel then says revert unavailable).
               (list "checkpoint" (fikra-approval-baseline-ref))
-              (list "origin" (if (string= (confirmation-resolver-kind) "headless")
-                               "headless" "interactive-frame"))))
+              ;; r85 (codex r82/r84 P2): honest provenance — the scope
+              ;; liveness check IS the not-prompt-forged proof (the token
+              ;; was adapter-minted and names THIS live thread+turn).
+              (list "origin" (concat "model="
+                              (condition-case nil
+                                (fikra/adapter/fikra-current-backend)
+                                (error () "?"))
+                              " · token scope " scope " verified (not prompt-forged)"))))
       ;; running → confirming (checked transition — an illegal enqueue
       ;; errors rather than corrupting thread state).
       (fikra/thread/fikra-thread-status-set "confirming")
+      ;; The emit's refresh hook ran BEFORE this transition — the queued
+      ;; modeline segment needs one more beat (r85).
+      (condition-case nil
+        (progn (require-module fikra/chat)
+               (fikra/chat/fikra-refresh-lighter))
+        (error () nil))
       (editor-set-status
         ;; Mockup 8.3 key labels (r80); y/n remain bound as aliases.
         (concat "Fikra: approve " kind "? a Allow · r Reject · A Always · C-g abort"))

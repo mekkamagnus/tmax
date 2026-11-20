@@ -117,7 +117,11 @@ context flakiness)."
             ;; Thread name when not the implicit main thread.
             (fikra-lighter-thread-segment)
             ;; #221: the wt:<id> segment appears only in worktree mode.
-            (fikra-worktree-segment))))
+            (fikra-worktree-segment)
+            ;; Mockup 8.3's modeline ("L2 · 1 queued"): the gate has work
+            ;; parked behind it (r85 — the single-pending model until
+            ;; #222's child threads; honest count of what is queued).
+            (fikra-lighter-queued-segment))))
 
 (defun fikra-lighter-level-segment ()
   (require-module fikra/modes)
@@ -142,6 +146,15 @@ context flakiness)."
 (defun fikra-lighter-turn-segment ()
   (let ((n (fikra/thread/fikra-thread-field "turn-count")))
     (if (and (numberp n) (> n 0)) (concat ":t" (number-to-string n)) "")))
+
+;; The mockup's "1 queued" modeline segment — confirming AND an approval
+;; actually pending (the paused loop holds one parked action).
+(defun fikra-lighter-queued-segment ()
+  (require-module fikra/approvals)
+  (if (and (string= (fikra/thread/fikra-thread-status) "confirming")
+           (fikra/approvals/fikra-approval-pending-p))
+    " · 1 queued"
+    ""))
 
 ;; #221: worktree marker — requires thread lazily (chat→worktree cycle:
 ;; worktree requires checkpoint → thread; chat requires modes only).

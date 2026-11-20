@@ -63,6 +63,8 @@ describe("P1 interactive gate — pause → USER KEY → resume", () => {
     // The PAUSE is a PENDING approval the unified signal can see.
     expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    // Mockup 8.3's modeline: the queued segment rides while parked (r85).
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toContain("· 1 queued");
     // The gate panel renders in the chat buffer.
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
     const paused = strip(bufferText(editor));
@@ -92,6 +94,8 @@ describe("P1 interactive gate — pause → USER KEY → resume", () => {
     await editor.handleKey("y");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
     expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+    // Resolved: the queued segment is GONE (mockup: only while parked).
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).not.toContain("1 queued");
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
     const resumed = strip(bufferText(editor));
     expect(resumed).toContain("allowed continuation");

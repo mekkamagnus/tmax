@@ -538,6 +538,10 @@ describe("#220 L2 — capability gating (claude-first, probe-driven)", () => {
     const panel = String(e(editor, `(fikra/event/fikra-gate-panel (list (list "kind" "permission-request") (list "action" "${long}") (list "tool" "bash") (list "risk" "destructive")))`).value);
     // The decisive TAIL is present (the old single row truncated at 40).
     expect(panel).toContain("force origin main"); // the tail row (wrap splits at 38)
+    // r85: honest provenance when the origin field is present (the
+    // mediate emit's token-scope wording).
+    const panelProv = String(e(editor, `(fikra/event/fikra-gate-panel (list (list "kind" "permission-request") (list "action" "${long}") (list "tool" "bash") (list "risk" "destructive") (list "origin" "model=claude · token scope main/1 verified (not prompt-forged)")))`).value);
+    expect(panelProv).toContain("(not prompt-forged)");
     // And the continuation markers show the wrap.
     expect(panel).toContain("…");
   });
