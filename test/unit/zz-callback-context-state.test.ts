@@ -43,16 +43,18 @@ const PROBE_MODULE = `
     (setq cb-probe-map (hashmap))
     (setq cb-probe-observations (hashmap))
     t)
-  ;; The FILTER — runs in the make-process callback's evalTlisp context.
-  ;; Records its view of BOTH carriers into the observations map.
-  (defun cb-probe-filter (pid output)
+  ;; The FILTER + SENTINEL — both run in the make-process callback's
+  ;; evalTlisp context; each records WHICH fired plus its view of BOTH
+  ;; carriers into the observations map.
+  (defun cb-probe-record (which)
     (editor/keymaps/keymap-mutable-set! cb-probe-observations
       "var-as-seen-by-filter" (if (stringp cb-probe-var) cb-probe-var "NON-STRING"))
     (editor/keymaps/keymap-mutable-set! cb-probe-observations
       "map-as-seen-by-filter"
       (if (hashmap-get cb-probe-map "main-key") "shared" "NOT-SHARED"))
-    (editor/keymaps/keymap-mutable-set! cb-probe-observations
-      "filter-ran" "t"))
+    (editor/keymaps/keymap-mutable-set! cb-probe-observations which "t"))
+  (defun cb-probe-filter (pid output) (cb-probe-record "filter-ran"))
+  (defun cb-probe-sentinel (pid code) (cb-probe-record "sentinel-ran"))
 (provide "callback-probe")
 )
 `;
@@ -75,13 +77,15 @@ describe("#306 — the evalTlisp callback-context state model (regression)", () 
     const pid = Number(e(editor, `(make-process
        :command (list "sh" "-c" "echo probe-output")
        :filter "callback-probe/cb-probe-filter"
-       :sentinel "callback-probe/cb-probe-filter")`).value);
+       :sentinel "callback-probe/cb-probe-sentinel")`).value);
     expect(pid).toBeGreaterThan(0);
 
     // Wait for the callback to have run (process exit fires the sentinel).
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 250));
-      if (String(e(editor, '(callback-probe/cb-probe-obs "filter-ran")').value) === "t") break;
+      const ran = String(e(editor, '(callback-probe/cb-probe-obs "filter-ran")').value);
+      const sent = String(e(editor, '(callback-probe/cb-probe-obs "sentinel-ran")').value);
+      if (ran === "t" && sent === "t") break;
     }
 
     const obs = (k: string) => String(e(editor, `(callback-probe/cb-probe-obs "${k}")`).value);
@@ -96,10 +100,10 @@ describe("#306 — the evalTlisp callback-context state model (regression)", () 
     // hashmap write.
     expect(obs("map-as-seen-by-filter")).toBe("shared");
 
-    // And the main session's own view is unchanged by the probe (the
-    // filter's own writes land in the SHARED observations map).
-    // (via the map-set setter — the defvar itself exports as a function)
-    e(editor, '(callback-probe/cb-probe-map-set "probe-readback" "x")');
-    expect(String(e(editor, '(callback-probe/cb-probe-map-set "main-key" "main-value-again")').value)).toBe("main-value-again");
+    // BOTH callback kinds fired (filter for the output chunk, sentinel
+    // for process exit) — and the main session reads the callback's own
+    // writes through the shared observations map (callback→main sharing).
+    expect(obs("filter-ran")).toBe("t");
+    expect(obs("sentinel-ran")).toBe("t");
   });
 });

@@ -40,7 +40,7 @@ Everything else — state machines, command dispatch, key sequences, count logic
 
 The `make-process` `:filter`/`:sentinel` callbacks evaluate their T-Lisp
 through the SPAWNING editor's `evalTlisp`. The verified model (pinned by
-`test/unit/callback-context-state.test.ts`):
+`test/unit/zz-callback-context-state.test.ts`):
 
 - **Same session (one editor):** the callback context shares the FULL
   environment — a `setq` performed in the main session IS visible to the

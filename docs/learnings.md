@@ -275,7 +275,7 @@ modelToEditorState (#253) already resolves currentBufferName from the LIVE model
 
 The 2026-11-20 dropped-turn-end incident was blamed on "setq invisible to
 filter callbacks, mutations shared." A minimal make-process fixture
-(test/unit/callback-context-state.test.ts) DISPROVED the setq half within
+(test/unit/zz-callback-context-state.test.ts) DISPROVED the setq half within
 one editor session: the filter sees the main session's setq AND the
 mutations. The incident's real mechanism was the daemon's
 separate-editor-session split (each evalTlisp bound to its spawning
