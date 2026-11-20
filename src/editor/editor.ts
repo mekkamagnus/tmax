@@ -586,6 +586,14 @@ export class Editor {
     };
 
     // Add key mapping functions
+    // Wall-clock ms (the sys-ops builtin is standalone-profile-only; trt
+    // and the fikra thread list need it in the EDITOR too — it was
+    // UndefinedSymbol in every editor context; 8.5 live catch).
+    defineRaw("current-time", (args) => {
+      if (args.length !== 0) throw new Error("current-time requires no arguments");
+      return createNumber(Date.now());
+    });
+
     defineRaw("key-bind", (args) => {
       if (args.length < 2 || args.length > 4) {
         throw new Error("key-bind requires 2-4 arguments: key, command, optional mode, optional major-mode");

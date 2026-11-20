@@ -135,12 +135,12 @@ describe("#222 *Fikra-Threads* list buffer", () => {
     expect(String(e(editor, "(fikra/threads/fikra-threads-list-open)").value)).toBe("*Fikra-Threads*");
     const text = bufferText(editor);
     // Header + project root grouping label.
-    expect(text).toContain("Threads — ");
+    expect(text).toContain("PROJECT ");
     expect(text).toContain(repoDir);
     // Both threads listed with columns.
     expect(text).toContain("main");
     expect(text).toContain("fix-1");
-    expect(text).toContain("local");
+    expect(text).toContain("main-tree");
     // A worktree thread shows worktree in the location column.
     e(editor, "(require-module fikra/worktree)");
     e(editor, '(fikra/thread/fikra-thread-switch "fix-1")');
@@ -183,5 +183,37 @@ describe("#222 *Fikra-Threads* list buffer", () => {
     e(editor, "(require-module fikra/mode)");
     expect(JSON.stringify(e(editor, '(key-binding "SPC a t" "normal")').value)).toContain("fikra-thread-new");
     expect(JSON.stringify(e(editor, '(key-binding "SPC a T" "normal")').value)).toContain("fikra-threads-list-open");
+  });
+});
+
+describe("#8.5 threads list — mockup row shape + actions (r43)", () => {
+  test("the header carries PROJECT/thread-count/worktree-count; keys b/w/k bound", async () => {
+    const editor = await setup();
+    e(editor, "(fikra/threads/fikra-threads-list-open)");
+    const text = String(e(editor, "(buffer-text)").value);
+    expect(text).toContain("PROJECT ");
+    expect(text).toContain("thread(s)");
+    expect(text).toContain("worktrees:");
+    expect(text).toContain(" RET open  t new  b backend  w worktree  k kill");
+    const b = e(editor, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-Threads*") "b")');
+    expect(JSON.stringify(b.value)).toContain("threads-backend");
+    const w = e(editor, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-Threads*") "w")');
+    expect(JSON.stringify(w.value)).toContain("threads-worktree");
+    const k = e(editor, '(keymap-ref (editor/keymaps/buffer-keymap "*Fikra-Threads*") "k")');
+    expect(JSON.stringify(k.value)).toContain("archive-selected");
+  });
+
+  test("L-level mapping follows the security model tiers", async () => {
+    const editor = await setup();
+    expect(String(e(editor, '(fikra/threads/fikra-threads-level-of "approval-required")').value)).toBe("L2");
+    expect(String(e(editor, '(fikra/threads/fikra-threads-level-of "full-access")').value)).toBe("L0");
+    expect(String(e(editor, '(fikra/threads/fikra-threads-level-of nil)').value)).toBe("-");
+  });
+
+  test("last-ago renders minutes from last-at; absent renders -", async () => {
+    const editor = await setup();
+    const recent = Date.now() - 120000;
+    expect(String(e(editor, `(fikra/threads/fikra-threads-last-ago ${recent})`).value)).toBe("2m ago");
+    expect(String(e(editor, "(fikra/threads/fikra-threads-last-ago nil)").value)).toBe("-");
   });
 });

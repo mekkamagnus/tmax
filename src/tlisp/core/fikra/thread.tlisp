@@ -460,7 +460,7 @@ current project's NON-archived threads."
 (defun fikra-thread-row-normalize (alist)
   (let ((row (hashmap)))
     (dolist (key (list "backend" "runtime-mode" "worktree" "status"
-                       "turn-count" "context-dir"))
+                       "turn-count" "context-dir" "last-at"))
       (let ((v (fikra-alist-get key alist)))
         (if (not (null v))
           (editor/keymaps/keymap-mutable-set! row key v))))
@@ -486,7 +486,8 @@ current project's NON-archived threads."
                    (if (funcall get "worktree") "worktree" "local"))
       "legacy" (if legacy t nil)
       "status" (funcall get "status")
-      "turns" (funcall get "turn-count"))))
+      "turns" (funcall get "turn-count")
+      "last-at" (funcall get "last-at"))))
 
 (defun fikra-thread-load-row (id)
   ;; Parse another thread's state.json (registry holds only loaded threads).
@@ -766,6 +767,11 @@ thread→adapter has no cycle but keep the lazy convention)."
           (fikra/plan/fikra-plan-offer-approval))
         (error () nil)))
     nil)
+  ;; 8.5: the thread list's "last: Xm ago" — the activity stamp rides the
+  ;; persisted state (absent on legacy records: renders as "-").
+  (condition-case nil
+    (editor/keymaps/keymap-mutable-set! (fikra-thread-state) "last-at" (current-time))
+    (error () nil))
   ;; Map the event status onto the thread state machine.
   (fikra-thread-status-set
     (cond

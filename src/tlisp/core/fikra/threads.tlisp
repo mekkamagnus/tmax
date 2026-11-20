@@ -2,7 +2,9 @@
   (export fikra-threads-list-open fikra-threads-render
           fikra-threads-selected-id fikra-threads-RET
           fikra-threads-archive-selected fikra-threads-new-thread
-          fikra-threads-j fikra-threads-k)
+          fikra-threads-j fikra-threads-k
+          fikra-threads-backend fikra-threads-worktree
+          fikra-threads-level-of fikra-threads-last-ago)
 
 ;; #222 (RFC-027 §D7): the *Fikra-Threads* buffer — threads grouped by
 ;; project (zcode model), columns name/backend/mode/location(local|
@@ -29,36 +31,64 @@
   fikra-threads-buffer-name)
 
 (defun fikra-threads-render ()
-  "Re-render the list from live thread state (grouped by project —
-the current project; multi-project grouping lands with multi-root
-daemons)."
+  "Re-render the list per mockup 8.5: the PROJECT header (thread count +
+active worktrees), one row per thread (status dot, name, backend, T<turns>,
+L<level>, worktree/main-tree, last activity), and the key-hint row."
   (let ((rows (fikra/thread/fikra-thread-rows))
         (was-ro (buffer-read-only-p)))
     (buffer-set-read-only nil)
     (let ((count (buffer-line-count)))
       (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
-    ;; buffer-insert is CURSOR-relative — reset before rewriting or later
-    ;; renders stack mid-buffer.
     (cursor-move 0 0)
-    (buffer-insert (concat "Threads — " (fikra-threads-project-label) "\n"))
-    (buffer-insert "  name        backend   mode                location   status   turns\n")
-    (buffer-insert "  ──────────────────────────────────────────────────────────────\n")
+    (buffer-insert
+      (concat "PROJECT " (fikra-threads-project-label)
+              "  ·  " (number-to-string (length rows)) " thread(s)"
+              "  ·  worktrees: " (number-to-string (fikra-threads-worktree-count rows 0)) " active\n"))
+    (buffer-insert "\n")
     (let ((i 0))
       (dolist (row rows)
         (buffer-insert
-          (concat (if (= i fikra-threads-selected) "▶ " "  ")
-                  (fikra-threads-pad (hashmap-get row "id") 12)
-                  (fikra-threads-pad (hashmap-get row "backend") 9)
-                  (fikra-threads-pad (hashmap-get row "mode") 20)
-                  (fikra-threads-pad (hashmap-get row "location") 10)
-                  (fikra-threads-pad (hashmap-get row "status") 8)
-                  ;; pad handles nil/non-numbers ("-" column) — a disk row
-                  ;; from an older state.json may lack turns.
-                  (fikra-threads-pad (hashmap-get row "turns") 5) "\n"))
+          (concat (if (= i fikra-threads-selected) "▶" " ")
+                  (if (string= (if (hashmap-get row "status") (hashmap-get row "status") "") "running") "●" "○")
+                  " "
+                  (fikra-threads-pad (hashmap-get row "id") 16)
+                  (fikra-threads-pad (if (hashmap-get row "backend") (hashmap-get row "backend") "-") 8)
+                  "T" (fikra-threads-pad (if (hashmap-get row "turns") (hashmap-get row "turns") 0) 3)
+                  (fikra-threads-pad (fikra-threads-level-of (hashmap-get row "mode")) 4)
+                  (if (string= (if (hashmap-get row "location") (hashmap-get row "location") "") "worktree") "worktree ✓" "main-tree   ")
+                  "  last: " (fikra-threads-last-ago (hashmap-get row "last-at"))
+                  "\n"))
         (setq i (+ i 1))))
+    (buffer-insert "\n")
+    (buffer-insert " RET open  t new  b backend  w worktree  k kill\n")
     (buffer-set-read-only was-ro)
     (cursor-move 0 0)
-    (cursor-move (+ 3 fikra-threads-selected) 0)))
+    (cursor-move (+ 2 fikra-threads-selected) 0)))
+
+;; The security-model level (modes.tlisp orders strictness; the L-level is
+;; the mediation tier: L2 approvals, L1 auto, L0 full).
+(defun fikra-threads-level-of (mode)
+  (let ((m (if mode mode "")))
+    (if (string= m "approval-required") "L2"
+      (if (or (string= m "auto-accept-edits") (string= m "auto")) "L1"
+        (if (string= m "full-access") "L0" "-")))))
+
+(defun fikra-threads-worktree-count (rows acc)
+  (if (null rows)
+    acc
+    (fikra-threads-worktree-count (cdr rows)
+      (if (string= (if (hashmap-get (car rows) "location") (hashmap-get (car rows) "location") "") "worktree")
+        (+ acc 1) acc))))
+
+;; "last: 2m ago" — minutes since last-at (ms); legacy records lack it.
+(defun fikra-threads-last-ago (last-at)
+  (if (not last-at)
+    "-"
+    ;; Integer minutes (T-Lisp / is real division — the live list showed
+    ;; "0.02m ago"); floor via the int-below trick: n - (mod n 1).
+    (let* ((diff (/ (- (current-time) last-at) 60000))
+           (mins (if (< diff 1) 0 (- diff (mod diff 1)))))
+      (concat (number-to-string mins) "m ago"))))
 
 (defun fikra-threads-project-label ()
   (let ((root (progn (if (not (fikra/thread/fikra-thread-current))
@@ -127,6 +157,31 @@ modeline)."
   "Create a new thread (inherits the current mode) and switch to it."
   (fikra/thread/fikra-thread-new))
 
+;; b: switch the SELECTED thread's backend (focus it, open the backend
+;; picker, return to the refreshed list).
+(defun fikra-threads-backend ()
+  "b: pick the selected thread's backend."
+  (let ((id (fikra-threads-selected-id)))
+    (if id
+      (progn
+        (fikra/thread/fikra-thread-focus id)
+        (require-module fikra/adapter)
+        (fikra-set-backend (fikra-backend-prompt))
+        (setq fikra-threads-selected 0)
+        (fikra-threads-render)
+        id))))
+
+;; w: worktree for the selected thread — local enters worktree mode, an
+;; active worktree opens the 8.6 review screen.
+(defun fikra-threads-worktree ()
+  "w: enter/review the selected thread's worktree."
+  (let ((id (fikra-threads-selected-id)))
+    (if id
+      (progn
+        (fikra/thread/fikra-thread-focus id)
+        (require-module fikra/worktree)
+        (fikra/worktree/fikra-worktree-review)))))
+
 ;; ── buffer-local keymap ─────────────────────────────────────────────
 (defun fikra-threads-ensure-keymap ()
   (if (not (editor/keymaps/buffer-keymap fikra-threads-buffer-name))
@@ -137,7 +192,11 @@ modeline)."
       (editor/keymaps/keymap-set-key kmap "Up" "(fikra/threads/fikra-threads-k)")
       (editor/keymaps/keymap-set-key kmap "RET" "(fikra/threads/fikra-threads-RET)")
       (editor/keymaps/keymap-set-key kmap "d" "(fikra/threads/fikra-threads-archive-selected)")
+      ;; mockup 8.5 keys: k kill (the archive alias), b backend, w worktree.
+      (editor/keymaps/keymap-set-key kmap "k" "(fikra/threads/fikra-threads-archive-selected)")
       (editor/keymaps/keymap-set-key kmap "n" "(fikra/threads/fikra-threads-new-thread)")
+      (editor/keymaps/keymap-set-key kmap "b" "(fikra/threads/fikra-threads-backend)")
+      (editor/keymaps/keymap-set-key kmap "w" "(fikra/threads/fikra-threads-worktree)")
       (editor/keymaps/buffer-set-keymap fikra-threads-buffer-name kmap)))
   t)
 
