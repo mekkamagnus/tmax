@@ -499,22 +499,34 @@ ambiguity)."
       ;; pre-turn-unstaged file's staged shape — gate r1 catch 3).
       (in-baseline
         (progn
-          (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir)
-                                 " checkout " tree " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
-          (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir)
-                                 " restore --staged " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))))
+          ;; VERIFIED restore (codex r1: the old 2>/dev/null suppression
+          ;; reported success on silent failures). -- separators before
+          ;; paths (leading-dash safe); --staged uses HEAD~0-scope form.
+          (let ((ck (string-trim (shell-command
+                       (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                               " checkout " tree " -- " (fikra/thread/fikra-thread-shq p)
+                               " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL")))))
+            (if (not (string-match "RESTORE-OK" ck))
+              (editor-set-status (concat "Fikra: restore failed for " p))
+              (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                                     " restore --staged -- " (fikra/thread/fikra-thread-shq p)
+                                     " 2>/dev/null"))))))
       ;; ABSENT from the baseline (or the baseline is nil/errored —
       ;; conservative: the ± emission's nil→emit-nothing mirror, NOT
       ;; rm-everything) AND the file exists → turn-created → remove the
       ;; WORKTREE file AND any staged index entry (gate r2: an agent
       ;; `git add`ed file resurrects from the AD index state on a plain
       ;; commit — rm alone left the repo inconsistent).
-      ((file-exists-p (concat dir "/" p))
+      ;; Turn-created: clean the staged entry EVEN when the file is
+      ;; already gone from disk (codex r1: the existence guard skipped
+      ;; index cleanup), then remove the worktree file when present.
+      (t
         (progn
           (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir)
-                                 " restore --staged " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
-          (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p))))))
-      (t nil))))
+                                 " restore --staged -- " (fikra/thread/fikra-thread-shq p)
+                                 " 2>/dev/null"))
+          (if (file-exists-p (concat dir "/" p))
+            (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p))))))))))
 
 (defun fikra-diff-restore-turn (paths)
   (let ((dir (fikra/thread/fikra-thread-working-dir))

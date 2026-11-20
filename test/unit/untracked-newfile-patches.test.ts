@@ -22,15 +22,14 @@ const e = (editor: Editor, expr: string) => executeTlisp(editor, expr);
 const strip = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "");
 
 const dirs: string[] = [];
-const originalCwd = process.cwd();
 
 async function setup(): Promise<{ editor: Editor; dir: string }> {
   const dir = mkdtempSync(join(tmpdir(), "i305-"));
   dirs.push(dir);
   execFileSync("git", ["init", "-q"], { cwd: dir });
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir });
-  process.chdir(dir);
   const editor = await createStartedEditor("");
+  editor.setClientLaunchDir(dir);
   e(editor, "(require-module fikra/thread)");
   e(editor, "(require-module fikra/diff)");
   e(editor, "(fikra/thread/fikra-thread-init)");
@@ -38,7 +37,6 @@ async function setup(): Promise<{ editor: Editor; dir: string }> {
 }
 
 afterAll(() => {
-  process.chdir(originalCwd);
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
@@ -49,13 +47,14 @@ function viewerText(editor: Editor): string {
 
 describe("#305 A — untracked files as new-file patches", () => {
   let editor: Editor;
+  let dir: string;
   beforeEach(async () => {
-    ({ editor } = await setup());
+    ({ editor, dir } = await setup());
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
   });
 
   test("a text untracked file renders as a full new-file diff", () => {
-    writeFileSync(join(process.cwd(), "hello.txt"), "line1\nline2\n");
+    writeFileSync(join(dir, "hello.txt"), "line1\nline2\n");
     const t = viewerText(editor);
     expect(t).toContain("diff --git a/hello.txt b/hello.txt");
     expect(t).toContain("new file mode");
@@ -68,7 +67,7 @@ describe("#305 A — untracked files as new-file patches", () => {
   });
 
   test("an EMPTY untracked file renders the header only (no hunks)", () => {
-    writeFileSync(join(process.cwd(), "empty.txt"), "");
+    writeFileSync(join(dir, "empty.txt"), "");
     const t = viewerText(editor);
     expect(t).toContain("diff --git a/empty.txt b/empty.txt");
     expect(t).toContain("new file mode");
@@ -80,16 +79,16 @@ describe("#305 A — untracked files as new-file patches", () => {
   });
 
   test("a BINARY untracked file renders the Binary-files line, no content", () => {
-    writeFileSync(join(process.cwd(), "blob.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
+    writeFileSync(join(dir, "blob.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
     const t = viewerText(editor);
     expect(t).toContain("Binary files /dev/null and b/blob.bin differ");
     expect(t.indexOf("\u0000")).toBe(-1);
   });
 
   test("odd names (spaces, unicode, leading dash) are safe by construction", () => {
-    writeFileSync(join(process.cwd(), "with space.txt"), "spaced\n");
-    writeFileSync(join(process.cwd(), "uni-éè.txt"), "unicode\n");
-    writeFileSync(join(process.cwd(), "-dashy.txt"), "dashed\n");
+    writeFileSync(join(dir, "with space.txt"), "spaced\n");
+    writeFileSync(join(dir, "uni-éè.txt"), "unicode\n");
+    writeFileSync(join(dir, "-dashy.txt"), "dashed\n");
     // The viewer pages one file at a time; the PATCH SOURCE (the
     // function under test) carries all three — assert on it directly.
     const patch = String(e(editor, '(fikra/diff/fikra-diff-for-paths (fikra/thread/fikra-thread-working-dir) (list "with space.txt" "uni-éè.txt" "-dashy.txt") "HEAD")').value);
@@ -103,11 +102,11 @@ describe("#305 A — untracked files as new-file patches", () => {
   });
 
   test("tracked files keep the tree-diff source alongside", () => {
-    writeFileSync(join(process.cwd(), "tracked.txt"), "base\n");
-    execFileSync("git", ["add", "tracked.txt"], { cwd: process.cwd() });
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "add tracked"], { cwd: process.cwd() });
-    writeFileSync(join(process.cwd(), "tracked.txt"), "base\nchanged\n");
-    writeFileSync(join(process.cwd(), "fresh.txt"), "new\n");
+    writeFileSync(join(dir, "tracked.txt"), "base\n");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: dir });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "add tracked"], { cwd: dir });
+    writeFileSync(join(dir, "tracked.txt"), "base\nchanged\n");
+    writeFileSync(join(dir, "fresh.txt"), "new\n");
     const t = viewerText(editor);
     // Tracked: a modification hunk against the baseline.
     expect(t).toContain("--- a/tracked.txt");

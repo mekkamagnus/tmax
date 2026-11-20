@@ -22,20 +22,19 @@ const e = (editor: Editor, expr: string) => executeTlisp(editor, expr);
 const strip = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "");
 
 const dirs: string[] = [];
-const originalCwd = process.cwd();
 
 function setup(script: string): { editor: Editor; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "i303-"));
   dirs.push(dir);
   execFileSync("git", ["init", "-q"], { cwd: dir });
   writeFileSync(join(dir, "fixture.jsonl"), script);
-  process.chdir(dir);
   return { editor: undefined as unknown as Editor, dir };
 }
 
 async function started(script: string): Promise<{ editor: Editor; dir: string }> {
   const s = setup(script);
   const editor = await createStartedEditor("");
+  editor.setClientLaunchDir(s.dir);
   s.editor = editor;
   e(editor, "(require-module fikra/backend-pausing)");
   e(editor, "(require-module fikra/adapter)");
@@ -47,7 +46,6 @@ async function started(script: string): Promise<{ editor: Editor; dir: string }>
 }
 
 afterAll(() => {
-  process.chdir(originalCwd);
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
@@ -61,20 +59,20 @@ const SCRIPT = [
 
 describe("#303 — the pausing fixture backend (pause → decide → resume)", () => {
   test("y allows THIS request: the turn pauses at the gate, resumes on the allow branch, ends cleanly", async () => {
-    const { editor } = await started(SCRIPT);
+    const { editor, dir } = await started(SCRIPT);
     const start = e(editor, '(fikra/adapter/fikra-backend-start-turn "do it")');
     expect(String(start.value)).toBe("paused");
     // The PAUSE state: the request rendered, the thread is confirming.
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
     expect(String(e(editor, "(fikra/backend-pausing/fikra-pausing-pending-p)").value)).toBe("true");
-    const log = readFileSync(join(process.cwd(), ".tmax/fikra/threads/main/events.jsonl"), "utf8");
+    const log = readFileSync(join(dir, ".tmax/fikra/threads/main/events.jsonl"), "utf8");
     expect(log).toContain("permission-request");
     expect(log).toContain("Edit: src/**");
     // Decide y → pump → the allow branch streams to turn-end.
     e(editor, '(fikra/backend-pausing/fikra-pausing-decide "y")');
     expect(String(e(editor, "(fikra/backend-pausing/fikra-pausing-pump)").value)).toBe("done");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
-    const log2 = readFileSync(join(process.cwd(), ".tmax/fikra/threads/main/events.jsonl"), "utf8");
+    const log2 = readFileSync(join(dir, ".tmax/fikra/threads/main/events.jsonl"), "utf8");
     expect(log2).toContain("permission-allowed");
     expect(log2).toContain("allowed continuation");
     expect(log2).not.toContain("action rejected");
@@ -85,11 +83,11 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
   });
 
   test("n rejects: the denial branch renders, the turn ends cleanly", async () => {
-    const { editor } = await started(SCRIPT);
+    const { editor, dir } = await started(SCRIPT);
     e(editor, '(fikra/adapter/fikra-backend-start-turn "do it")');
     e(editor, '(fikra/backend-pausing/fikra-pausing-decide "n")');
     expect(String(e(editor, "(fikra/backend-pausing/fikra-pausing-pump)").value)).toBe("done");
-    const log = readFileSync(join(process.cwd(), ".tmax/fikra/threads/main/events.jsonl"), "utf8");
+    const log = readFileSync(join(dir, ".tmax/fikra/threads/main/events.jsonl"), "utf8");
     expect(log).toContain("permission-denied");
     expect(log).toContain("action rejected");
     expect(log).not.toContain("allowed continuation");
@@ -103,7 +101,7 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     e(editor, '(fikra/adapter/fikra-backend-start-turn "first")');
     e(editor, '(fikra/backend-pausing/fikra-pausing-decide "a")');
     expect(String(e(editor, "(fikra/backend-pausing/fikra-pausing-pump)").value)).toBe("done");
-    const log = readFileSync(join(process.cwd(), ".tmax/fikra/threads/main/events.jsonl"), "utf8");
+    const log = readFileSync(join(dir, ".tmax/fikra/threads/main/events.jsonl"), "utf8");
     expect(log).toContain("permission-allowed");
     // The allow-list persisted on the thread record.
     const state = JSON.parse(readFileSync(join(dir, ".tmax/fikra/threads/main/state.json"), "utf8"));
@@ -112,8 +110,8 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
     // Reload the thread (fresh editor = the save/reload leg) and re-run
     // with the SAME pair: the pause is SKIPPED (start returns done,
     // permission-allowed with always=t).
-    process.chdir(dir);
-    const editor2 = await createStartedEditor("");
+      const editor2 = await createStartedEditor("");
+    editor2.setClientLaunchDir(dir);
     e(editor2, "(require-module fikra/backend-pausing)");
     e(editor2, "(require-module fikra/adapter)");
     e(editor2, `(fikra/backend-pausing/fikra-backend-pausing-load "${join(dir, "fixture.jsonl")}")`);
@@ -174,15 +172,17 @@ describe("#303 — the pausing fixture backend (pause → decide → resume)", (
   });
 
   test("the GRADED CAPTURE: the pause→decide→resume frame sequence renders in *Fikra*", async () => {
-    const { editor } = await started(SCRIPT);
+    const { editor, dir } = await started(SCRIPT);
     // Frame 1 — the PAUSE frame (the [y/n/a] prompt + the request row).
     e(editor, '(fikra/adapter/fikra-backend-start-turn "capture")');
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
     const pauseFrame = strip(bufferText(editor));
     expect(pauseFrame).toContain("before the gate");
-    expect(pauseFrame).toContain("Edit: src/**");
-    expect(pauseFrame).toContain("a Allow");
-    expect(pauseFrame).toContain("A Always");
+    // The r70 panel: tool row + target row + the y/n/a keys.
+    expect(pauseFrame).toContain("Edit");
+    expect(pauseFrame).toContain("src/**");
+    expect(pauseFrame).toContain("allow");
+    expect(pauseFrame).toContain("always");
     // Frame 2 — the RESUMED frame (decision + continuation + completion).
     e(editor, '(fikra/backend-pausing/fikra-pausing-decide "y")');
     e(editor, "(fikra/backend-pausing/fikra-pausing-pump)");

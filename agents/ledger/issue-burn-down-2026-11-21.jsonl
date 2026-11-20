@@ -36,3 +36,5 @@
 {"event":"unit-start","ts":"2026-11-20T21:01:08Z","unit":"#305"}
 {"event":"gate","ts":"2026-11-20T21:18:27Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"43c4253","findings-count":4}
 {"event":"gate","ts":"2026-11-20T21:35:03Z","kind":"verify-gate","verdict":"GAPS","rounds":2,"reviewed-sha":"7603dc9","findings-count":1}
+{"event":"gate","ts":"2026-11-20T22:18:05Z","kind":"codex-grade","verdict":"5/10","rounds":1,"reviewed-sha":"492ec68","findings-count":3}
+{"event":"gate","ts":"2026-11-20T22:18:05Z","kind":"verify-gate","verdict":"PASS","rounds":3,"reviewed-sha":"492ec68","findings-count":0}

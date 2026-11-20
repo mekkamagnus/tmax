@@ -214,6 +214,7 @@ fikra-pausing-decide + the pump."
                                         (error () "")))
                         (list "checkpoint" (fikra/approvals/fikra-approval-baseline-ref))
                         (list "origin" "backend-pause")))
+
                 (fikra/thread/fikra-thread-status-set "confirming")
                 (editor-set-status
                   (concat "Fikra: approve " tool
