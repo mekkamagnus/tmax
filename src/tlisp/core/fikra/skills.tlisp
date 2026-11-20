@@ -10,8 +10,6 @@
 ;; model-visible). Coexists with pure T-Lisp defworkflows (section 9 Q3
 ;; composition deferred).
 
-(key-bind "SPC a k" "(progn (require-module fikra/skills) (fikra/skills/fikra-skill-prompt))" "normal")
-
 ;; A discovered skill row: hashmap id/path/visibility/description.
 (defvar fikra-skills-cache (list)
   "Discovered skills (refreshed on demand).")

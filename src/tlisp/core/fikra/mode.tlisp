@@ -111,6 +111,8 @@ With 0 or negative number, disable."
 (key-bind "SPC a p" "(progn (require-module fikra/plan) (fikra/plan/fikra-plan-toggle))" "normal")
 ;; Turn diff view (mockup 8.4 entry point; the ± rows land at turn end).
 (key-bind "SPC a d" "(progn (require-module fikra/diff) (fikra/diff/fikra-turn-diff))" "normal")
+;; Skills picker (mockup 8.7: .fikra/skills surfaced to model and user).
+(key-bind "SPC a k" "(progn (require-module fikra/skills) (fikra/skills/fikra-skill-prompt))" "normal")
 
 (provide "fikra-mode")
 )
