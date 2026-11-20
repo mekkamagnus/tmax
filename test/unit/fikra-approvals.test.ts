@@ -530,4 +530,16 @@ describe("#220 L2 — capability gating (claude-first, probe-driven)", () => {
     expect(P("t", '(fikra/approvals/fikra-approval-risk "Bash" "ls")')).toBe("shell");
     expect(P("t", '(fikra/approvals/fikra-approval-risk "Edit" "{}")')).toBe("file-edit");
   });
+  test("a LONG action wraps across boxed rows — the full text stays visible (r73)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, "(require-module fikra/approvals)");
+    e(editor, "(require-module fikra/event)");
+    const long = "bash: rm -rf src/client/.legacy-render/ && echo done && git push --force origin main";
+    const panel = String(e(editor, `(fikra/event/fikra-gate-panel (list (list "kind" "permission-request") (list "action" "${long}") (list "tool" "bash") (list "risk" "destructive")))`).value);
+    // The decisive TAIL is present (the old single row truncated at 40).
+    expect(panel).toContain("force origin main"); // the tail row (wrap splits at 38)
+    // And the continuation markers show the wrap.
+    expect(panel).toContain("…");
+  });
+
 });
