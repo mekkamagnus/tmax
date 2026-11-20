@@ -162,7 +162,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               mkdirSync(cacheDir, { recursive: true });
               const out = resolve(cacheDir, "tmax-mcp-confirmation.ts");
               if (!existsSync(out)) {
-                const asset = readFileSync("/$bunfs/root/bin/tmax-mcp-confirmation.ts", "utf8");
+                const asset = readFileSync("/$bunfs/root/tmax-mcp-confirmation.ts", "utf8");
                 writeFileSync(out, asset, { mode: 0o600 });
               }
               return Either.right(createString(out));
