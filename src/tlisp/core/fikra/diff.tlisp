@@ -148,17 +148,13 @@
       ;; typed "revert" could never reach the comparison. The table must be
       ;; a FUNCTION (input action) — the runtime-mode table pattern; a defvar
       ;; list failed as "Undefined function".
-      (let ((confirm (completing-read "Revert this turn's changes? "
-                                      "fikra/diff/fikra-revert-confirm-table"
-                                      nil nil ""
-                                      "fikra-revert-confirm-history"
-                                      "fikra/diff/fikra-revert-confirm-accept")))
-        (if (not (string= confirm "revert"))
-          (editor-set-status "Fikra: revert cancelled")
-          (progn
-            (fikra-diff-restore-turn paths)
-            (editor-set-status "Fikra: turn reverted — SPC a d to refresh")
-            (fikra-turn-diff)))))))
+      ;; Round-28: the ACCEPT fn performs the revert (completing-read
+      ;; never returns the choice to the caller).
+      (completing-read "Revert this turn's changes? "
+                       "fikra/diff/fikra-revert-confirm-table"
+                       nil nil ""
+                       "fikra-revert-confirm-history"
+                       "fikra/diff/fikra-revert-confirm-accept"))))
 
 ;; The restore mechanism, separate from the confirmation gate (the gate is
 ;; read-string — interactive-only; the restore is testable/demoable).
@@ -233,9 +229,22 @@
   "Minibuffer history for the revert confirmation.")
 
 (defun fikra-revert-confirm-accept (choice)
-  "Minibuffer accept handler: the chosen CHOICE is the revert decision
-input; completing-read needs the accept fn to receive it."
-  choice)
+  "Minibuffer accept handler (round-28): completing-read hands the
+CHOICE here — accept DOES the work (the runtime-mode pattern; the
+caller never sees the value). Restore on revert, status otherwise."
+  (if (string= choice "revert")
+    (progn
+      (let ((paths (fikra-changed-paths-since-baseline)))
+        (if (or (null paths) (= (length paths) 0))
+          (editor-set-status "Fikra: nothing to revert")
+          (progn
+            (fikra-diff-restore-turn paths)
+            (editor-set-status "Fikra: turn reverted — SPC a d to refresh")
+            (fikra-turn-diff))))
+      "revert")
+    (progn
+      (editor-set-status "Fikra: revert cancelled")
+      "cancel")))
 
 (provide "fikra-diff")
 )
