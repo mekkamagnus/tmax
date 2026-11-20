@@ -328,7 +328,8 @@ not land under the wrong project)."
                  (not (string= saved ""))
                  (fikra/adapter/fikra-backend-available-p saved))
           (fikra/adapter/fikra-set-backend-forced saved)
-          (fikra/adapter/fikra-set-backend-forced "none"))))
+          ;; ACTIVE-only reset — the thread's SAVED choice survives (r47).
+          (fikra/adapter/fikra-reset-backend-active))))
     (error () nil)))
 
 ;; ── #222: creation / switching / archive / listing ─────────────────

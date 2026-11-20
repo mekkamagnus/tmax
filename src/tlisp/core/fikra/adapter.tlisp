@@ -1,6 +1,6 @@
 (defmodule fikra/adapter
   (export fikra-register-backend fikra-set-backend fikra-current-backend
-          fikra-backend-table fikra-backend-accept
+          fikra-backend-table fikra-backend-accept fikra-reset-backend-active
           fikra-list-backends fikra-list-available-backends fikra-backend-available-p
           fikra-backend-capabilities fikra-backend-capable-p
           fikra-backend-start-turn fikra-backend-abort
@@ -102,6 +102,13 @@ set-backend survives refocus instead of being reset)."
           (fikra/thread/fikra-thread-save))))
     (error () nil))
   name)
+
+;; r47 cap follow-up: reset the ACTIVE selection WITHOUT persisting — a
+;; temporarily unavailable backend keeps its saved choice (focus-restore
+;; resets the adapter, never the thread's field).
+(defun fikra-reset-backend-active ()
+  (setq fikra-current-backend-name "none")
+  "none")
 
 (defun fikra-current-backend ()
   (if fikra-current-backend-name fikra-current-backend-name "none"))
