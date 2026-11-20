@@ -15,6 +15,8 @@ beforeEach(() => {
   repoDir = mkdtempSync(join(tmpdir(), "fikra-ml-"));
   dirs.push(repoDir);
   execFileSync("git", ["init", "-q"], { cwd: repoDir });
+  execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+  execFileSync("git", ["config", "user.name", "t"], { cwd: repoDir });
   writeFileSync(join(repoDir, ".gitignore"), ".tmax/\n");
   process.chdir(repoDir);
 });
@@ -78,31 +80,36 @@ describe("#8.1 modeline + checkpoint marker (r58)", () => {
     // The scan verifies completion REFS — this scratch repo has none, so
     // 0 is the honest target here (the nav suite proves the refs-walk).
     expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("0");
-    // LIVE KEY DISPATCH (r60): the actual keystroke through handleKey.
-    const ed2 = await createStartedEditor("");
-    e(ed2, "(require-module fikra/mode)");
-    e(ed2, "(fikra-start)");
-    e(ed2, "(require-module fikra/adapter)");
-    e(ed2, "(require-module fikra/backend-replay)");
-    e(ed2, '(fikra/adapter/fikra-set-backend-forced "replay")');
-    e(ed2, '(require-module "fikra/thread")');
-    e(ed2, '(fikra-thread-set-field "turn-count" 1)');
-    const ed2h = ed2 as unknown as { handleKey: (k: string) => Promise<unknown> };
+    // LIVE KEY DISPATCH (r61 asserts the RESULT): refs for turn 1 exist,
+    // the keystrokes run, and the viewer OPENS ON TURN 1.
+    // Seed a commit first (the empty repo's HEAD is unborn).
+    writeFileSync(join(repoDir, "seed.txt"), "x\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed"], { cwd: repoDir });
+    writeFileSync(join(repoDir, "app.txt"), "line1\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    const tree1 = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const c1 = execFileSync("git", ["commit-tree", tree1, "-m", "t1"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/main/1-baseline", "HEAD"], { cwd: repoDir });
+    execFileSync("git", ["update-ref", "refs/fikra/main/1", c1], { cwd: repoDir });
+    e(ed, "(require-module fikra/diff)");
+    const ed2h = ed as unknown as { handleKey: (k: string) => Promise<unknown> };
     await ed2h.handleKey("Escape");
     await ed2h.handleKey(" ");
     await ed2h.handleKey("a");
     await ed2h.handleKey("R");
-    const st2 = String(e(ed2, "(buffer-name)").value);
-    // A RUNNING turn must not be the target: count 3 mid-flight → 2.
+    expect(String(e(ed, "(buffer-name)").value)).toBe("*Fikra-Diff*");
+    expect(String(e(ed, "(buffer-text)").value)).toContain("turn 1");
+    // A RUNNING turn must not be the target: turn 2 starts mid-flight →
+    // the scan lands on turn 1 (its ref EXISTS — created above).
     e(ed, '(require-module "fikra/thread")');
     e(ed, '(fikra-thread-turn-begin)');
-    expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("0");
+    expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("1");
     // A mid-flight FIRST turn: nothing completed — 0 (r59's edge).
     e(ed, '(fikra-thread-focus "edge")');
     e(ed, '(fikra-thread-set-field "turn-count" 1)');
     e(ed, '(fikra-thread-status-set "running")');
     expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("0");
     // (The failed-turn walk lives in the nav suite where refs exist.)
-    void st2;
   });
 });
