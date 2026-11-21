@@ -910,8 +910,21 @@ availability gate must be synchronous; the turn itself is async)."
       nil
     (if (not (and thread-id fikra-ollama-pending-message))
       nil
+    ;; r136c (codex catch): the SAME-THREAD path gets the SAME recovery
+    ;; (a render throw with the log unwritable stranded the turn — the
+    ;; handler only lived on the switched branch).
     (if (string= thread-id (fikra/thread/fikra-thread-current))
-      (fikra-ollama-handle-reply status body)
+      (condition-case nil
+        (fikra-ollama-handle-reply status body)
+        (error (m)
+          (condition-case nil
+            (progn
+              (editor-set-status (concat "Fikra-ollama: reply failed — " m))
+              (setq fikra-ollama-pending-message nil)
+              (if (string= (fikra/thread/fikra-thread-status) "running")
+                (fikra/thread/fikra-thread-turn-end "error")))
+            (error () nil))
+          'reply-error))
       ;; r136 (codex re-grade P2): the bg-settle dance is THROW-SAFE
       ;; (a reply-handling error used to leak the focus and strand the
       ;; turn) and settles honestly — the bash sentinel's pattern.

@@ -400,10 +400,14 @@ segment reads)."
 ;; scan cannot expand variables (rm${IFS}-r${IFS}d removed a directory
 ;; ungated), so parameter/command substitution parks for the human to
 ;; judge. Conservative by design (echo $HOME gates too).
+;; NOTE: d is DOWNCASED — the dollar-ifs literal is lowercase; and
+;; r136c (codex catch): BACKTICK substitution joins (rm`printf " "`-r d
+;; removed a directory ungated).
 (defun fikra-risk-has-expansion (d)
   (or (string-contains-p (hex-decode "247b") d)
       (string-contains-p (hex-decode "2428") d)
-      (string-contains-p (hex-decode "24494653") d)))
+      (string-contains-p (hex-decode "24696673") d)
+      (string-contains-p (hex-decode "60") d)))
 
 (defun fikra-approval-risk (kind detail)
   ;; Destructive first (any tool can carry it), then the tool class —
