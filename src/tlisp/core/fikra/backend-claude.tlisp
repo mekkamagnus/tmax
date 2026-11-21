@@ -354,6 +354,15 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
         ;; (the issue's named rule counts deltas, not completions).
         ((string= dtype "input_json_delta")
           (list (list (list "kind" "tool-input-delta"))))
+        ;; #320 — extended-thinking partials → thought-delta (carries the
+        ;; CONTENT BLOCK INDEX — fikra/thought owns ordered delivery).
+        ((string= dtype "thinking_delta")
+          (let ((frag (fikra-afield delta "thinking")))
+            (if (and (stringp frag) (> (length frag) 0))
+              (list (list (list "kind" "thought-delta")
+                          (list "block" (number-to-string (fikra-afield ev "index")))
+                          (list "text" frag)))
+              nil)))
         (t nil))
       nil)))
 
@@ -393,6 +402,14 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
                      nil)))
                ((string= btype "tool_use")
                  (fikra-tool-call-event block))
+               ;; #320 — a COMPLETE thinking block (completed-only
+               ;; streams: no deltas ever set the accumulator) renders
+               ;; once, whole via the existing thought path. Empty → nil.
+               ((string= btype "thinking")
+                 (let ((txt (fikra-afield block "thinking")))
+                   (if (and (stringp txt) (> (length txt) 0))
+                     (list (list "kind" "thought") (list "text" txt))
+                     nil)))
                (t nil))))
       (fikra-norm-blocks (cdr blocks)
         (if event (cons event out) out)))))
@@ -619,7 +636,11 @@ chunks into another thread's log."
             (if (string= thread-id (fikra/thread/fikra-thread-current))
               (fikra/thread/fikra-thread-set-session-id (fikra-afield e "id"))
               (fikra/thread/fikra-thread-set-session-id-for thread-id (fikra-afield e "id")))))
-        (fikra/event/fikra-event-emit-batch-for thread-id events)))))
+        ;; #320: ordered delivery for thinking deltas (redeliveries
+        ;; dropped, gaps buffered; markers ride with the batch).
+        (require-module fikra/thought)
+        (fikra/event/fikra-event-emit-batch-for thread-id
+          (fikra/thought/fikra-thought-feed thread-id events))))))
 
 (defun fikra-backend-claude-sentinel (pid exit-code)
   "AUTHORITATIVE turn end: process exit settles the thread state machine

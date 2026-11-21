@@ -204,6 +204,10 @@ context flakiness)."
         (editor/keymaps/keymap-set-key kmap "A" "(progn (require-module fikra/approvals) (fikra/approvals/fikra-approval-answer-always))")
         (editor/keymaps/keymap-set-key kmap "y" "(progn (require-module fikra/approvals) (fikra/approvals/fikra-approval-answer-allow))")
         (editor/keymaps/keymap-set-key kmap "n" "(progn (require-module fikra/approvals) (fikra/approvals/fikra-approval-answer-reject))")
+        ;; #320: TAB toggles the thought segment at point (collapsed ↔
+        ;; expanded; the toggle is display-only — replay derives the
+        ;; default from lengths).
+        (editor/keymaps/keymap-set-key kmap "TAB" "(progn (require-module fikra/event) (fikra/event/fikra-thought-tab))")
         (editor/keymaps/buffer-set-keymap (fikra/thread/fikra-thread-buffer-name) kmap))))
   t)
 
