@@ -330,3 +330,28 @@ describe("#8.4 brace-compressed renames (r98 — codex r97 P2)", () => {
     expect(text).toMatch(/R .*old-dir\.txt => new-dir\.txt/);
   });
 });
+
+describe("#8.4 directory renames (r99 — codex r98 P2)", () => {
+  test("a DIRECTORY rename '{old => new}/file.txt' renders R (the leading brace at index 0)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    mkdirSync(join(repoDir, "olddir"), { recursive: true });
+    writeFileSync(join(repoDir, "olddir", "file.txt"), "content\n");
+    ref("nav", 1, "baseline", "line1\n");
+    rmSync(join(repoDir, "olddir"), { recursive: true });
+    mkdirSync(join(repoDir, "newdir"), { recursive: true });
+    writeFileSync(join(repoDir, "newdir", "file.txt"), "content\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    const tree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "dr"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1", commit], { cwd: repoDir });
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-turn-diff-for 1)");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toMatch(/R .*olddir.*=>.*newdir.*file\.txt/);
+  });
+});
