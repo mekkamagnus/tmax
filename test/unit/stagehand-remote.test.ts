@@ -270,7 +270,13 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     expect(ref("q")).toContain("stagehand-remote-quit");
     // ROUTE-level assertion: every non-q binding's SOURCE carries
     // hex-decode (a raw-char codegen regression would fail here).
-        const tableStr = String(e(editor, "(string-join \"\" (stagehand/remote/stagehand-printable-keys-get))").value);
+    const tableStr = String(e(editor, "(string-join \"\" (stagehand/remote/stagehand-printable-keys-get))").value);
+    // gate r4: the Enter + C-c BINDINGS asserted (not just the fns),
+    // and the table-length pin (the route guard below derives its
+    // domain from the same table — a truncation passes silently).
+    expect(ref("Enter")).toContain("stagehand-remote-input-enter");
+    expect(ref("C-c")).toContain("stagehand-remote-cancel");
+    expect(tableStr.length).toBe(94);
     for (const ch of tableStr) {
       if (ch === "q") continue;
       const r = String(e(editor, `(keymap-ref (editor/keymaps/buffer-keymap "*Stagehand-Remote*") "${ch === '"' ? '\\"' : ch === "\\" ? "\\\\" : ch}")`).value);
