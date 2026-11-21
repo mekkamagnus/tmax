@@ -273,9 +273,11 @@ availability gate must be synchronous; the turn itself is async)."
       (cond
         ((and (symbolp res) (string= (symbol-name res) "async"))
           ;; r126: an async bash holds the round — the sentinel resumes
-          ;; from i+1 (the tool message lands at exit).
+          ;; from i+1 (the tool message lands at exit). r127 (codex
+          ;; catch 2): the ACC rides too (a buffer_read BEFORE the bash
+          ;; vanished from the model's messages).
           (progn
-            (setq fikra-ollama-async-cont (list calls (+ i 1)))
+            (setq fikra-ollama-async-cont (list calls (+ i 1) acc))
             'async))
         ((and (symbolp res) (string= (symbol-name res) "parked"))
           ;; r120: the REMAINDER rides the park — the decision resumes
@@ -392,16 +394,24 @@ availability gate must be synchronous; the turn itself is async)."
     (list (list "kind" "tool-call") (list "tool" "bash")
           (list "summary" cmd)))
   (setq fikra-ollama-async-out "")
-  (condition-case nil
-    (make-process
-      :command (list "sh" "-c"
-                     (concat "cd " (fikra/thread/fikra-thread-shq dir)
-                             " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e"))
-      :cwd dir
-      :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
-      :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
-    (error () nil))
-  'async)
+  (let ((pid (condition-case nil
+              (make-process
+                :command (list "sh" "-c"
+                               (concat "cd " (fikra/thread/fikra-thread-shq dir)
+                                       " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e"))
+                :cwd dir
+                :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
+                :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
+              (error () nil))))
+    (if pid
+      'async
+      ;; r127 (codex catch 4): a FAILED spawn reports an honest FAIL
+      ;; row — never 'async (the turn would strand).
+      (progn
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "tool-result") (list "ok" nil)
+                (list "summary" "spawn failed")))
+        "{\"role\":\"tool\",\"content\":\"spawn failed\"},"))))
 
 (defun fikra-ollama-bash-filter (pid output)
   (setq fikra-ollama-async-out
@@ -435,11 +445,12 @@ availability gate must be synchronous; the turn itself is async)."
 ;; appended).
 (defun fikra-ollama-resume-from (cont msg)
   (let ((calls (car cont))
-        (i (car (cdr cont))))
-    ;; The completed message lands NOW (its position: right after the
-    ;; already-appended earlier results).
+        (i (car (cdr cont)))
+        (acc (car (cdr (cdr cont)))))
+    ;; The pre-async results (r127) + the completed message land at
+    ;; their positions; the remaining calls' results append after.
     (setq fikra-ollama-messages
-      (concat fikra-ollama-messages msg))
+      (concat fikra-ollama-messages (if acc acc "") msg))
     (let ((results (fikra-ollama-run-calls calls i nil)))
       (cond
         ((and (symbolp results) (string= (symbol-name results) "parked")) nil)

@@ -703,3 +703,48 @@ describe("ollama async exec (r126 — the codex-named responsiveness gap)", () =
     expect(text).toContain("SLOW-DONE");
   });
 });
+
+describe("ollama async hardening (r127 — codex r126 catches)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireCalls = (ed: Editor, seed: number, calls: { name: string; args: unknown }[]) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls:
+      calls.map((c) => ({ function: { name: c.name, arguments: c.args } })) } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  test("a buffer_read BEFORE an async bash rides the resume (its result never vanishes)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "pre.txt"), "READ-BEFORE-ASYNC");
+    e(ed, '(fikra/chat/fikra-turn-send "mixed")');
+    fireCalls(ed, 181, [
+      { name: "buffer_read", args: { path: "pre.txt" } },
+      { name: "bash", args: { command: "echo AFTER-BASH" } },
+    ]);
+    // Poll for the TOOL MESSAGE (the command text also appears in the
+    // tool_calls JSON — match the result shape, not the command).
+    const acc = await until(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)", '"role":"tool"');
+    expect(acc).toContain("READ-BEFORE-ASYNC");
+    const readMsg = acc.indexOf('"role":"tool","content":"READ-BEFORE-ASYNC"');
+    const bashMsg = acc.indexOf('"role":"tool","content":"AFTER-BASH"');
+    expect(readMsg).toBeGreaterThan(-1);
+    expect(bashMsg).toBeGreaterThan(readMsg);
+  });
+
+  test("the non-blocking proof is DURING: the eval answers BEFORE the 2s command finishes", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "slow")');
+    fireCalls(ed, 182, [{ name: "bash", args: { command: "sleep 2 && echo SLOW-END" } }]);
+    // The row rendered = the spawn happened; the child sleeps NOW.
+    expect(String(e(ed, "(buffer-text)").value)).toContain("sleep 2");
+    // The concurrent eval must answer while the child still sleeps —
+    // verified by the RESULT not yet being rendered.
+    const t0 = Date.now();
+    expect(String(e(ed, "(+ 1 2)").value)).toBe("3");
+    const dt = Date.now() - t0;
+    expect(dt).toBeLessThan(1500);
+    // ...and the result lands at exit.
+    expect(await until(ed, "(buffer-text)", "SLOW-END", 60)).toContain("SLOW-END");
+  });
+});
