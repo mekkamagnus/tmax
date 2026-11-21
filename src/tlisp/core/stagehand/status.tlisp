@@ -173,11 +173,11 @@ fold-aware variant, navigation math uses the complete set)."
   (mapcar (lambda (pair) (car pair)) (stagehand-blocks-of sections nil)))
 
 (defun stagehand-blocks-of (sections respect-fold)
-  ;; ((display path code section) ...) per visible row, in order —
-  ;; display is the rendered text, path/code the PARSED entry fields
-  ;; (nil on headers), section the owning section name. Position in
-  ;; this list IS row identity. RESPECT-FOLD drops a folded section's
-  ;; file rows (the header stays — the unfold affordance).
+  ;; ((display path code section origin) ...) per visible row, in
+  ;; order — display is the rendered text, path/code/origin the PARSED
+  ;; entry fields (nil on headers), section the owning section name.
+  ;; Position in this list IS row identity. RESPECT-FOLD drops a folded
+  ;; section's file rows (the header stays — the unfold affordance).
   (if (null sections)
     (list)
     (let* ((name (car (car sections)))
@@ -185,19 +185,19 @@ fold-aware variant, navigation math uses the complete set)."
            (hdr (concat name " (" (number-to-string (length entries)) ")")))
       (append
         (if (and respect-fold (stagehand-status-folded-p name))
-          (list (list hdr nil nil name))
-          (cons (list hdr nil nil name) (stagehand-entry-pairs name entries)))
+          (list (list hdr nil nil name nil))
+          (cons (list hdr nil nil name nil) (stagehand-entry-pairs name entries)))
         (stagehand-blocks-of (cdr sections) respect-fold)))))
 
 (defun stagehand-entry-pairs (section-name entries)
-  ;; ((display path code section) ...) for a section's entries.
+  ;; ((display path code section origin) ...) for a section's entries.
   (if (null entries)
     (list)
     (let* ((e (car entries))
            (c (car e))
            (p (car (cdr e)))
            (r (car (cdr (cdr e)))))
-      (cons (list (stagehand-render-row c p r) p c section-name)
+      (cons (list (stagehand-render-row c p r) p c section-name r)
         (stagehand-entry-pairs section-name (cdr entries))))))
 
 ;; ── fold state ──────────────────────────────────────────────────────
@@ -349,7 +349,7 @@ the buffer is untouched."
         (editor-set-status "untracked file — no diff"))
       (t
         (stagehand-diff-run (stagehand-side-of-section (nth 3 pair))
-          (concat " -- " (stagehand-shq (car (cdr pair))))
+          (stagehand-row-paths-arg pair)
           (car (cdr pair)))))))
 
 (defun stagehand-side-of-section (section-name)
@@ -369,14 +369,40 @@ the buffer is untouched."
       (stagehand-section-scan (cdr sections) name))))
 
 (defun stagehand-paths-arg (entries)
-  ;; " -- 'p1' 'p2' ..." — every path shell-quoted after one --.
-  (stagehand-paths-scan entries ""))
+  ;; " -- ':(literal)p1' ':(literal)p2' ..." — one -- separator
+  ;; (option-shaped filenames like --stat must not become flags), every
+  ;; path shell-quoted AND wrapped in git's :(literal) pathspec magic
+  ;; (a filename like a*.txt must not glob its siblings). Renamed
+  ;; entries contribute their ORIGIN too (the rename diff needs both
+  ;; sides or git shows a bare add).
+  (stagehand-paths-scan entries " --"))
 
 (defun stagehand-paths-scan (entries acc)
   (if (null entries)
     acc
-    (stagehand-paths-scan (cdr entries)
-      (concat acc " " (stagehand-shq (car (cdr (car entries))))))))
+    (let* ((e (car entries))
+           (dest (car (cdr e)))
+           (origin (car (cdr (cdr e)))))
+      (stagehand-paths-scan (cdr entries)
+        (concat acc
+          " " (stagehand-shq (stagehand-literal-pathspec dest))
+          (if origin
+            (concat " " (stagehand-shq (stagehand-literal-pathspec origin)))
+            ""))))))
+
+(defun stagehand-literal-pathspec (path)
+  ;; Git's literal pathspec magic — disables globbing and pathspec
+  ;; interpretation for this argument.
+  (concat ":(literal)" path))
+
+(defun stagehand-row-paths-arg (pair)
+  ;; The row form: one -- + the literal destination (+ origin when the
+  ;; row is a rename/copy — the pair's 5th slot).
+  (concat " --"
+    " " (stagehand-shq (stagehand-literal-pathspec (car (cdr pair))))
+    (if (nth 4 pair)
+      (concat " " (stagehand-shq (stagehand-literal-pathspec (nth 4 pair))))
+      "")))
 
 (defun stagehand-diff-run (side paths-arg title)
   (let* ((flag (if (string= side "cached") " --cached" ""))

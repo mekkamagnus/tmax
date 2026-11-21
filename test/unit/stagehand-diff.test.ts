@@ -384,6 +384,54 @@ describe("#289 — the view (integration, real temp repos)", () => {
     expect(strip(bufferText(editor))).toContain("+apostrophe changed");
   });
 
+  test("OPTION-SHAPED and GLOB filenames diff literally (codex r1 #1/#2)", () => {
+    const c = process.cwd();
+    // A tracked file literally named --stat: section d must produce the
+    // section's PATCH, not a whole-repo --stat summary.
+    writeFileSync(join(c, "--stat"), "option content\n");
+    writeFileSync(join(c, "a*.txt"), "star content\n");
+    writeFileSync(join(c, "abc.txt"), "sibling content\n");
+    commit("base");
+    writeFileSync(join(c, "--stat"), "option modified\n");
+    writeFileSync(join(c, "a*.txt"), "star modified\n");
+    statusOf();
+    // Section d on Unstaged: 2 U-hdr | 3 Unstaged-hdr.
+    e(editor, "(cursor-move 3 0)");
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    const t = strip(bufferText(editor));
+    expect(t).toContain("diff --git"); // a patch, not a stat summary
+    expect(t).not.toContain(" files changed");
+    expect(t).toContain("-option content");
+    // Row d on a*.txt: its OWN diff only — the glob must not pull in
+    // abc.txt.
+    statusOf();
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("a*.txt"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    const t2 = strip(bufferText(editor));
+    expect(t2).toContain("-star content");
+    expect(t2).not.toContain("sibling content");
+  });
+
+  test("a STAGED RENAME row diffs BOTH sides — rename metadata survives (codex r1 #3)", () => {
+    const c = process.cwd();
+    writeFileSync(join(c, "old.txt"), "rename me\n");
+    commit("base");
+    execFileSync("git", ["mv", "old.txt", "new.txt"], { cwd: c });
+    statusOf();
+    // The staged R row: find it in the Staged section.
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("R  new.txt (from old.txt)"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    const t = strip(bufferText(editor));
+    // The rename diff, not a bare new-file addition.
+    expect(t).toContain("rename from old.txt");
+    expect(t).toContain("rename to new.txt");
+    expect(t).toContain("similarity index");
+  });
+
   test("git failure mid-diff → status names it; the buffer is unchanged", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "x\n");
     commit("base");
