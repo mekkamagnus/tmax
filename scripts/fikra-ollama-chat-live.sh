@@ -105,9 +105,14 @@ for i in $(seq 1 360); do
   OUT=$(ev '(fikra/thread/fikra-thread-status)' | tail -1)
   case "$OUT" in idle|error) TOOL_DONE=1; break;; *) sleep 1;; esac
 done
-[ -n "$TOOL_DONE" ] && ok "tool turn settled ($OUT)" || bad "tool turn never settled"
+[ -n "$TOOL_DONE" ] || bad "tool turn never settled"
 TOOLCHAT=$(ev '(progn (buffer-switch "*Fikra*") (buffer-text))' | sed -e 's/\x1b\[[0-9;]*m//g')
-echo "$TOOLCHAT" | grep -q "bash" && echo "$TOOLCHAT" | grep -q "TOOL-ROUND-LIVE"   && ok "the MODEL-DRIVEN tool round rendered (⚙ + real evidence)"   || bad "no tool round evidence"
+# r114: the row + the RESULT line (the prompt alone must not satisfy).
+echo "$TOOLCHAT" | grep -q "bash" \
+  && echo "$TOOLCHAT" | grep -E -q "→ (ok|FAIL).*TOOL-ROUND-LIVE|TOOL-ROUND-LIVE.*→ " \
+  && ok "the MODEL-DRIVEN tool round rendered (row + result evidence)" \
+  || bad "no tool round evidence (row or result missing)"
+[ "$OUT" = "idle" ] || bad "tool turn ended $OUT (expected idle)"
 
 STATUS=$(ev '(editor-status)' | tail -1)
 echo "$STATUS" | grep -q "turn completed" && ok "status: $STATUS" || bad "status: $STATUS"

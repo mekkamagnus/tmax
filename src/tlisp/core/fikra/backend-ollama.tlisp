@@ -227,7 +227,13 @@ availability gate must be synchronous; the turn itself is async)."
                  (fikra-ollama-alist-get "function" call)))
          (args-raw (fikra-ollama-alist-get "arguments"
                      (fikra-ollama-alist-get "function" call)))
-         (args (condition-case nil (json-read-from-string (if args-raw args-raw "{}")) (error () ()))))
+         ;; r114 (codex r113 P1): arguments arrive as EITHER shape — a
+         ;; JSON STRING (parse) or an already-parsed ALIST (the live
+         ;; qwen3 object case; the string-only parse yielded empty
+         ;; arguments and the tool executed NOTHING).
+         (args (if (listp args-raw)
+                 (if (and args-raw (> (length args-raw) 0)) args-raw ())
+                 (condition-case nil (json-read-from-string (if args-raw args-raw "{}")) (error () ())))))
     (if (string= fname "bash")
       (fikra-ollama-run-bash call args)
       (if (string= fname "buffer_edit")

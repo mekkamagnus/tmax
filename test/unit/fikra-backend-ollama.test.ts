@@ -280,3 +280,41 @@ describe("ollama tool-using loop (r112 — the 8.1 native loop)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
   });
 });
+
+describe("ollama object-shaped arguments (r114 — codex r113 P1)", () => {
+  test("arguments arriving as an OBJECT (the live qwen3 shape) execute for real", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "run it")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 95 "live")');
+    // The arguments as an OBJECT (not a JSON string) — the live shape.
+    const r1 = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command: "echo OBJECT-ARGS-RAN" } } },
+    ] } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 95 "${r1}")`);
+    e(ed, `(fikra-http-complete 95 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    const text = String(e(ed, "(buffer-text)").value);
+    // The COMMAND RAN (the old path executed an empty command).
+    expect(text).toContain("OBJECT-ARGS-RAN");
+    expect(text).toContain("→ ok");
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 96 "live")');
+    const r2 = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "done" } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 96 "${r2}")`);
+    e(ed, `(fikra-http-complete 96 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+
+  test("the MODEL-VISIBLE failure status rides the next request (codex r113 P2#5)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "run it")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 97 "live")');
+    const r1 = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command: "echo NOPE; exit 7" } } },
+    ] } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 97 "${r1}")`);
+    e(ed, `(fikra-http-complete 97 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    // The ACCUMULATOR (the next request's tool message) carries the status.
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("exit code: 7");
+    expect(acc).toContain("NOPE");
+  });
+});
