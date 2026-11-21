@@ -147,6 +147,23 @@ export function getVisibleViewportLeft(state: EditorState, contentWidth: number)
 }
 
 /**
+ * #321 (codex r4): the DISPLAY line the renderer actually wraps — the
+ *  wiki-link transform applies BEFORE wrapping (SPEC-119), so the cursor
+ *  helpers must count/map the same text. Returns [displayText, displayCol].
+ */
+function displayLineForWrap(
+  state: EditorState,
+  rawLine: string,
+  column: number,
+): [string, number] {
+  if (wikiDisplayActive(state)) {
+    const t = transformWikiLine(rawLine, undefined);
+    if (t.changed) return [t.text, t.mapCol(column)];
+  }
+  return [rawLine, column];
+}
+
+/**
  * #321 (codex r3): map a logical column into the wrapped segments —
  * cumulative visual widths, boundary-exact prefers the NEXT segment
  * (the renderer starts the next row there); returns [row, column].
@@ -183,8 +200,10 @@ export function getWrappedCursorRow(
   const top = getWrappedViewportTop(state, bufferHeight, width);
   let row = 0;
   for (let ln = top; ln < state.cursorPosition.line && ln < totalLines; ln++) row += rowsOf(ln);
-  const segs = wrapLine(getLine(state, state.cursorPosition.line) ?? "", cw);
-  row += wrappedSegOf(segs, state.cursorPosition.column)[0];
+  const [dispLine, dispCol] = displayLineForWrap(
+    state, getLine(state, state.cursorPosition.line) ?? "", state.cursorPosition.column);
+  const segs = wrapLine(dispLine, cw);
+  row += wrappedSegOf(segs, dispCol)[0];
   return Math.max(0, Math.min(bufferHeight - 1, row));
 }
 
@@ -195,10 +214,12 @@ export function getWrappedCursorColumn(state: EditorState, width: number): numbe
   const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
   const cw = Math.max(1, width - gw);
-  const segs = wrapLine(getLine(state, state.cursorPosition.line) ?? "", cw);
+  const [dispLine, dispCol] = displayLineForWrap(
+    state, getLine(state, state.cursorPosition.line) ?? "", state.cursorPosition.column);
+  const segs = wrapLine(dispLine, cw);
   // The ABSOLUTE screen column: gutter + the within-segment offset (the
   // rendered frame prefixes every row with the gutter; codex r3 c1).
-  return gw + wrappedSegOf(segs, state.cursorPosition.column)[1];
+  return gw + wrappedSegOf(segs, dispCol)[1];
 }
 
 export function getCursorScreenOffset(state: EditorState, bufferHeight: number, contentWidth: number): { row: number; col: number } {

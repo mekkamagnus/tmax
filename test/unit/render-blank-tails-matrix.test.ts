@@ -292,6 +292,20 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     expect(c2).toBe(20);
   });
 
+  test("#321 codex r4: the wrapped cursor counts the DISPLAY line (wiki links transform before wrap)", () => {
+    // A short line with a wiki link displays far shorter than its raw
+    // form — the cursor helpers must count/map the DISPLAY text.
+    const state = makeState(["[[some/page|a]] Z", "tail"], true, 0, 22);
+    // The transform activates in markdown mode with the wiki-display
+    // minor mode on (a .md filename completes the predicate).
+    const cursorOnZ = { ...state, currentMajorMode: "markdown", currentFilename: "note.md",
+      activeMinorModes: ["wiki-link-display"], cursorPosition: { line: 0, column: 15 } };
+    const row = getWrappedCursorRow(cursorOnZ as any, 22, 100);
+    expect(row).toBe(0); // the DISPLAY line is short — no wrap, row 0
+    const col = getWrappedCursorColumn(cursorOnZ as any, 100);
+    expect(col).toBeLessThan(10); // the display column (a + space + Z), not 15
+  });
+
 /** Exposed for the fix-phase test + recording: the matrix table. */
 export function matrixTable(): string {
   return ["| N | rows x cols | wrap | path | tail | blank-tail-rows |",
