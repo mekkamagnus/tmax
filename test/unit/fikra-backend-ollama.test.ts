@@ -990,4 +990,27 @@ describe("ollama async ownership + interruption (r131 — codex r130 P1#1/P1#3)"
     const text = strip(String(e(ed, "(buffer-text)").value));
     expect(text).not.toMatch(/→ (ok|FAIL)\s*$/m);
   });
+
+  // r131e (codex r131d catch): turn-end's event append is BEST-EFFORT —
+  // an unwritable log path must not strand the thread "running" (the
+  // status transition is the state truth). Probed by codex with a
+  // /dev/null thread root. The re-fire must FAIL FAST here (dead URL,
+  // not the hanging stub) so the error settle is observable.
+  tt("a turn still TERMINATES when the event log is unwritable", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-set-url "http://127.0.0.1:1")');
+    e(ed, '(fikra/chat/fikra-turn-send "poison log")');
+    fireCalls(ed, 176, [{ name: "bash", args: { command: "echo POISON-LOG" } }]);
+    // Poison the thread's log root (the -for emitter derives the
+    // events.jsonl path from it; the state persist throws the same
+    // way): /dev/null/<...> cannot be created.
+    e(ed, '(fikra/thread/fikra-thread-set-field "root" "/dev/null")');
+    // The sentinel fires; its resume re-fires against the dead port and
+    // that failure settles the turn — every append/persist under the
+    // poisoned root throws, yet the status must go terminal.
+    const st = await untilStatus(ed, "error", 60);
+    expect(st).toBe("error");
+    // Restore a sane root for teardown.
+    e(ed, `(fikra/thread/fikra-thread-set-field "root" "${process.cwd()}")`);
+  });
 });

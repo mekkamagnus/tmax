@@ -907,10 +907,15 @@ thread→adapter has no cycle but keep the lazy convention)."
   ;; ── completed ── markers, threads stuck "running"). The -for emitter
   ;; derives the log path from the thread record (mutation-shared state),
   ;; exactly like the stream filter's events.
-  (fikra/event/fikra-event-emit-batch-for (fikra-thread-current)
-    (list (list (list "kind" "turn-end")
-                (list "turn" (fikra-thread-field "turn-count"))
-                (list "status" status))))
+  ;; r131e (codex r131d catch): the turn-end EVENT is best-effort — an
+  ;; append failure (an unwritable log path) must not strand the thread
+  ;; "running": the STATUS transition below is the state truth.
+  (condition-case nil
+    (fikra/event/fikra-event-emit-batch-for (fikra-thread-current)
+      (list (list (list "kind" "turn-end")
+                  (list "turn" (fikra-thread-field "turn-count"))
+                  (list "status" status))))
+    (error () nil))
   ;; #223 (gate catch: the offer had NO production call site): a COMPLETED
   ;; turn in plan interaction offers the y/e/n approval. Lazy require
   ;; (plan requires thread; the cycle forbids top-level).
