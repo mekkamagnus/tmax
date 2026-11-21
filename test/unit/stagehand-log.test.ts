@@ -255,6 +255,53 @@ describe("#290 — gate r1 coverage", () => {
     expect(git("rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD"); // remote refs detach
   });
 
+  test("AMBIGUOUS name (tag at the selected commit, branch elsewhere): the TAG is chosen, not the branch (codex r1 #1)", async () => {
+    commit("target");
+    commit("moved-on");
+    // A BRANCH named like the TAG but pointing at a DIFFERENT commit.
+    execFileSync("git", ["tag", "amb", "HEAD~1"], { cwd: process.cwd() });
+    execFileSync("git", ["branch", "amb"], { cwd: process.cwd() }); // at HEAD (different commit)
+    await openLog(editor);
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("target"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-checkout)");
+    e(editor, '(stagehand/log/stagehand-log-checkout-accept "y")');
+    // The tag at the CONFIRMED commit wins (tags/amb disambiguates);
+    // git would have preferred the branch for the bare name.
+    expect(String(e(editor, "(editor-status)").value)).toContain("checked out amb");
+    expect(git("rev-parse", "HEAD")).toBe(git("rev-parse", "amb^{commit}")); // the confirmed (tag's) commit
+    expect(git("describe", "--tags", "--exact-match")).toContain("amb");
+  });
+
+  test("SEALED stream: straggler chunks after the sentinel are dropped (codex r1 #2)", async () => {
+    commit("one");
+    await openLog(editor);
+    const before = strip(bufferText(editor));
+    const pid = Number(String(e(editor, "(stagehand/log/stagehand-log-last-pid-get)").value));
+    // A LATE chunk (post-sentinel): the seal must drop it — the
+    // buffer (now read-only) and the bookkeeping stay consistent.
+    e(editor, `(stagehand/log/stagehand-log-filter ${pid} (hex-decode "${Buffer.from("* deadbeef late-row\n").toString("hex")}"))`);
+    expect(strip(bufferText(editor))).toBe(before); // unchanged
+  });
+
+  test("GRAPH PREFIXES survive on COMMIT rows (codex r1 #3)", async () => {
+    commit("base");
+    execFileSync("git", ["checkout", "-q", "-b", "feature"], { cwd: process.cwd() });
+    commit("feature work");
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: process.cwd() });
+    commit("main work");
+    execFileSync("git", ["merge", "-q", "--no-ff", "feature", "-m", "merge"], { cwd: process.cwd() });
+    await openLog(editor);
+    // A commit row BELOW the merge carries a graph prefix ('|\ '
+    // or '* '): assert some commit row other than line 0 starts
+    // with a graph glyph.
+    const lines = strip(bufferText(editor)).split("\n");
+    const commitRows = lines.filter((l, i) => i > 0 && String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${i})`).value) !== "nil");
+    expect(commitRows.length).toBeGreaterThan(0);
+    expect(commitRows.some((l) => /^[*|]/.test(l))).toBe(true); // the visual graph lives on commit rows
+  });
+
   test("refs/tags precedence: a TAGGED mid-branch commit checks out the TAG name", async () => {
     commit("c1");
     execFileSync("git", ["tag", "v1"], { cwd: process.cwd() });
