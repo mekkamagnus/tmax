@@ -879,6 +879,68 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(h2).toContain("TOOL-CTX");
   });
 
+  // r139 (codex re-grade): MULTI-ROUND history — true order, no
+  // duplicated narration. Round 1 narrates then runs a tool; round 2
+  // narrates then runs another; a final reply ends the turn. The next
+  // turn's RECORDED body must read: user, tools1, narration2, tools2,
+  // final — with each narration exactly once.
+  tt("a two-round turn rides in true order without duplication", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "multi round")');
+    const fireReplyRaw = (seed: number, reply: unknown) => {
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+      const r = hex(JSON.stringify({ message: reply }));
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+      e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+    };
+    fireReplyRaw(210, { role: "assistant", content: "First narration.",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "echo ROUND-ONE" } } }] });
+    // Wait for round 1's re-fire (a new latest-id) WITHOUT consuming it
+    // with a plain reply (that would END the turn).
+    let refire1 = "210";
+    for (let i = 0; i < 60; i++) {
+      const now = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+      if (now !== "210" && now !== "null") { refire1 = now; break; }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(refire1).not.toBe("210");
+    // Round 2 seeds THAT re-fire with another tool round.
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${refire1} "live")`);
+    const r2 = hex(JSON.stringify({ message: { role: "assistant", content: "Second narration.",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "echo ROUND-TWO" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${refire1} "${r2}")`);
+    e(ed, `(fikra-http-complete ${refire1} 200 "${hex("{}")}")`);
+    await settleRefireFrom(ed, refire1, "ALL-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // Turn 2's body.
+    e(ed, '(fikra/chat/fikra-turn-send "next turn")');
+    let body = "";
+    for (let i = 0; i < 60; i++) {
+      try {
+        const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
+        const last = lines[lines.length - 1];
+        if (last && last.includes("next turn")) { body = last; break; }
+      } catch { /* wait */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(body).toContain("ROUND-ONE");
+    expect(body).toContain("ROUND-TWO");
+    // No duplicated narrations (each exactly once).
+    expect(body.split("First narration.").length - 1).toBe(1);
+    expect(body.split("Second narration.").length - 1).toBe(1);
+    // The TRUE order: narration1 < tools1 < narration2 < tools2 < final.
+    const n1 = body.indexOf("First narration.");
+    const t1 = body.indexOf("ROUND-ONE");
+    const n2 = body.indexOf("Second narration.");
+    const t2 = body.indexOf("ROUND-TWO");
+    const fin = body.indexOf("ALL-DONE");
+    expect(n1).toBeGreaterThan(-1);
+    expect(t1).toBeGreaterThan(n1);
+    expect(n2).toBeGreaterThan(t1);
+    expect(t2).toBeGreaterThan(n2);
+    expect(fin).toBeGreaterThan(t2);
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
