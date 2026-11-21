@@ -245,27 +245,38 @@ availability gate must be synchronous; the turn itself is async)."
 ;; verbatim (the accumulated messages keep the model's exact shape).
 (defun fikra-ollama-tool-round (msg tool-calls)
   (setq fikra-ollama-round (+ fikra-ollama-round 1))
-  (setq fikra-ollama-messages
-    (concat fikra-ollama-messages
-            "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
-            (fikra-ollama-calls-json tool-calls 0 "")
-            "]},")) 
+  ;; r135 (codex r130 P2): the model's text BESIDE its tool calls is
+  ;; kept — rendered before the ⚙ rows and carried in the reconstructed
+  ;; assistant message (it used to be discarded: content hardcoded "").
+  (let ((text (let ((c (fikra-ollama-alist-get "content" msg)))
+                (if (and c (stringp c) (> (length c) 0)) c ""))))
+    (if (> (length text) 0)
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "text-delta")
+              (list "speaker" "assistant")
+              (list "text" text))))
+    (setq fikra-ollama-messages
+      (concat fikra-ollama-messages
+              "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string text)
+              ",\"tool_calls\":["
+              (fikra-ollama-calls-json tool-calls 0 "")
+              "]},")))
   (let ((results (fikra-ollama-run-calls tool-calls 0 "")))
     (if (and (symbolp results) (or (string= (symbol-name results) "parked")
                                    (string= (symbol-name results) "async")))
       nil
       (progn
-    (setq fikra-ollama-messages
-      (concat fikra-ollama-messages results))
-    (if (>= fikra-ollama-round fikra-ollama-max-rounds)
-      (progn
-        (setq fikra-ollama-pending-message nil)
-        (fikra/event/fikra-event-emit
-          (list (list "kind" "text-delta")
-                (list "speaker" "assistant")
-                (list "text" "(tool round cap reached — stopping the loop)")))
-        (fikra/thread/fikra-thread-turn-end "completed"))
-      (fikra-ollama-chat fikra-ollama-pending-message))))))
+        (setq fikra-ollama-messages
+          (concat fikra-ollama-messages results))
+        (if (>= fikra-ollama-round fikra-ollama-max-rounds)
+          (progn
+            (setq fikra-ollama-pending-message nil)
+            (fikra/event/fikra-event-emit
+              (list (list "kind" "text-delta")
+                    (list "speaker" "assistant")
+                    (list "text" "(tool round cap reached — stopping the loop)")))
+            (fikra/thread/fikra-thread-turn-end "completed"))
+          (fikra-ollama-chat fikra-ollama-pending-message))))))
 
 ;; The tool_calls array re-embedded as JSON (the raw arguments string
 ;; must survive verbatim — re-parsing loses its exact shape).
@@ -691,6 +702,27 @@ availability gate must be synchronous; the turn itself is async)."
           t
           (string-prefix-p (concat real-dir "/") resolved))))))
 
+;; r135 (codex r130 P2): up to 3 sign-prefixed lines + a counted tail
+;; (the r106 evidence shape; the claude backend's preview builder is
+;; module-scoped — a local twin).
+(defun fikra-ollama-preview-lines (sign text)
+  (let ((lines (string-split text "\n"))
+        (out ""))
+    (fikra-ollama-preview-scan sign lines 0 (length lines) out)))
+
+(defun fikra-ollama-preview-scan (sign lines i n out)
+  (if (>= i n)
+    (if (> n 3)
+      (concat out sign " … " (number-to-string (- n 3)) " more
+")
+      out)
+    (if (< i 3)
+      (fikra-ollama-preview-scan sign lines (+ i 1) n
+        (concat out sign " " (nth i lines) "
+"))
+      ;; skip the middle — the tail marker lands at the end
+      (fikra-ollama-preview-scan sign lines (+ i 1) n out))))
+
 (defun fikra-ollama-run-edit (call args)
   (let* ((path (if (fikra-ollama-alist-get "path" args)
                  (fikra-ollama-alist-get "path" args) ""))
@@ -702,9 +734,19 @@ availability gate must be synchronous; the turn itself is async)."
          ;; and — r133 — SYMLINK hops all refuse).
          (contained (fikra-ollama-path-contained-p dir path))
          (abs (concat dir "/" path)))
-    (fikra/event/fikra-event-emit
-      (list (list "kind" "tool-call") (list "tool" "buffer-edit")
-            (list "summary" (concat path " @" (number-to-string (length content))))))
+    ;; r135 (codex r130 P2): the INLINE change evidence — the old vs new
+    ;; first lines render +/- under the ⚙ row (the mockup's edit row;
+    ;; the preview is known at call time: old read, new in the args).
+    (let ((old-content (if contained
+                         (condition-case nil (read-file-content abs) (error () nil))
+                         nil)))
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "tool-call") (list "tool" "buffer-edit")
+              (list "summary" (concat path " @" (number-to-string (length content))))
+              (list "preview"
+                (concat (if (and old-content (stringp old-content) (> (length old-content) 0))
+                          (fikra-ollama-preview-lines "-" old-content) "")
+                        (fikra-ollama-preview-lines "+" content))))))
     (if (not contained)
       (progn
         (fikra/event/fikra-event-emit

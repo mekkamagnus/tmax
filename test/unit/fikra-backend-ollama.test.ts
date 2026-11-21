@@ -774,6 +774,54 @@ describe("ollama per-action checkpoint refs (r134 — codex r130 P1#4)", () => {
   });
 });
 
+describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireReply = (ed: Editor, seed: number, reply: unknown) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: reply }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  // P2: the model's text BESIDE its tool calls renders and rides the
+  // reconstructed message (it used to be discarded: content "").
+  tt("text beside tool_calls renders + rides the assistant message", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "explain and run")');
+    fireReply(ed, 195, { role: "assistant", content: "Running the check now.",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "echo TEXT-BESIDE" } } }] });
+    const text = strip(await until(ed, "(buffer-text)", "→ ok", 60));
+    // The text rendered BEFORE the tool row.
+    const ti = text.indexOf("Running the check now.");
+    const gi = text.indexOf("⚙ bash");
+    expect(ti).toBeGreaterThan(-1);
+    expect(gi).toBeGreaterThan(ti);
+    expect(text).toMatch(/→ ok\s*TEXT-BESIDE/);
+    // The reconstructed assistant message carries it (the next request).
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain('"role":"assistant","content":"Running the check now."');
+  });
+
+  // P2: the edit row carries INLINE change evidence (the mockup's
+  // +/- lines) — old vs new first lines with counted tails.
+  tt("a buffer_edit renders - old / + new preview lines under the row", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "old135.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    e(ed, '(fikra/chat/fikra-turn-send "rewrite it")');
+    fireReply(ed, 196, { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "buffer_edit",
+        arguments: { path: "old135.txt", content: "alpha\nBETA-X\ngamma\ndelta\nepsilon\n" } } }] });
+    const text = strip(await until(ed, "(buffer-text)", "buffer-edit", 60));
+    expect(text).toContain("- alpha");
+    expect(text).toContain("- beta");
+    expect(text).toContain("- … 2 more");
+    expect(text).toContain("+ alpha");
+    expect(text).toContain("+ BETA-X");
+    expect(text).toContain("+ … 3 more");
+    expect(String(e(ed, '(shell-command "cat old135.txt")').value)).toContain("BETA-X");
+  });
+});
+
 describe("ollama focus-switch lifecycle (r119 — codex r118 P1)", () => {
   tt("park → switch → allow: the ORIGINATING thread settles (not stranded confirming)", async () => {
     const ed = await armed();
