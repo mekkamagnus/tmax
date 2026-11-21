@@ -54,7 +54,8 @@
               (fikra-diff-render
                 (concat (fikra-diff-summary state rows
                           (fikra-diff-turn-tools-line state))
-                        "\n" patch)))))))))
+                        "\n" patch "\n"
+                        (fikra-diff-keys-footer))))))))))
 
 ;; Summary table (mockup 8.4: file summary + totals) — colored header,
 ;; magenta ± rows with per-file counts, totals line.
@@ -84,10 +85,9 @@ per-file ± rows)."
       (progn
         (setq fikra-diff-view-turn n)
         (fikra-diff-render
-          (concat "\e[1;36m── turn " (number-to-string n)
-                  " (completed) · ]/[ next/prev turn · n/N file · SPC a d live view ──\e[0m\n\n"
-                  (fikra-diff-completed-summary n)
-                  patch))))))
+          (concat (fikra-diff-completed-summary n)
+                  patch "\n"
+                  (fikra-diff-keys-footer)))))))
 
 ;; The numstat-derived ± rows for a COMPLETED turn (the live view builds
 ;; them from working state; here they come from the ref pair).
@@ -199,8 +199,7 @@ per-file ± rows)."
           (number-to-string (fikra-diff-total rows 2)) " "
           (if (or (not tools) (string= tools "")) "" (concat "· " tools))
           "──\e[0m\n\n"
-          (fikra-diff-rows rows)
-          "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn · SPC a d live view \n\n"))
+          (fikra-diff-rows rows)))
 
 ;; ── the per-turn tool tally (mockup line 1: "· tools: buffer-edit ×2,
 ;; bash ×1") — walk the event memory counting turn-starts; tool-calls
@@ -259,6 +258,34 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
             (nth (- (length cols) 1) cols) (substring (car cols) 0 1)))))
     m))
 
+;; The letter for a row path — rename tails resolve to the NEW path
+;; (numstat prints "old => new"; the letters map keys on the new path).
+(defun fikra-diff-letter-for (path)
+  (or-with-rename (hashmap-get fikra-diff-letters path) path))
+
+(defun or-with-rename (hit path)
+  (if (and hit (> (length hit) 0))
+    hit
+    (let ((pos (fikra-diff-arrow-pos path 0)))
+      (if (> pos 0)
+        (let ((tail (substring path (+ pos 4) (length path))))
+          (let ((h2 (hashmap-get fikra-diff-letters tail)))
+            (if (and h2 (> (length h2) 0)) h2 nil)))
+        nil))))
+
+;; First index of " => " in S (a byte scan).
+(defun fikra-diff-arrow-pos (s i)
+  (if (> (- (length s) i) 3)
+    (if (string= (substring s i (+ i 4)) " => ")
+      i
+      (fikra-diff-arrow-pos s (+ i 1)))
+    0))
+
+;; The mockup's footer hint — AFTER the patch (r97: the controls ride
+;; below the content, not between the summary and the patch).
+(defun fikra-diff-keys-footer ()
+  (concat "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn · SPC a d live view \n"))
+
 ;; ROWS are ((path adds dels) ...); IDX 1 = adds column, 2 = dels.
 (defun fikra-diff-total (rows idx)
   (let ((sum 0))
@@ -273,7 +300,7 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
     (dolist (r rows)
       ;; The mockup's status letter (M/A/D/R) when the render knows it;
       ;; ± for callers that did not build the letters map (legacy).
-      (let ((letter (hashmap-get fikra-diff-letters (car r))))
+      (let ((letter (fikra-diff-letter-for (car r))))
         (setq out (concat out "\e[35m"
                           (if (and letter (> (length letter) 0)) letter "±")
                           " " (car r)

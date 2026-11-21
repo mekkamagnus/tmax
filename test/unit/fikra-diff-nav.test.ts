@@ -277,3 +277,30 @@ describe("#8.4 summary block (r96 — status letters + tool tally)", () => {
     rmSync("/tmp/fikra-nav-r96-events.jsonl", { force: true });
   });
 });
+
+describe("#8.4 rename letter (r97 — codex r96 P2)", () => {
+  test("a RENAMED file renders R (numstat's 'old => new' resolves to the new path)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    // Baseline: app.txt + old-renamed.txt (write it BEFORE the ref so the
+    // baseline TREE carries it — a rename needs its source in the base).
+    writeFileSync(join(repoDir, "old-renamed.txt"), "renamed content\n");
+    ref("nav", 1, "baseline", "line1\n");
+    // Completion: the source GONE, the target added (git reads R).
+    rmSync(join(repoDir, "old-renamed.txt"));
+    writeFileSync(join(repoDir, "renamed.txt"), "renamed content\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    const tree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "ren"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1", commit], { cwd: repoDir });
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-turn-diff-for 1)");
+    const text = String(e(ed, "(buffer-text)").value);
+    // The rename row carries R (not ±).
+    expect(text).toMatch(/R (old-renamed\.txt => renamed\.txt|.*=> renamed\.txt)/);
+  });
+});
