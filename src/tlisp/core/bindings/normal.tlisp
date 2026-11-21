@@ -109,6 +109,9 @@
   (require-module fikra/mode)
   ;; #286: Stagehand git status buffer (SPC g dispatch).
   (require-module stagehand/status)
+  ;; #288: Stagehand commit (loads AFTER status — it consumes status's
+  ;; helpers; status's keymap binds c/C/R into it lazily).
+  (require-module stagehand/commit)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.

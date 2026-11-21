@@ -6,7 +6,9 @@
           stagehand-status-open-file stagehand-status-quit
           stagehand-status-folded-p stagehand-status-root
           stagehand-status-rows-of stagehand-visible-rows
-          stagehand-render-row stagehand-status-diff)
+          stagehand-render-row stagehand-status-diff
+          stagehand-git stagehand-shq stagehand-has-commits-p
+          stagehand-current-sections stagehand-git-line)
 
   (require-module stagehand/diff)
 
@@ -506,6 +508,7 @@ repository (fresh root detection every invocation)."
 
 (defun stagehand-current-sections ()
   ;; stagehand-last-parse is a DEFVAR (a list value), not a function.
+  ;; Exported for the cluster's consumers (commit reads the Staged set).
   (stagehand-status-sections stagehand-last-parse))
 
 (defvar stagehand-last-parse (list)
@@ -672,6 +675,9 @@ arg; the quoting is the apostrophe-escape pattern)."
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/status/stagehand-status-quit)")
         (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/status/stagehand-status-open-file)")
         (editor/keymaps/keymap-set-key kmap "d" "(stagehand/status/stagehand-status-diff)")
+        (editor/keymaps/keymap-set-key kmap "c" "(stagehand/commit/stagehand-commit-new)")
+        (editor/keymaps/keymap-set-key kmap "C" "(stagehand/commit/stagehand-commit-amend)")
+        (editor/keymaps/keymap-set-key kmap "R" "(stagehand/commit/stagehand-commit-reword)")
         (editor/keymaps/buffer-set-keymap (stagehand-status-buffer-name) kmap))))
   t)
 

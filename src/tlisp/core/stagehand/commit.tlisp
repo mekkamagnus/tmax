@@ -1,0 +1,187 @@
+(defmodule stagehand/commit
+  (export stagehand-commit-new stagehand-commit-amend
+          stagehand-commit-reword stagehand-commit-fixup
+          stagehand-commit-dispatch stagehand-commit-abort
+          stagehand-commit-buffer-name stagehand-commit-last-tmp
+          stagehand-commit-clear)
+
+  (require-module stagehand/status)
+
+;; #288 — Stagehand T0: COMMIT. The *Commit-Message* compose buffer
+;; (insert mode, C-c C-c commits / C-c C-k + C-g abort — the capture
+;; chord pattern) with `git commit -F <tmpfile>` delivery. Variants:
+;; c (new; requires a staged file), C (amend; seeded with the last
+;; message; the index rides as it stands), R (reword at HEAD; non-HEAD
+;; is #295's machinery). F (fixup) SKIPS the compose entirely —
+;; `git commit --fixup=<sha>` directly (git writes the fixup! message
+;; itself; -F and --fixup message semantics never combine).
+;;
+;; The temp file is ALWAYS removed at the sentinel — success, git
+;; failure, or abort. On failure the compose RETAINS the typed message
+;; (edit + C-c C-c retries); on success/abort it closes and the prior
+;; buffer is restored (buffer-kill's recency survivor). The status
+;; buffer is never torn down by this flow.
+
+(defvar stagehand-commit-variant "new"
+  "The active compose's variant: new | amend | reword.")
+(defvar stagehand-commit-tmp-path nil
+  "The last temp message file (the getter surfaces it; tests assert it
+is GONE after every sentinel — the orphan-file contract).")
+
+(defun stagehand-commit-last-tmp ()
+  "The last temp message path, or nil (module defvars are VALUES —
+this getter is how other modules/tests read one)."
+  stagehand-commit-tmp-path)
+
+(major-mode-register "stagehand-commit" '() nil)
+(major-mode-doc "stagehand-commit" "Stagehand commit compose — C-c C-c commits, C-c C-k / C-g aborts")
+
+(defun stagehand-commit-buffer-name () "*Commit-Message*")
+
+;; ── entry points (bound in the status buffer's keymap) ─────────────
+(defun stagehand-commit-new ()
+  "c — compose a NEW commit message. Requires ≥1 staged file (else
+status 'nothing staged'). Works on an UNBORN repo (the first
+commit)."
+  (if (< (stagehand-staged-count) 1)
+    (editor-set-status "nothing staged")
+    (stagehand-commit-compose "new" "")))
+
+(defun stagehand-commit-amend ()
+  "C — compose an AMEND: seeded with the last commit's message; the
+index rides AS IT STANDS (nothing-staged amend edits the message).
+Refuses on an unborn repo."
+  (if (= (stagehand-has-head) 0)
+    (editor-set-status "no commits to amend")
+    (stagehand-commit-compose "amend" (stagehand-last-message))))
+
+(defun stagehand-commit-reword ()
+  "R — reword at HEAD (the status-buffer fallback; #290's log rows
+own the general case, non-HEAD is #295's). Same delivery as amend."
+  (if (= (stagehand-has-head) 0)
+    (editor-set-status "no commits to amend")
+    (stagehand-commit-compose "reword" (stagehand-last-message))))
+
+(defun stagehand-commit-fixup (sha)
+  "F — a DIRECT fixup invocation: no compose, no temp file, no -F
+(git constructs the 'fixup! <subject>' message itself). SHA comes
+from #290's log rows; nil → 'no target'. The status names the
+created fixup sha."
+  (let ((root (stagehand/status/stagehand-status-root)))
+    (cond
+      ((or (null sha) (string= sha ""))
+        (editor-set-status "no target"))
+      ((null root)
+        (editor-set-status "Stagehand: no repository"))
+      (t
+        (let ((res (stagehand/status/stagehand-git
+                     (concat "commit --fixup=" (stagehand/status/stagehand-shq sha))
+                     root)))
+          (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+            (editor-set-status
+              (concat "fixup created: "
+                (stagehand/status/stagehand-git-line "log -1 --format=%h" root)))
+            (editor-set-status
+              (concat "fixup failed (" (number-to-string (nth 2 res)) ") "
+                (stagehand-first-line (nth 1 res))))))))))
+
+;; ── the compose ─────────────────────────────────────────────────────
+(defun stagehand-commit-compose (variant seed)
+  ;; Open (or reset) *Commit-Message*, seed it, and hand the user an
+  ;; insert-mode buffer with the commit chords.
+  (setq stagehand-commit-variant variant)
+  (if (not (member (stagehand-commit-buffer-name) (buffer-list)))
+    (buffer-create (stagehand-commit-buffer-name)))
+  (buffer-switch (stagehand-commit-buffer-name))
+  (major-mode-set "stagehand-commit")
+  (buffer-set-read-only nil)
+  (stagehand-commit-clear)
+  (if (and seed (not (string= seed "")))
+    (buffer-insert seed))
+  (stagehand-commit-ensure-keymap)
+  (editor-set-mode "insert")
+  (editor-set-status
+    (concat "commit (" variant "): C-c C-c commits, C-c C-k aborts")))
+
+(defun stagehand-commit-dispatch ()
+  "C-c C-c — deliver the message. Empty → status, buffer RETAINED.
+Failure → status names exit + stderr, buffer + message RETAINED
+(C-c C-c retries). Success → close + restore. The temp file is
+removed on EVERY exit."
+  (let ((text (buffer-text)))
+    (if (string= (string-trim text) "")
+      (editor-set-status "empty message")
+      (let* ((tmp (stagehand-mktemp))
+             (res (progn
+                    (append-file tmp text)
+                    (stagehand-commit-run tmp))))
+        ;; THE SENTINEL: the temp file never outlives the attempt.
+        (setq stagehand-commit-tmp-path tmp)
+        (shell-exec (concat "rm -f " (stagehand/status/stagehand-shq tmp)))
+        (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+          (stagehand-commit-close)
+          (editor-set-status
+            (concat "commit failed (" (number-to-string (nth 2 res)) ") "
+              (stagehand-first-line (nth 1 res)))))))))
+
+(defun stagehand-commit-abort ()
+  "C-c C-k / C-g — abandon: no commit, close + restore."
+  (stagehand-commit-close))
+
+(defun stagehand-commit-close ()
+  ;; Kill the compose; buffer-kill's Editor path restores the recency
+  ;; survivor (the status buffer). The editor returns to normal mode.
+  (editor-set-mode "normal")
+  (buffer-kill (stagehand-commit-buffer-name)))
+
+(defun stagehand-commit-run (tmp)
+  (let ((amend (if (or (string= stagehand-commit-variant "amend")
+                       (string= stagehand-commit-variant "reword"))
+                 " --amend"
+                 "")))
+    (stagehand/status/stagehand-git
+      (concat "commit -F " (stagehand/status/stagehand-shq tmp) amend)
+      (stagehand/status/stagehand-status-root))))
+
+;; ── helpers ─────────────────────────────────────────────────────────
+(defun stagehand-mktemp ()
+  (string-trim
+    (car (shell-exec "mktemp -t tmaxcommit"))))
+
+(defun stagehand-first-line (s)
+  (let ((l (car (string-split (concat (or s "") "\n") "\n"))))
+    (if (and l (> (length l) 0)) l "")))
+
+(defun stagehand-staged-count ()
+  ;; The Staged section's entry count from the live parse.
+  (length (car (cdr (nth 2 (stagehand/status/stagehand-current-sections))))))
+
+(defun stagehand-has-head ()
+  (stagehand/status/stagehand-has-commits-p
+    (stagehand/status/stagehand-status-root)))
+
+(defun stagehand-last-message ()
+  (string-trim
+    (car (stagehand/status/stagehand-git "log -1 --format=%B"
+           (stagehand/status/stagehand-status-root)))))
+
+(defun stagehand-commit-clear ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+(defun stagehand-commit-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-commit-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-commit"))
+        (editor/keymaps/keymap-set-key kmap "C-c C-c" "(stagehand/commit/stagehand-commit-dispatch)")
+        (editor/keymaps/keymap-set-key kmap "C-c C-k" "(stagehand/commit/stagehand-commit-abort)")
+        (editor/keymaps/keymap-set-key kmap "C-g" "(stagehand/commit/stagehand-commit-abort)")
+        (editor/keymaps/buffer-set-keymap (stagehand-commit-buffer-name) kmap))))
+  t)
+
+(provide "stagehand-commit"))
