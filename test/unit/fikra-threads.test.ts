@@ -278,3 +278,37 @@ describe("#8.5 threads — backend isolation + crash display (r45)", () => {
     expect(String(diskRow.value)).not.toBe("running");
   });
 });
+
+describe("8.5 merged + fixture markers (r102)", () => {
+  test("a thread whose review patch APPLIED shows done · merged via patch ✓", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/adapter)");
+    e(ed, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(ed, "(require-module fikra/worktree)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "mg")');
+    e(ed, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = String(e(ed, '(fikra/thread/fikra-thread-field "worktree")').value);
+    writeFileSync(join(wt, "merged.txt"), "merged content\n");
+    e(ed, "(fikra/worktree/fikra-worktree-review)");
+    e(ed, "(fikra/worktree/fikra-worktree-review-apply)");
+    // The list row carries the mockup's done + merged markers.
+    e(ed, "(require-module fikra/threads)");
+    e(ed, "(fikra/threads/fikra-threads-list-open)");
+    const text = String(bufferText(ed));
+    expect(text).toMatch(/done\s+merged via patch ✓/);
+    expect(text).not.toMatch(/L2\s+merged/);
+  });
+
+  test("a REPLAY backend row shows — · fixture · (deterministic test thread)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/adapter)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "fx")');
+    e(ed, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(ed, "(require-module fikra/threads)");
+    e(ed, "(fikra/threads/fikra-threads-list-open)");
+    const text = String(bufferText(ed));
+    expect(text).toMatch(/fixture\s+\(deterministic test thread\)/);
+  });
+});

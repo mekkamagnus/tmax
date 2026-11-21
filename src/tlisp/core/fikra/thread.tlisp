@@ -528,7 +528,8 @@ current project's NON-archived threads."
 (defun fikra-thread-row-normalize (alist)
   (let ((row (hashmap)))
     (dolist (key (list "backend" "runtime-mode" "worktree" "status"
-                       "turn-count" "context-dir" "last-at" "status"))
+                       "turn-count" "context-dir" "last-at" "status"
+                       "merged-via-patch"))
       (let ((v (fikra-alist-get key alist)))
         (if (not (null v))
           (editor/keymaps/keymap-mutable-set! row key v))))
@@ -565,7 +566,8 @@ current project's NON-archived threads."
                  "idle"
                  (funcall get "status"))
       "turns" (funcall get "turn-count")
-      "last-at" (funcall get "last-at"))))
+      "last-at" (funcall get "last-at")
+      "merged" (if (funcall get "merged-via-patch") t nil))))
 
 (defun fikra-thread-load-row (id)
   ;; Parse another thread's state.json (registry holds only loaded threads).

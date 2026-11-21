@@ -55,14 +55,26 @@ L<level>, worktree/main-tree, last activity), and the key-hint row."
                   (fikra-threads-pad (hashmap-get row "id") 16)
                   (fikra-threads-pad (if (hashmap-get row "backend") (hashmap-get row "backend") "-") 8)
                   "T" (fikra-threads-pad (if (hashmap-get row "turns") (hashmap-get row "turns") 0) 3)
-                  (fikra-threads-pad (fikra-threads-level-of (hashmap-get row "mode")) 4)
+                  ;; r102 (mockup rows 4-5): a MERGED thread shows done
+                  ;; in the level column; a FIXTURE backend (replay/
+                  ;; pausing — deterministic test threads) shows —.
+                  (fikra-threads-pad
+                    (if (hashmap-get row "merged")
+                      "done"
+                      (if (fikra-threads-fixture-p row)
+                        "—"
+                        (fikra-threads-level-of (hashmap-get row "mode")))) 5)
                   ;; #298: the legacy label must stay visible in the 8.5
                   ;; list (the rewrite regressed it — main went red).
                   (cond
+                    ((hashmap-get row "merged") "merged via patch ✓")
+                    ((fikra-threads-fixture-p row) "fixture     ")
                     ((string= (if (hashmap-get row "location") (hashmap-get row "location") "") "worktree") "worktree ✓")
                     ((if (hashmap-get row "legacy") t nil) "legacy      ")
                     (t "main-tree   "))
-                  "  last: " (fikra-threads-last-ago (hashmap-get row "last-at"))
+                  (if (fikra-threads-fixture-p row)
+                    "  (deterministic test thread)"
+                    (concat "  last: " (fikra-threads-last-ago (hashmap-get row "last-at"))))
                   "\n"))
         (setq i (+ i 1))))
     (buffer-insert "\n")
@@ -70,6 +82,11 @@ L<level>, worktree/main-tree, last activity), and the key-hint row."
     (buffer-set-read-only was-ro)
     (cursor-move 0 0)
     (cursor-move (+ 2 fikra-threads-selected) 0)))
+
+;; A deterministic TEST backend thread (mockup row 5: replay → fixture).
+(defun fikra-threads-fixture-p (row)
+  (let ((b (if (hashmap-get row "backend") (hashmap-get row "backend") "")))
+    (or (string= b "replay") (string= b "pausing"))))
 
 ;; The security-model level (modes.tlisp orders strictness; the L-level is
 ;; the mediation tier: L2 approvals, L1 auto, L0 full).

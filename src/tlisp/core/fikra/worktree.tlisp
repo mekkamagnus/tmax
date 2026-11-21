@@ -459,6 +459,10 @@ unchecked apply could report success over a failure)."
               (if (not (string-match "APPLIED-OK" applied))
                 (editor-set-status (concat "Fikra: apply FAILED — " applied))
                 (progn
+                  ;; r102 (mockup 8.5 row 4): the successful apply MERGES
+                  ;; the thread — the list shows done / merged via patch ✓.
+                  (fikra/thread/fikra-thread-set-field "merged-via-patch" t)
+                  (fikra/thread/fikra-thread-save)
                   (buffer-switch "*scratch*")
                   (editor-set-status
                     (concat "Fikra: applied " (fikra/thread/fikra-thread-current)
