@@ -34,6 +34,11 @@ beforeEach(() => {
   dirs.push(dir);
   execFileSync("git", ["init", "-q"], { cwd: dir });
   writeFileSync(join(dir, ".gitignore"), ".tmax/\n");
+  // A committed base (the per-action checkpoint captures refs — they
+  // need a real tree; unborn repos have none).
+  writeFileSync(join(dir, "base.txt"), "base\n");
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
   process.chdir(dir);
 });
 afterAll(() => {
@@ -316,5 +321,75 @@ describe("ollama object-shaped arguments (r114 — codex r113 P1)", () => {
     const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
     expect(acc).toContain("exit code: 7");
     expect(acc).toContain("NOPE");
+  });
+});
+
+describe("ollama L2 gate + per-action checkpoints (r116 — the 8.1 named follow-ups)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireTool = (ed: Editor, seed: number, command: string, name = "bash") => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name, arguments: name === "bash" ? { command } : { path: "r116.txt", content: "checkpointed" } } },
+    ] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  test("a DESTRUCTIVE bash parks at the gate: the panel renders, the command does NOT run", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "clean it up")');
+    fireTool(ed, 101, "rm -rf build/");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    expect(String(e(ed, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    const panel = String(e(ed, "(buffer-text)").value);
+    expect(panel).toContain("APPROVE ACTION");
+    expect(panel).toContain("rm -rf build/");
+    expect(panel).not.toMatch(/→ (ok|FAIL)/);
+  });
+
+  test("ALLOW resumes: the command executes and the loop continues", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "clean it up")');
+    fireTool(ed, 102, "rm -rf build/");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toContain("rm -rf build/");
+    expect(text).toMatch(/→ (ok|FAIL)/);
+    // Settle with a plain reply (a fresh seeded completion).
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 103 "live")');
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "cleaned" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 103 "${reply}")`);
+    e(ed, `(fikra-http-complete 103 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+
+  test("REJECT: the model LEARNS (the denial rides the next request)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "clean it up")');
+    fireTool(ed, 104, "rm -rf build/");
+    e(ed, "(fikra/approvals/fikra-approval-answer-reject)");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("user rejected this command");
+    expect(String(e(ed, "(buffer-text)").value)).toContain("= denied");
+  });
+
+  test("a model EDIT lands a checkpoint (the marker rides INLINE via the merge)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "make the file")');
+    fireTool(ed, 105, "", "buffer_edit");
+    expect(String(e(ed, '(shell-command "cat r116.txt")').value)).toContain("checkpointed");
+    // The capture is async; poll the EVENT MEMORY for checkpoint-ready
+    // (diagnostics first — then the inline marker after a rebuild).
+    let marked = false;
+    for (let i = 0; i < 15 && !marked; i++) {
+      e(ed, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+      const t = String(e(ed, "(buffer-text)").value);
+      if (/r116\.txt.*ckpt|ckpt.*r116\.txt/.test(t)) marked = true;
+      else await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(marked).toBe(true);
   });
 });

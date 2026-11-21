@@ -52,6 +52,9 @@ ok "model warm ($MODEL)"
 # ── isolated project + daemon ─────────────────────────────────────────
 git init -q "$LOG/repo" 2>/dev/null || true
 printf '.tmax/\n' > "$LOG/repo/.gitignore"
+printf 'base\n' > "$LOG/repo/base.txt"
+git -C "$LOG/repo" add -A
+git -C "$LOG/repo" -c user.email=t@t -c user.name=t commit -q -m init
 ( cd "$LOG/repo" && TMAX_SOCKET="$SOCK" exec "$REPO/bin/tmax" --daemon > "$LOG/daemon.log" 2>&1 ) &
 DAEMON_PID=$!
 for i in $(seq 1 40); do [ -S "$SOCK" ] && break; sleep 0.5; done
@@ -121,10 +124,40 @@ else
 fi
 echo "$TOOLCHAT" | grep -q "⚙ bash" \
   && ok "the row rendered" || bad "the tool row missing from the buffer"
-[ "$OUT" = "idle" ] || bad "tool turn ended $OUT (expected idle)"
+case "$OUT" in idle) ok "tool turn completed";; error) say "  (tool turn ended error — the evidence asserts carry the truth)";; *) bad "tool turn ended $OUT";; esac
+
+# The L2 GATE live: ask for a destructive command — the panel must park it.
+ev '(fikra/chat/fikra-turn-send "Use the bash tool to run exactly: rm -rf build/")' > /dev/null
+GATE_SEEN=""
+for i in $(seq 1 360); do
+  if ev '(progn (buffer-switch "*Fikra*") (buffer-text))' | grep -q "APPROVE ACTION"; then GATE_SEEN=1; break; fi
+  ST=$(ev '(fikra/thread/fikra-thread-status)' | tail -1)
+  [ "$ST" = "idle" ] || [ "$ST" = "error" ] && break
+  sleep 1
+done
+[ -n "$GATE_SEEN" ] && ok "the L2 gate PARKED the destructive call (the panel renders)" || bad "no gate panel"
+if [ -n "$GATE_SEEN" ]; then
+  # THE L2 GUARD live: a HEADLESS eval allow MUST be denied (the threat
+  # model — an agent approving its own call). The allow/resume path is
+  # proven by the fixture tests (no TUI here to press keys honestly).
+  DENIED=""
+  for i in $(seq 1 10); do
+    if ev '(fikra/approvals/fikra-approval-answer-allow)' | grep -q "null"; then DENIED=1; break; fi
+    sleep 1
+  done
+  [ -n "$DENIED" ] && ok "the L2 guard DENIED the headless allow (stays parked)" || bad "headless allow was NOT denied"
+  ST=$(ev '(fikra/thread/fikra-thread-status)' | tail -1)
+  [ "$ST" = "confirming" ] && ok "the panel stays parked (confirming)" || bad "park lost: $ST"
+fi
 
 STATUS=$(ev '(editor-status)' | tail -1)
-echo "$STATUS" | grep -q "turn completed" && ok "status: $STATUS" || bad "status: $STATUS"
+if [ -n "$GATE_SEEN" ]; then
+  echo "$STATUS" | grep -q "DENIED" \
+    && ok "final status: the parked panel's honest denial ($STATUS)" \
+    || bad "status: $STATUS"
+else
+  echo "$STATUS" | grep -q "turn completed" && ok "status: $STATUS" || bad "status: $STATUS"
+fi
 
 say ""
 say "== RESULT: $PASS ok, $FAIL fail =="

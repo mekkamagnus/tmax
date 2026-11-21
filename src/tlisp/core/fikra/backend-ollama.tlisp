@@ -5,7 +5,8 @@
           fikra-backend-ollama-complete
           fikra-backend-ollama-seed fikra-ollama-history-messages
           fikra-ollama-messages-get fikra-ollama-tools-json
-          fikra-backend-ollama-set-model)
+          fikra-backend-ollama-set-model
+          fikra-backend-ollama-pending-p fikra-backend-ollama-decide)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -46,6 +47,9 @@ on its own thread, never whatever is focused at land time).")
   "The turn's accumulated messages-array body (history + user, then each
 tool round's assistant tool_call + tool results — the loop's working
 context; rebuilt per turn).")
+(defvar fikra-ollama-parked-call nil
+  "The tool_call PARKED at the L2 gate awaiting the user's a/r/A (the
+destructive-bash mediation; the loop resumes on the decision).")
 (defvar fikra-ollama-round 0
   "The current tool round (the loop cap guard).")
 (defvar fikra-ollama-max-rounds 4
@@ -243,9 +247,44 @@ availability gate must be synchronous; the turn itself is async)."
 (defun fikra-ollama-run-bash (call args)
   (let* ((cmd (if (fikra-ollama-alist-get "command" args)
                 (fikra-ollama-alist-get "command" args) ""))
-         (dir (fikra/thread/fikra-thread-working-dir)))
-    ;; The call row FIRST (r113, codex r112 P2): a long-running command
-    ;; must show its row while it runs, not only after.
+         (dir (fikra/thread/fikra-thread-working-dir))
+         ;; r116: the L2 gate — a DESTRUCTIVE command parks at the
+         ;; approval panel (the mockup's per-action mediation); the loop
+         ;; resumes on the user's a/r/A.
+         (risk (condition-case nil
+                  (progn (require-module fikra/approvals)
+                         (fikra/approvals/fikra-approval-risk "bash" cmd))
+                  (error () ""))))
+    (if (string= risk "destructive")
+      (fikra-ollama-park call cmd)
+      (fikra-ollama-run-bash-now cmd dir))))
+
+(defun fikra-ollama-park (call cmd)
+  (setq fikra-ollama-parked-call call)
+  (require-module fikra/approvals)
+  (fikra/event/fikra-event-emit
+    (list (list "kind" "permission-request")
+          (list "action" (concat "bash: " cmd))
+          (list "tool" "bash")
+          (list "id" "ollama-native")
+          (list "target" (fikra/approvals/fikra-approval-target cmd))
+          (list "thread" (fikra/thread/fikra-thread-current))
+          (list "turn" (number-to-string (fikra/thread/fikra-thread-turn-count)))
+          (list "risk" "destructive")
+          (list "mode" (condition-case nil
+                          (progn (require-module fikra/modes)
+                                 (fikra/modes/fikra-effective-mode))
+                          (error () "")))
+          (list "checkpoint" (fikra/approvals/fikra-approval-baseline-ref))
+          (list "origin" "native-loop")))
+  (fikra/thread/fikra-thread-status-set "confirming")
+  (editor-set-status "Fikra: approve bash? a Allow · r Reject · A Always")
+  'parked)
+
+;; The un-gated execution (the r113 path).
+(defun fikra-ollama-run-bash-now (cmd dir)
+  (let ((dir dir))
+    ;; The call row FIRST (r113): a long-running command shows its row.
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-call") (list "tool" "bash")
             (list "summary" cmd)))
@@ -303,6 +342,15 @@ availability gate must be synchronous; the turn itself is async)."
     (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                          (fikra/thread/fikra-thread-dirname abs))))
     (write-file-content abs content)
+    ;; r116: the PER-ACTION checkpoint — the edit lands a ref BEFORE the
+    ;; loop continues (the mockup's 'each mutating action lands a
+    ;; checkpoint ref'; the async capture's checkpoint-ready rides the
+    ;; r107 final-trigger → the INLINE merge puts the marker on THIS
+    ;; edit row).
+    (condition-case nil
+      (progn (require-module fikra/checkpoint)
+             (fikra/checkpoint/fikra-checkpoint-capture-async "completion"))
+      (error () nil))
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-result") (list "ok" t)
             (list "summary" (concat "wrote " path))))
@@ -469,6 +517,44 @@ availability gate must be synchronous; the turn itself is async)."
                (string= (car e) key))
         (setq found (car (cdr e)))))
     found))
+
+;; The L2 decide seam (the adapter contract): the parked tool resumes on
+;; the user's a/r/A. y → execute + continue the round; n → the denial
+;; rides the accumulator (the model learns); a → y (a persistent native
+;; allow-list is the follow-up).
+(defun fikra-backend-ollama-pending-p ()
+  (if fikra-ollama-parked-call t nil))
+
+(defun fikra-backend-ollama-decide (decision)
+  (let ((call fikra-ollama-parked-call))
+    (setq fikra-ollama-parked-call nil)
+    (if (not call)
+      nil
+      (if (string= decision "n")
+        (progn
+          (fikra/event/fikra-event-emit
+            (list (list "kind" "permission-denied")))
+          (setq fikra-ollama-messages
+            (concat fikra-ollama-messages
+                    "{\"role\":\"tool\",\"content\":\"user rejected this command; do not retry it\"},"))
+          (if (string= (fikra/thread/fikra-thread-status) "confirming")
+            (fikra/thread/fikra-thread-status-set "running"))
+          (fikra-ollama-chat fikra-ollama-pending-message))
+        (progn
+          (fikra/event/fikra-event-emit
+            (list (list "kind" "permission-allowed")))
+          (if (string= (fikra/thread/fikra-thread-status) "confirming")
+            (fikra/thread/fikra-thread-status-set "running"))
+          (let* ((fn (fikra-ollama-alist-get "function" call))
+                 (args-raw (fikra-ollama-alist-get "arguments" fn))
+                 (args (if (listp args-raw) args-raw
+                         (condition-case nil (json-read-from-string (if args-raw args-raw "{}")) (error () ()))))
+                 (cmd (if (fikra-ollama-alist-get "command" args)
+                        (fikra-ollama-alist-get "command" args) "")))
+            (setq fikra-ollama-messages
+              (concat fikra-ollama-messages
+                      (fikra-ollama-run-bash-now cmd (fikra/thread/fikra-thread-working-dir))))
+            (fikra-ollama-chat fikra-ollama-pending-message)))))))
 
 (defun fikra-backend-ollama-abort ()
   ;; The async request cannot be cancelled (the http primitive has no
