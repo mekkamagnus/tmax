@@ -119,6 +119,7 @@ export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
   //    NOTE the matrix's ONE exception: an INFORMATIONAL stdout line with
   //    exit 1 (--stop did not do what was asked).
   if (identity.mode === "embedded") {
+    deps.close(); // the one row bypassing out() — release here too (codex r6)
     return { rows: [{ stream: "stdout", line: STOP_LINES.embedded }], exitCode: 1 };
   }
 

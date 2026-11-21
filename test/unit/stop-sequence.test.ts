@@ -78,12 +78,15 @@ describe("#276 — the 8-row output matrix", () => {
     expect(unlinked).toBe(false); // the socket is left in place
   });
 
-  test("3) EMBEDDED → stdout embedded row, exit 1, NEVER signaled (the original repro)", async () => {
+  test("3) EMBEDDED → stdout embedded row, exit 1, NEVER signaled; the connection closed (the original repro)", async () => {
     let signaled = false;
+    let closed = false;
     const o = await run({
       identity: async () => ({ mode: "embedded", pid: 42 }),
       signal: () => { signaled = true; },
+      close: () => { closed = true; },
     });
+    expect(closed).toBe(true); // codex r6: every terminal row releases
     expect(row(o)).toEqual({ stream: "stdout", line: STOP_LINES.embedded });
     expect(o.exitCode).toBe(1);
     expect(signaled).toBe(false);
