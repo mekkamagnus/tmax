@@ -972,3 +972,9 @@ The standing 6 predated the screen's r24-r37 evolution (verified patch generatio
 - **r123 (`2195def`, PASS 7/10)**: the resumed remainder runs home-bound (resume-rest-for) — every resumed bash/read/edit resolves the originating dir; focus restored.
 
 **Named**: next-round ownership (the continuation's chat re-fire must stay home-bound), regression strength (a distinct away-dir), per-action ref independence, async exec, streaming. Board stays **70/80** pending the re-grade.
+
+## Round 124 — the continuation runs home-bound (the ownership closure)
+
+**`b9e9bc1` (PASS 7/10)**: fikra-ollama-continue-home wraps the whole continuation — the resumption AND the next chat re-fire — in the home focus: the re-fired request stamps the originating thread, its reply routes home, the continuing calls run home. Codex's independent probe verified the stamp and the settled home thread with focus preserved. The first attempt's lesson applied: an exact expression swap at the call sites, never a structural rewrite of decide-inner.
+
+**The mediation arc (r116-r124) is complete**: parks halt rounds, results keep call order, execution and continuation are home-bound, decisions settle their thread, refusals reach the model, edits are contained, the classifier catches the deletion family, and the executor cannot be bypassed. Named: per-action ref independence, async exec, the stronger ownership regression, streaming. Board **70/80** pending the re-grade.
