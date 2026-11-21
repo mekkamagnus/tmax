@@ -345,13 +345,25 @@ its summary are missing')."
                 (if clean
                   "\e[32m✓ patch applies cleanly against main\e[0m\n"
                   (concat "\e[1;31m✗ patch does NOT apply cleanly\e[0m\n"
-                          "conflicts: " conflicts "\n")))
+                          ;; r94: the DETAIL rides unlabeled here (the
+                          ;; "conflicts:" label belongs to the merged
+                          ;; context row alone — two labeled rows broke
+                          ;; the mockup's single-context shape).
+                          "  " conflicts "\n")))
               ;; Mockup line 4 — the single merged context row. The
               ;; "(auto-merged)" annotation is EARNED: it appears only
               ;; when overlap paths exist AND the apply --check verdict is
               ;; clean (those paths verifiably merge); a conflict case
               ;; never claims it.
-              "conflicts: " (if (or empty clean) "none" (if (string= conflicts "") "?" conflicts))
+              ;; r94 (codex r93 P2): the CONTEXT row stays ONE line — the
+              ;; conflict case summarizes the COUNT (the multi-line git
+              ;; error already rides under the verdict; re-embedding it
+              ;; here duplicated it and broke the merged row).
+              "conflicts: " (if (or empty clean)
+                              "none"
+                              (concat (number-to-string
+                                        (length (string-split conflicts "\n")))
+                                      " line(s) — full output above"))
               " · files touched by others since fork: " (number-to-string overlap)
               (if (and clean (> overlap 0)) " (auto-merged)" "") "\n\n"
               "\e[1m a\e[0m apply patch  \e[1m d\e[0m review diff first  \e[1m r\e[0m refuse + keep worktree\n"))

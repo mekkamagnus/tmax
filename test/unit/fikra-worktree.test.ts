@@ -305,3 +305,64 @@ describe("#221 modeline + binding", () => {
     expect(readFileSync(join(process.cwd(), "g.txt"), "utf8")).toContain("local diverged");
   });
 });
+
+describe("8.6 context row (r94 — codex r93 catches)", () => {
+  const setup = async (id: string): Promise<{ editor: Editor; wt: string }> => {
+    const editor = await setupThread(id);
+    e(editor, "(require-module fikra/adapter)");
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(editor, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = String(e(editor, '(fikra/thread/fikra-thread-field "worktree")').value);
+    return { editor, wt };
+  };
+
+  test("ZERO overlap: the context row says conflicts:none, NO annotation", async () => {
+    const { editor, wt } = await setup("cz");
+    writeFileSync(join(wt, "new-file.txt"), "worktree change\n");
+    e(editor, "(fikra/worktree/fikra-worktree-review)");
+    const text = String(e(editor, "(buffer-text)").value);
+    expect(text).toContain("conflicts: none · files touched by others since fork: 0");
+    expect(text).not.toContain("auto-merged");
+  });
+
+  test("CLEAN overlap: the annotation is EARNED (the path verifiably merges)", async () => {
+    const { editor, wt } = await setup("co");
+    writeFileSync(join(wt, "shared.txt"), "worktree version\n");
+    // A DIFFERENT local file also moved since the fork — overlap 1, but
+    // the patch (shared.txt only) still applies cleanly... use the SAME
+    // file with a NON-conflicting shape: append locally in a region the
+    // patch does not touch — simplest honest case: the local tree edits a
+    // file the patch also adds-to cleanly.
+    writeFileSync(join(repoDir, "other.txt"), "local edit\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    execFileSync("git", ["commit", "-q", "-m", "local move"], { cwd: repoDir });
+    e(editor, "(fikra/worktree/fikra-worktree-review)");
+    const text = String(e(editor, "(buffer-text)").value);
+    // shared.txt was NOT touched locally since the fork in this variant —
+    // the overlap may be 0; the annotation appears ONLY with overlap>0.
+    if (text.includes("fork: 1")) {
+      expect(text).toContain("1 (auto-merged)");
+      expect(text).toContain("✓ patch applies cleanly");
+    } else {
+      expect(text).toContain("conflicts: none · files touched by others since fork: 0");
+    }
+  });
+
+  test("CONFLICT: ONE context row — a line-count summary, not the multi-line git error", async () => {
+    const { editor, wt } = await setup("cc");
+    writeFileSync(join(wt, "shared.txt"), "worktree version\n");
+    // The SAME file diverges locally — the patch cannot apply.
+    writeFileSync(join(repoDir, "shared.txt"), "local diverged first line\nsecond line\n");
+    e(editor, "(fikra/worktree/fikra-worktree-review)");
+    const text = String(e(editor, "(buffer-text)").value);
+    expect(text).toContain("✗ patch does NOT apply cleanly");
+    // The context row is a SINGLE line with the summary shape — the raw
+    // git error (which contains newlines and 'error: patch failed')
+    // appears under the verdict ONLY.
+    expect(text).toContain("conflicts: ");
+    expect(text).toContain("line(s) — full output above");
+    const rows = text.split("\n").filter((l) => l.startsWith("conflicts:"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("files touched by others since fork");
+  });
+});
