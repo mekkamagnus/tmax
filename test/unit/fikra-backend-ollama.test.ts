@@ -969,4 +969,25 @@ describe("ollama async ownership + interruption (r131 — codex r130 P1#1/P1#3)"
     // And the stale sentinel never re-fired a request of its own.
     expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value)).toBe("174");
   });
+
+  // r131c (codex r131b catch): an interrupted turn's pending park dies
+  // with it — a LATE approval must not execute the old call under the
+  // new turn's epoch/home.
+  tt("an interrupt clears the parked call: a late approval executes nothing", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "park then die")');
+    fireCalls(ed, 175, [{ name: "bash", args: { command: "rm -rf stale/" } }]);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    const accBefore = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    e(ed, "(fikra/backend-ollama/fikra-backend-ollama-abort)");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
+    // The LATE decision arrives (the panel outlived the turn).
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    // Nothing executed: no new tool message, no rejection message, the
+    // turn stays interrupted.
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).toBe(accBefore);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text).not.toMatch(/→ (ok|FAIL)\s*$/m);
+  });
 });

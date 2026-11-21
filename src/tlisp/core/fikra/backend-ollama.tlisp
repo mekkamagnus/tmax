@@ -153,6 +153,13 @@ availability gate must be synchronous; the turn itself is async)."
   (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
   ;; r131b: the turn's OWNING thread (the async spawn home truth).
   (setq fikra-ollama-turn-home (fikra/thread/fikra-thread-current))
+  ;; r131c (codex r131b catch): a NEW turn orphans any pending park —
+  ;; a later approval must not execute the OLD call under THIS turn's
+  ;; epoch/home.
+  (setq fikra-ollama-parked-call nil)
+  (setq fikra-ollama-parked-rest nil)
+  (setq fikra-ollama-parked-acc "")
+  (setq fikra-ollama-parked-thread nil)
   (fikra/thread/fikra-thread-turn-begin)
   ;; The model resolves SYNCHRONOUSLY (a light curl, like the probe) —
   ;; no tags round-trip through the async machinery.
@@ -482,45 +489,49 @@ availability gate must be synchronous; the turn itself is async)."
         ;; The HOME focus for everything this sentinel does.
         (if (and home (not (string= home prev)))
           (fikra/thread/fikra-thread-focus home))
-        ;; r131b (codex r131 P2): the body is condition-cased so the
-        ;; focus ALWAYS restores — a throw inside emit/resume used to
-        ;; leak the home focus.
-        (let* ((raw (if entry (hashmap-get entry "out") ""))
-               (raw-code (fikra-ollama-exit-code raw))
-               ;; r128 (codex r127 catch 3): a MISSING EXIT: marker
-               ;; defaulted to success — the child's own exit-code is
-               ;; the truth when the marker never printed (a kill, a
-               ;; crash).
-               (code (if (fikra-ollama-has-exit-p raw)
-                       raw-code
-                       (number-to-string exit-code)))
-               (ok (string= code "0"))
-               (out (string-trim (fikra-ollama-strip-exit raw)))
-               (msg (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
-                             (concat out (if ok "" (concat "\nexit code: " code)))) "},"))
-               (r (condition-case nil
+        ;; r131c (codex r131b catches): EVERYTHING after the focus
+        ;; switch lives inside the handler — a throw anywhere restores
+        ;; the focus — AND a thrown body SETTLES the turn honestly (the
+        ;; entry is already tombstoned; an unsurfaced error would leave
+        ;; the turn "running" with no continuation — the r125/r129
+        ;; stuck-turn class).
+        (let ((r (condition-case nil
+                  (let* ((raw (if entry (hashmap-get entry "out") ""))
+                         (raw-code (fikra-ollama-exit-code raw))
+                         ;; r128 (codex r127 catch 3): a MISSING EXIT:
+                         ;; marker defaulted to success — the child's own
+                         ;; exit-code is the truth when the marker never
+                         ;; printed (a kill, a crash).
+                         (code (if (fikra-ollama-has-exit-p raw)
+                                 raw-code
+                                 (number-to-string exit-code)))
+                         (ok (string= code "0"))
+                         (out (string-trim (fikra-ollama-strip-exit raw)))
+                         (msg (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
+                                       (concat out (if ok "" (concat "\nexit code: " code)))) "},")))
+                    (fikra/event/fikra-event-emit
+                      (list (list "kind" "tool-result") (list "ok" ok)
+                            (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
                     (if (not (fikra-ollama-turn-live-p))
                       ;; The turn ENDED while this child ran (e.g. the
                       ;; allow-path race): the evidence renders, nothing
                       ;; resumes — there is no turn to continue.
-                      (progn
-                        (fikra/event/fikra-event-emit
-                          (list (list "kind" "tool-result") (list "ok" ok)
-                                (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
-                        'turn-over)
-                      (progn
-                        (fikra/event/fikra-event-emit
-                          (list (list "kind" "tool-result") (list "ok" ok)
-                                (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
-                        (if (not cont)
-                          (progn
-                            (setq fikra-ollama-messages
-                              (concat fikra-ollama-messages msg))
-                            (fikra-ollama-chat fikra-ollama-pending-message))
-                          (fikra-ollama-resume-from cont msg))))
-                    (error () 'sentinel-error))))
-          (if (and home (not (string= home prev)))
-            (fikra/thread/fikra-thread-focus prev))
+                      'turn-over
+                      (if (not cont)
+                        (progn
+                          (setq fikra-ollama-messages
+                            (concat fikra-ollama-messages msg))
+                          (fikra-ollama-chat fikra-ollama-pending-message))
+                        (fikra-ollama-resume-from cont msg))))
+                  (error (m)
+                    (editor-set-status (concat "Fikra-ollama: async resume failed — " m))
+                    (if (fikra-ollama-turn-live-p)
+                      (fikra/thread/fikra-thread-turn-end "error"))
+                    'sentinel-error))))
+          (condition-case nil
+            (if (and home (not (string= home prev)))
+              (fikra/thread/fikra-thread-focus prev))
+            (error () nil))
           r)))))
 
 ;; Resume run-calls from the stash's index (the message already
@@ -934,6 +945,11 @@ availability gate must be synchronous; the turn itself is async)."
   ;; async children — the epoch bump makes their sentinels drop, and
   ;; the children are KILLED (the model's command stops running).
   (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
+  ;; r131c: the interrupted turn's pending park dies with it.
+  (setq fikra-ollama-parked-call nil)
+  (setq fikra-ollama-parked-rest nil)
+  (setq fikra-ollama-parked-acc "")
+  (setq fikra-ollama-parked-thread nil)
   (dolist (k (hashmap-keys fikra-ollama-async-procs))
     (if (hashmap-get fikra-ollama-async-procs k)
       (condition-case nil
