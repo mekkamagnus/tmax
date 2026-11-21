@@ -351,17 +351,27 @@ describe("#289 — the view (integration, real temp repos)", () => {
     expect(String(e(editor, "(editor-status)").value)).toContain("no hunks");
   });
 
-  test("an APOSTROPHE filename quotes safely — no command injection (gate r2 security)", () => {
+  test("an APOSTROPHE filename quotes safely — no command injection (gate r2+r3)", () => {
     const c = process.cwd();
-    // The exact injection shape the gate reproduced: the mangled
-    // separator let the trailing fragment execute as a command.
+    // The exact injection shape the gate reproduced end-to-end on the
+    // VULNERABLE code: the mangled separator let the trailing fragment
+    // execute as a command when d routed the filename through shq.
+    // The file must be TRACKED + MODIFIED (an UNSTAGED row) — an
+    // untracked row is refused before quoting ever runs (gate r3
+    // proved the untracked variant vacuous: it passed on vulnerable
+    // code). The gate verified this strengthened form FAILS on
+    // vulnerable code exactly at the PWNED assertion.
     writeFileSync(join(c, "evil';touch PWNED;'x.txt"), "evil content\n");
+    commit("base");
+    writeFileSync(join(c, "evil';touch PWNED;'x.txt"), "evil modified\n");
     statusOf();
     const lines = strip(bufferText(editor)).split("\n");
     const row = lines.findIndex((l) => l.includes("evil'"));
     e(editor, `(cursor-move ${row} 0)`);
     e(editor, "(stagehand/status/stagehand-status-diff)");
     expect(existsSync(join(c, "PWNED"))).toBe(false); // NO execution
+    // The diff itself rendered (quoting held, not just refusal).
+    expect(strip(bufferText(editor))).toContain("+evil modified");
     // And a plain apostrophe filename diff works at all.
     writeFileSync(join(c, "it's.txt"), "apostrophe\n");
     commit("more");
