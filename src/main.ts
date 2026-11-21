@@ -206,6 +206,7 @@ async function main() {
   // feature. cleanStart=true prevents initializeWorkspaces from overwriting
   // the just-loaded file + filename.
   const server = new TmaxServer(undefined, false, editor, initFilePath, true);
+  server.setEmbeddedMode(); // #276: --stop must refuse to signal us
   try {
     await server.startEditor();
 

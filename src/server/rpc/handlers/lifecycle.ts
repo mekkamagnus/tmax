@@ -8,18 +8,26 @@
  */
 
 import type { ServerContext } from "./context.ts";
-import type { PingResult, ShutdownResult } from "../types.ts";
+import type { PingResult, ShutdownResult, ServerIdentityResult } from "../types.ts";
 
 /** Build the lifecycle-domain handlers bound to a `ServerContext`. */
 export function createLifecycleHandlers(ctx: ServerContext): {
   ping: () => Promise<PingResult>;
   shutdown: () => ShutdownResult;
+  "server-identity": () => ServerIdentityResult;
 } {
   return {
     ping: async (): Promise<PingResult> => ({
       status: "running",
       server: "tmax",
       frames: ctx.frames.size,
+    }),
+    // #276: the identity RPC — {mode, pid}. `--stop` asks this BEFORE any
+    // signal: an embedded session answers 'embedded' and is NEVER
+    // signaled; the daemon answers 'daemon' + its pid for verification.
+    "server-identity": (): ServerIdentityResult => ({
+      mode: ctx.getServerMode(),
+      pid: process.pid,
     }),
     shutdown: (): ShutdownResult => {
       // AC5.6: schedule shutdown AFTER the response is written. The connection

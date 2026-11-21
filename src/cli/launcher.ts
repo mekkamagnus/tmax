@@ -19,6 +19,8 @@ import { join } from 'node:path';
 import { TmaxClient } from '../client/rpc-client.ts';
 import { runTmaxClient } from '../client/cli.ts';
 import { daemonSpawnTarget } from './exec-target.ts';
+import { runStopSequence } from './stop-sequence.ts';
+import { realStopDeps } from './stop-sequence-deps.ts';
 import { main as sweepMain } from '../server/sweep.ts';
 import { readLockRaw } from '../server/lock-file.ts';
 
@@ -296,34 +298,13 @@ export async function runLauncher(argv: string[]): Promise<LauncherRoute> {
 
   const p = parseArgs(argv);
 
-  // --stop: graceful shutdown, SIGTERM fallback, always clean socket/lock
-  // (#69 / BUG-55).
+  // --stop: the #276 sequence — connection outcomes first, the identity
+  // RPC gates every signal (EMBEDDED IS NEVER SIGNALED), and the SIGTERM
+  // fallback fires only on the VERIFIED pid. See cli/stop-sequence.ts.
   if (p.stop) {
-    if (await isRunning()) {
-      const stopper = new TmaxClient(SOCKET);
-      try {
-        await stopper.connect();
-        await stopper.sendRequest('shutdown', {});
-        stopper.close();
-      } catch { /* surfaced by the re-check below */ }
-      await new Promise((r) => setTimeout(r, 1000));
-      if (await isRunning()) {
-        console.error('Warning: daemon did not stop gracefully, sending SIGTERM');
-        const res = spawnSync('lsof', ['-t', '-U', SOCKET], { encoding: 'utf8' });
-        const pid = Number((res.stdout ?? '').trim().split('\n')[0]);
-        if (Number.isFinite(pid) && pid > 0) {
-          try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-      }
-      console.log('Daemon stopped');
-    } else {
-      console.log('Daemon not running');
-    }
-    for (const f of [SOCKET, `${SOCKET}.lock`]) {
-      try { if (existsSync(f)) unlinkSync(f); } catch { /* best-effort */ }
-    }
-    process.exit(0);
+    const outcome = await runStopSequence(realStopDeps(SOCKET));
+    for (const row of outcome.rows) (row.stream === "stdout" ? console.log : console.error)(row.line);
+    process.exit(outcome.exitCode);
   }
 
   // --sweep: delegate to the sweep CLI (BUG-29).

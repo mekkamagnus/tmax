@@ -162,6 +162,12 @@ export type CaptureResult =
 export interface PingResult { status: "running"; server: "tmax"; frames: number }
 
 /** Shutdown acknowledgement (returned before the socket closes — AC5.6). */
+/** #276: the identity RPC's answer — mode + pid (stop verification). */
+export interface ServerIdentityResult {
+  mode: "daemon" | "embedded";
+  pid: number;
+}
+
 export interface ShutdownResult { ok: true }
 
 /** Client-event acknowledgement. */
@@ -475,6 +481,7 @@ export interface RpcMethodMap {
   "save-file": { params: SaveFileParams; result: SaveFileResult };
   capture: { params: CaptureParams; result: CaptureResult };
   ping: { params: NoParams; result: PingResult };
+  'server-identity': { params: NoParams; result: ServerIdentityResult };
   status: { params: NoParams; result: StatusResult };
   clients: { params: NoParams; result: ClientsResult };
   frames: { params: NoParams; result: FramesResult };

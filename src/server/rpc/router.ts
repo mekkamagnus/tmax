@@ -265,6 +265,7 @@ const PARAM_GUARDS: Readonly<Record<RpcMethodName, ParamGuard>> = {
   "save-file": saveFileGuard,
   capture: captureGuard,
   ping: noParamsGuard,
+  'server-identity': noParamsGuard,
   status: noParamsGuard,
   clients: noParamsGuard,
   frames: noParamsGuard,
@@ -313,6 +314,7 @@ export const SYNC_POLICY: Readonly<Record<RpcMethodName, SyncPolicy>> = {
   "save-file": "stateless",
   capture: "readonly",
   ping: "readonly",
+  "server-identity": "readonly",
   status: "readonly",
   clients: "readonly",
   frames: "readonly",
@@ -333,7 +335,7 @@ export const SYNC_POLICY: Readonly<Record<RpcMethodName, SyncPolicy>> = {
 const HANDLES: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   "open", "eval", "command", "query", "insert", "keypress", "render-state",
   "client-event", "save-file", "capture", "ping", "status", "clients", "frames",
-  "shutdown", "workspace-list", "workspace-new", "workspace-switch", "workspace-save",
+  "shutdown", "server-identity", "workspace-list", "workspace-new", "workspace-switch", "workspace-save",
   "workspace-kill", "workspace-rename", "workspace-load", "workspace-move-window",
   "confirmation/mediate",
 ]);

@@ -172,6 +172,11 @@ export class TmaxServer {
   private startedAt: Date = new Date();
   private activeFrameId: string | null = null;
   private isRunning: boolean = false;
+  // #276: the serving mode — 'daemon' | 'embedded' (the identity RPC).
+  private serverMode: "daemon" | "embedded" = "daemon";
+  /** #276: mark this server EMBEDDED (the embedded path in main.ts —
+   *  `--stop` must refuse to signal it). */
+  setEmbeddedMode(): void { this.serverMode = "embedded"; }
   private testMode: boolean = false;
   private ownsSocket: boolean = false;
   private ownsLock: boolean = false;
@@ -1331,6 +1336,7 @@ export class TmaxServer {
     const frames = createFramesHandlers(ctx);
     const workspaces = createWorkspaceHandlers(ctx);
     const lifecycle = createLifecycleHandlers(ctx);
+    const serverIdentity = lifecycle["server-identity"];
     const confirmation = createConfirmationHandlers(ctx);
     return {
       open: editing.open,
@@ -1344,6 +1350,7 @@ export class TmaxServer {
       'save-file': editing['save-file'],
       capture: frames.capture,
       ping: lifecycle.ping,
+      'server-identity': serverIdentity,
       status: frames.status,
       clients: frames.clients,
       frames: frames.frames,
@@ -1380,6 +1387,7 @@ export class TmaxServer {
       setActiveFrameId: (id) => { this.activeFrameId = id; },
       workspaceManager: this.workspaceManager,
       isDaemonRunning: () => this.isRunning,
+      getServerMode: () => this.serverMode,
       getStartedAt: () => this.startedAt,
       getSocketPath: () => this.socketPath,
 

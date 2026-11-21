@@ -86,6 +86,9 @@ export interface ServerContext {
   readonly workspaceManager: WorkspaceManager;
   /** True once start() has marked the daemon as running. */
   isDaemonRunning(): boolean;
+  /** #276: the process's serving mode — 'daemon' | 'embedded' (the
+   *  identity RPC answers it; --stop refuses to signal embedded). */
+  getServerMode(): "daemon" | "embedded";
   /** Daemon start time (for uptime). */
   getStartedAt(): Date;
   /** Socket path (for status output). */
