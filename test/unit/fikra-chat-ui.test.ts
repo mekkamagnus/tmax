@@ -65,7 +65,7 @@ describe("#216 chat open", () => {
     e(editor, '(fikra/backend-replay/fikra-backend-replay-start-turn "q")');
     e(editor, "(fikra/chat/fikra-chat-open)");
     let buf = String(e(editor, "(buffer-text)").value);
-    expect(stripAnsi(buf)).toContain("AI: kept");
+    expect(stripAnsi(buf)).toContain("assistant › kept");
     // Re-open: replay from disk, same content (idempotent).
     e(editor, "(fikra/chat/fikra-chat-open)");
     expect(String(e(editor, "(buffer-text)").value)).toBe(buf);
@@ -79,8 +79,8 @@ describe("#216 turn-send through the replay backend", () => {
     e(editor, "(fikra/chat/fikra-chat-open)");
     e(editor, '(fikra/chat/fikra-turn-send "hello agent")');
     const buf = String(e(editor, "(buffer-text)").value);
-    expect(stripAnsi(buf)).toContain("You: hello agent");
-    expect(stripAnsi(buf)).toContain("AI: reply!");
+    expect(stripAnsi(buf)).toContain("user › hello agent");
+    expect(stripAnsi(buf)).toContain("assistant › reply!");
     // Thread settled.
     expect(String(e(editor, "(fikra/chat/fikra-turn-status)").value)).toBe("idle");
   });

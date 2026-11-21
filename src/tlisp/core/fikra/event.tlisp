@@ -554,8 +554,10 @@ text-deltas inside the batch join into the same line."
           (concat out
                   (if open ""
                     (if (string= (fikra-event-get-str (car events) "speaker") "user")
-                      (fikra-face "\e[1;34m" "You: ")
-                      (fikra-face "\e[1;35m" "AI: ")))
+                      ;; Mockup 8.1's speaker labels (r105): user › /
+                      ;; assistant › (was You:/AI:).
+                      (fikra-face "\e[1;34m" "user › ")
+                      (fikra-face "\e[1;35m" "assistant › ")))
                   (fikra-event-get-str (car events) "text"))
           t)
         (fikra-event-render-fold (cdr events)
@@ -956,8 +958,8 @@ text-deltas inside the batch join into the same line."
               (concat out
                       (if open ""
                         (if (string= (fikra-event-get-str (car events) "speaker") "user")
-                          (fikra-face "\e[1;34m" "You: ")
-                          (fikra-face "\e[1;35m" "AI: ")))
+                          (fikra-face "\e[1;34m" "user › ")
+                          (fikra-face "\e[1;35m" "assistant › ")))
                       (fikra-event-get-str (car events) "text"))
               t)
             (fikra-event-render-skip (cdr events) ranges turn

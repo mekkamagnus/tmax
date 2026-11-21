@@ -52,7 +52,7 @@ async function planSetup(): Promise<Editor> {
 /** Emit a completed plan-mode turn: user echo + the plan markdown. */
 function planTurn(editor: Editor, plan: string): void {
   e(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "replay")))');
-  e(editor, `(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" "You: make a plan")))`);
+  e(editor, `(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" "user › make a plan")))`);
   e(editor, `(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" ${JSON.stringify(plan)})))`);
   // The LIFECYCLE fn (the production turn-end path — backends call this,
   // not a bare event emit).

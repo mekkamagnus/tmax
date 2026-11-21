@@ -152,7 +152,7 @@ describe("#213 thread core — reopen replays history into *Fikra*", () => {
     e(editorB, "(require-module fikra/thread)");
     e(editorB, "(fikra/thread/fikra-thread-open)");
     const buf = String(e(editorB, '(buffer-text)').value);
-    expect(stripAnsi(buf)).toContain("AI: persisted turn text");
+    expect(stripAnsi(buf)).toContain("assistant › persisted turn text");
     expect(buf).toContain("── turn 1");
     // Fresh editor's *Fikra* buffer was created + focused.
     expect(String(e(editorB, '(buffer-current)').value)).toBe("*Fikra*");

@@ -85,8 +85,8 @@ describe("#212 FAEP — replay rendering (RFC §D2 table)", () => {
     const text = replay(editor);
     expect(stripAnsi(text)).toContain("── turn 1 · claude ──");
     expect(text).toContain("\u001b[1;36m── turn 1");
-    expect(stripAnsi(text)).toContain("AI: The gap buffer is O(1) at the gap.\n");
-    expect(text).toContain("\u001b[1;35mAI: ");
+    expect(stripAnsi(text)).toContain("assistant › The gap buffer is O(1) at the gap.\n");
+    expect(text).toContain("\u001b[1;35massistant › ");
     expect(stripAnsi(text)).toContain("⚙ Bash  bun test buffer\n");
     expect(stripAnsi(text)).toContain("  → ok 92 pass\n");
     expect(stripAnsi(text)).toContain("± src/x.ts +8 -0\n");
@@ -173,14 +173,14 @@ describe("#212 FAEP — incremental render into *Fikra*", () => {
     ev(editor, "text-delta", { text: "streaming!" });
 
     const bufText = String(executeTlisp(editor, "(buffer-text)").value);
-    expect(stripAnsi(bufText)).toContain("AI: streaming!");
+    expect(stripAnsi(bufText)).toContain("assistant › streaming!");
     // Switching away: further emits must NOT render into this buffer.
     executeTlisp(editor, '(buffer-switch "test")');
     ev(editor, "text-delta", { text: "second-chunk" });
     expect(String(executeTlisp(editor, '(buffer-text)').value)).not.toContain("second-chunk");
     // ...but *Fikra* keeps its first render.
     executeTlisp(editor, '(buffer-switch "*Fikra*")');
-    expect(stripAnsi(String(executeTlisp(editor, '(buffer-text)').value))).toContain("AI: streaming!");
+    expect(stripAnsi(String(executeTlisp(editor, '(buffer-text)').value))).toContain("assistant › streaming!");
   });
 
   test("emit does not write into non-Fikra buffers", async () => {

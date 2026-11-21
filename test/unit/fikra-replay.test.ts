@@ -198,7 +198,7 @@ describe("#215 e2e: fixture → FAEP → rendering → thread state", () => {
     turn(editor, "q1");
     turn(editor, "q2");
     const buf = String(e(editor, "(buffer-text)").value);
-    expect(stripAnsi(buf)).toContain("AI: rendered from a fixture");
+    expect(stripAnsi(buf)).toContain("assistant › rendered from a fixture");
     expect(stripAnsi(buf)).toContain("⚙ Bash");
     expect(stripAnsi(buf)).toContain("echo hi");
     expect(buf).toContain("── turn 2");
