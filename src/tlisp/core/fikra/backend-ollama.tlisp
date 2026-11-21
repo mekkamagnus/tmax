@@ -891,7 +891,7 @@ availability gate must be synchronous; the turn itself is async)."
     ;; r138: the walker interleaves each turn's exchange AT its turn-end
     ;; (after its text, before the next user message — codex r137's
     ;; ordering finding).
-    (fikra-ollama-history-scan events 0 cutoff "" nil nil)))
+    (fikra-ollama-history-scan events 0 cutoff "" nil nil nil)))
 
 ;; The index of the LAST turn-end (-1 when none — a first turn has no
 ;; history).
@@ -906,7 +906,7 @@ availability gate must be synchronous; the turn itself is async)."
 ;; the turn's exchange flushes BEFORE the first assistant text that
 ;; follows them (the true intra-turn order — the tools ran BEFORE the
 ;; final reply), and any remainder flushes at the turn's end.
-(defun fikra-ollama-history-scan (events i cutoff acc tools-seen turn-n)
+(defun fikra-ollama-history-scan (events i cutoff acc tools-seen turn-n flushed)
   ;; r138: TOOLS-SEEN tracks whether the current turn already ran tools;
   ;; the turn's exchange flushes BEFORE the first ASSISTANT text that
   ;; follows them (the true intra-turn order — the tools ran before the
@@ -921,34 +921,35 @@ availability gate must be synchronous; the turn itself is async)."
                         (if raw-turn raw-turn turn-n))))
       (cond
         ((string= k "turn-start")
-          (fikra-ollama-history-scan events (+ i 1) cutoff acc nil this-turn))
+          (fikra-ollama-history-scan events (+ i 1) cutoff acc nil this-turn nil))
         ((or (string= k "tool-call") (string= k "tool-result"))
-          (fikra-ollama-history-scan events (+ i 1) cutoff acc t this-turn))
+          (fikra-ollama-history-scan events (+ i 1) cutoff acc t this-turn flushed))
         ((string= k "text-delta")
           (let* ((sp (fikra/event/fikra-event-get-str e "speaker"))
                  (tx (fikra/event/fikra-event-get-str e "text"))
-                 (frag (if (and tools-seen turn-n (string= sp "assistant"))
+                 ;; r138c (codex catch): the walk READS the slot without
+                 ;; clearing it — history rebuilds every turn and the
+                 ;; exchanges must survive. FLUSHED guards the
+                 ;; double-flush within one walk.
+                 (frag (if (and tools-seen turn-n (string= sp "assistant")
+                                (not (and flushed (string= flushed turn-n))))
                          (hashmap-get fikra-ollama-tool-exchanges turn-n)
-                         nil))
-                 (pre (if frag
-                        (progn (keymap-mutable-set! fikra-ollama-tool-exchanges turn-n nil) frag)
-                        "")))
+                         nil)))
             (if (> (length tx) 0)
               (fikra-ollama-history-scan events (+ i 1) cutoff
-                (concat acc pre "{\"role\":\""
+                (concat acc (if frag frag "") "{\"role\":\""
                         (if (string= sp "user") "user" "assistant")
                         "\",\"content\":" (fikra-ollama-json-string tx) "},")
-                tools-seen this-turn)
-              (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn))))
+                tools-seen this-turn (if frag turn-n flushed))
+              (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn flushed))))
         ((string= k "turn-end")
-          (let ((frag (if turn-n (hashmap-get fikra-ollama-tool-exchanges turn-n) nil)))
-            (if frag
-              (progn
-                (keymap-mutable-set! fikra-ollama-tool-exchanges turn-n nil)
-                (fikra-ollama-history-scan events (+ i 1) cutoff (concat acc frag) tools-seen this-turn))
-              (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn))))
+          (let ((frag (if (and turn-n (not (and flushed (string= flushed turn-n))))
+                        (hashmap-get fikra-ollama-tool-exchanges turn-n)
+                        nil)))
+            (fikra-ollama-history-scan events (+ i 1) cutoff
+              (concat acc (if frag frag "")) tools-seen this-turn flushed)))
         (t
-          (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn))))))
+          (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn flushed))))))
 
 ;; JSON-string escaping (quotes + backslashes; runtime concat is
 ;; reader-safe, the embedded chars must be JSON-escaped — hex-built

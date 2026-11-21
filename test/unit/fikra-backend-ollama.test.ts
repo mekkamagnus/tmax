@@ -871,6 +871,12 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(toolAt).toBeGreaterThan(user1At);
     expect(replyAt).toBeGreaterThan(toolAt);
     expect(user2At).toBeGreaterThan(replyAt);
+    // r138c (codex catch): history rebuilds EVERY turn — a SECOND call
+    // must still carry the exchange (the walk must not consume it).
+    const h1 = String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value);
+    const h2 = String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value);
+    expect(h1).toContain("TOOL-CTX");
+    expect(h2).toContain("TOOL-CTX");
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
