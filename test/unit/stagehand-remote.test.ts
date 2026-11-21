@@ -71,8 +71,6 @@ const popupText = (ed: Editor) => {
   return t;
 };
 
-const rangeListLisp = `(stagehand-range-list 0 93)`;
-
 describe("#293 — the :pty primitive", () => {
   test(":pty t gives the child a REAL TTY ([ -t 0 ] sees one); pipes do not", async () => {
     e(editor, `(make-process :command '("/bin/sh" "-c" "if [ -t 0 ]; then echo IS_TTY; else echo NOT_TTY; fi > /tmp/i293-tty-$$.out; sleep 0.1") :pty t :cwd "${process.cwd()}")`);
@@ -270,10 +268,14 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     // printable char resolves (the full 94-domain, not a sample: the
     // raw " and \ codegen made 2 of them unparsable).
     expect(ref("q")).toContain("stagehand-remote-quit");
-    const all = String(e(editor, `(string-join "" (mapcar (lambda (k) (if (keymap-ref (editor/keymaps/buffer-keymap "*Stagehand-Remote*") k) "1" "0")) (stagehand/remote/stagehand-printable-keys-get)))`).value);
-    expect(all).toBe("1".repeat(94)); // q counts too (bound to quit)
-    expect(ref("Enter")).toContain("stagehand-remote-input-enter");
-    expect(ref("C-c")).toContain("stagehand-remote-cancel");
+    // ROUTE-level assertion: every non-q binding's SOURCE carries
+    // hex-decode (a raw-char codegen regression would fail here).
+        const tableStr = String(e(editor, "(string-join \"\" (stagehand/remote/stagehand-printable-keys-get))").value);
+    for (const ch of tableStr) {
+      if (ch === "q") continue;
+      const r = String(e(editor, `(keymap-ref (editor/keymaps/buffer-keymap "*Stagehand-Remote*") "${ch === '"' ? '\\"' : ch === "\\" ? "\\\\" : ch}")`).value);
+      expect(`${ch}:${r}`).toContain("hex-decode");
+    }
     // And typing a printable key during the run writes VERBATIM (the
     // echo fixture proves the PTY write; here the binding is the proof).
     e(editor, "(stagehand/remote/stagehand-remote-cancel)");

@@ -5,7 +5,6 @@
           stagehand-remote-sentinel stagehand-remote-buffer-name
           stagehand-remote-alive-p stagehand-remote-last-exit
           stagehand-remote-input-enter stagehand-remote-input-key
-          stagehand-char-of stagehand-range-list
           stagehand-printable-keys-get stagehand-press-held-off-p
           stagehand-ladder-signal)
 
@@ -42,13 +41,6 @@ fresh press AFTER the wait).")
 (defvar stagehand-remote-mode "push"
   "The active run's mode: push | pull.")
 
-(defun stagehand-char-of (code)
-  ;; Single-char string for a printable ASCII CODE (the table avoids
-  ;; per-char chr builtins).
-  (nth (- code 33) stagehand-printable-table))
-
-;; codepoint strings parallel to stagehand-printable-table (the
-;; codegen's hex payloads).
 (defvar stagehand-printable-codes
   (list "21" "22" "23" "24" "25" "26" "27" "28" "29" "2a" "2b" "2c" "2d" "2e" "2f"
         "30" "31" "32" "33" "34" "35" "36" "37" "38" "39" "3a" "3b" "3c" "3d" "3e" "3f" "40"
@@ -258,19 +250,6 @@ caught the 1-vs-1000 unit bug)."
     ((<= presses 1) "SIGINT")
     ((= presses 2) "SIGTERM")
     (t "SIGKILL")))
-
-(defun stagehand-range-list (lo hi)
-  (if (> lo hi) (list) (cons lo (stagehand-range-list (+ lo 1) hi))))
-
-(defun stagehand-printable-keys ()
-  ;; The printable ASCII range as single-char key strings.
-  (stagehand-key-scan 33 126 (list)))
-
-(defun stagehand-key-scan (lo hi out)
-  (if (> lo hi)
-    (reverse out)
-    (stagehand-key-scan (+ lo 1) hi
-      (cons (stagehand-char-of lo) out))))
 
 (defun stagehand-remote-input-enter ()
   "Enter → a newline to the PTY."
