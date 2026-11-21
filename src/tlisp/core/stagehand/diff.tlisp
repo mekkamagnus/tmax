@@ -23,25 +23,36 @@
 
 ;; ── the grammar (pure — unit-testable without git) ─────────────────
 (defun stagehand-diff-parse (text)
-  "Diff TEXT → ((class line) ...) in order. Pure: no git, no state."
-  (stagehand-diff-scan (string-split text "\n") (list)))
+  "Diff TEXT → ((class line) ...) in order. Pure: no git, no globals —
+the positional state (inside-hunks) threads through the scan."
+  (stagehand-diff-scan (string-split text "\n") (list) nil))
 
-(defun stagehand-diff-scan (lines out)
+(defun stagehand-diff-scan (lines out in-hunks)
+  ;; IN-HUNKS: a @@ has been seen since the last file header — so
+  ;; ---/+++ leading lines are remove/add PAYLOADS (SQL/Lua/Haskell
+  ;; '--' banners), not file headers. 'diff --git' resets it for the
+  ;; next file's header block.
   (if (null lines)
     (reverse out)
-    (stagehand-diff-scan (cdr lines)
-      (cons (list (stagehand-diff-classify (car lines)) (car lines))
-        out))))
+    (let* ((line (car lines))
+           (class (stagehand-diff-classify line in-hunks)))
+      (stagehand-diff-scan (cdr lines)
+        (cons (list class line) out)
+        (if (string-prefix-p "diff --git " line)
+          nil
+          (or in-hunks (string= class "hunk-header")))))))
 
-(defun stagehand-diff-classify (line)
+(defun stagehand-diff-classify (line in-hunks)
   "One diff line → its class: file-header, hunk-header, add, remove,
-context, meta. Precedence matters: ---/+++ are file headers (they
-LEAD with -/+), and the meta markers precede the add/remove catch."
+context, meta. ---/+++ are file headers ONLY in the header region
+(IN-HUNKS nil); the meta markers precede the add/remove catch."
   (cond
     ((or (string-prefix-p "diff --git " line)
-         (string-prefix-p "index " line)
-         (string-prefix-p "--- " line)
-         (string-prefix-p "+++ " line))
+         (string-prefix-p "index " line))
+      "file-header")
+    ((and (not in-hunks)
+          (or (string-prefix-p "--- " line)
+              (string-prefix-p "+++ " line)))
       "file-header")
     ((string-prefix-p "@@" line) "hunk-header")
     ;; The meta family (rename/copy/mode/no-newline markers). The

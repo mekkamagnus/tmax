@@ -116,6 +116,29 @@ describe("#289 — the pure grammar", () => {
     expect(classesOf(editor, cp).split("\n")).toContain("meta|copy from src");
   });
 
+  test("'--- '/'++ '-SHAPED payloads after a hunk are remove/add, not file headers (gate r1)", () => {
+    // SQL/Lua/Haskell '--' banners: a REMOVED line whose payload
+    // starts '-- ' must not light up as a file header.
+    const banner = [
+      "diff --git a/q.sql b/q.sql",
+      "index 1..2 100644",
+      "--- a/q.sql",
+      "+++ b/q.sql",
+      "@@ -1,2 +1,2 @@",
+      "--- old banner",
+      "+++ new banner",
+      "+real add",
+    ].join("\n");
+    const rows = classesOf(editor, banner).split("\n");
+    expect(rows[5]).toBe("remove|--- old banner");
+    expect(rows[6]).toBe("add|+++ new banner");
+    expect(rows[7]).toBe("add|+real add");
+    // And the header-region ---/+++ stay file headers (also across a
+    // SECOND file's block after its diff --git resets the region).
+    expect(rows[2]).toBe("file-header|--- a/q.sql");
+    expect(rows[3]).toBe("file-header|+++ b/q.sql");
+  });
+
   test("an EMPTY diff parses to a single empty context row", () => {
     const rows = classesOf(editor, "").split("\n");
     expect(rows.length).toBe(1);
@@ -173,11 +196,14 @@ describe("#289 — the view (integration, real temp repos)", () => {
     // Layout: 2 U-hdr | 3 other.txt | 4 Unstaged-hdr | 5 S-hdr | 6 row.
     e(editor, "(cursor-move 6 0)");
     e(editor, "(stagehand/status/stagehand-status-diff)");
-    const t = strip(bufferText(editor));
+    const raw = bufferText(editor);
+    const t = strip(raw);
     expect(t).toContain("+STAGED CHANGE");
     // --cached shows the STAGED state only — the worktree-matching
     // content (base + staged change) means no unstaged delta leaks in.
     expect(t).toContain("Stagehand-Diff: f.txt");
+    // The staged view faces through the SAME emission path (gate r1).
+    expect(raw).toContain("\x1b[32m+STAGED CHANGE");
   });
 
   test("d on an UNTRACKED row → the refusal, no diff buffer", () => {
@@ -189,7 +215,7 @@ describe("#289 — the view (integration, real temp repos)", () => {
     expect(String(e(editor, "(editor-status)").value)).toContain("untracked file — no diff");
   });
 
-  test("d on a SECTION header → the whole-section diff (same side)", () => {
+  test("d on a SECTION header → the section's OWN files (same side)", () => {
     writeFileSync(join(process.cwd(), "a.txt"), "a\n");
     writeFileSync(join(process.cwd(), "b.txt"), "b\n");
     commit("base");
@@ -203,6 +229,68 @@ describe("#289 — the view (integration, real temp repos)", () => {
     expect(t).toContain("Stagehand-Diff: section: Unstaged");
     expect(t).toContain("-a");
     expect(t).toContain("-b"); // BOTH files — the whole section
+  });
+
+  test("d on the UNTRACKED section header → the refusal, no diff buffer (gate r1)", () => {
+    writeFileSync(join(process.cwd(), "new.txt"), "n\n");
+    writeFileSync(join(process.cwd(), "f.txt"), "f\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "F-modified\n");
+    statusOf();
+    // Layout: 2 U-hdr | 3 new.txt | 4 Unstaged-hdr | 5 f.txt.
+    e(editor, "(cursor-move 2 0)"); // the Untracked HEADER
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand*");
+    expect(String(e(editor, "(editor-status)").value)).toContain("untracked files — no diff");
+  });
+
+  test("d on the CONFLICTED section header → only the conflicted files (gate r1)", () => {
+    const c = process.cwd();
+    writeFileSync(join(c, "f.txt"), "base\n");
+    writeFileSync(join(c, "clean.txt"), "stay\n");
+    commit("base");
+    execFileSync("git", ["checkout", "-q", "-b", "side"], { cwd: c });
+    writeFileSync(join(c, "f.txt"), "side\n");
+    commit("side");
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: c });
+    writeFileSync(join(c, "f.txt"), "main\n");
+    commit("main");
+    try {
+      execFileSync("git", ["merge", "side"], { cwd: c, stdio: "ignore" });
+    } catch { /* conflict — expected */ }
+    statusOf();
+    // Layout: 2 U-hdr | 3 Unstaged-hdr (M f.txt etc.) | 4-5 headers | 6 C-hdr | 7 UU f.txt.
+    const lines = strip(bufferText(editor)).split("\n");
+    const confHdr = lines.findIndex((l) => l.startsWith("Conflicted ("));
+    e(editor, `(cursor-move ${confHdr} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    const t = strip(bufferText(editor));
+    expect(t).toContain("Stagehand-Diff: section: Conflicted");
+    expect(t).toContain("f.txt");
+    // clean.txt is NOT in the section — its diff must NOT leak in.
+    expect(t).not.toContain("clean.txt");
+  });
+
+  test("d on a CONFLICTED FILE ROW → the worktree (combined) diff for that path (gate r1)", () => {
+    const c = process.cwd();
+    writeFileSync(join(c, "f.txt"), "base\n");
+    commit("base");
+    execFileSync("git", ["checkout", "-q", "-b", "side"], { cwd: c });
+    writeFileSync(join(c, "f.txt"), "side\n");
+    commit("side");
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: c });
+    writeFileSync(join(c, "f.txt"), "main\n");
+    commit("main");
+    try {
+      execFileSync("git", ["merge", "side"], { cwd: c, stdio: "ignore" });
+    } catch { /* conflict — expected */ }
+    statusOf();
+    const lines = strip(bufferText(editor)).split("\n");
+    const uuRow = lines.findIndex((l) => l.startsWith("UU "));
+    e(editor, `(cursor-move ${uuRow} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand-Diff*");
+    expect(strip(bufferText(editor))).toContain("f.txt");
   });
 
   test("n/p navigate hunk headers (wrap); q closes", () => {
@@ -230,6 +318,9 @@ describe("#289 — the view (integration, real temp repos)", () => {
     expect(line()).toBe(h1);
     e(editor, "(stagehand/diff/stagehand-diff-prev)");
     expect(line()).toBe(h2);
+    // FORWARD wrap: n at the LAST hunk returns to the first.
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    expect(line()).toBe(h1);
     // q closes — the diff buffer is gone (recency survivor restored).
     e(editor, "(stagehand/diff/stagehand-diff-quit)");
     expect(String(e(editor, "(buffer-current)").value)).not.toContain("Stagehand-Diff");
@@ -245,6 +336,19 @@ describe("#289 — the view (integration, real temp repos)", () => {
     await editor.handleKey("d");
     expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand-Diff*");
     expect(strip(bufferText(editor))).toContain("+v2");
+  });
+
+  test("an EMPTY diff and a NO-HUNKS buffer → status paths, no switch (gate r1)", () => {
+    const before = String(e(editor, "(buffer-current)").value);
+    // Empty diff text → 'Stagehand: empty diff', no buffer switch.
+    e(editor, '(stagehand/diff/stagehand-diff-open "" "nothing")');
+    expect(String(e(editor, "(buffer-current)").value)).toBe(before);
+    expect(String(e(editor, "(editor-status)").value)).toContain("empty diff");
+    // A hunkless body (headers only) → 'no hunks' on n.
+    e(editor, '(stagehand/diff/stagehand-diff-open "diff --git a/x b/x\nindex 1..2 100644" "hdr")');
+    expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand-Diff*");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("no hunks");
   });
 
   test("git failure mid-diff → status names it; the buffer is unchanged", () => {

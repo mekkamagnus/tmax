@@ -20,8 +20,12 @@ the #286 status buffer.
   old/new mode, similarity/dissimilarity index, rename/copy from/to,
   `\ No newline at end of file`). Precedence: `---`/`+++` are FILE
   headers (they lead with `-`/`+`); meta markers precede the
-  add/remove catch. The backslash marker literal is hex-decoded (the
-  T-Lisp reader strips backslash escapes).
+  add/remove catch. `---`/`+++` are file headers ONLY in the header
+  region — the parser threads positional state (inside-hunks;
+  `diff --git` resets it per file), so a removed line whose payload
+  starts `-- ` (SQL/Lua/Haskell banners) classifies as `remove`, not
+  file-header (gate r1). The backslash marker literal is hex-decoded
+  (the T-Lisp reader strips backslash escapes).
 - **Faces are EMITTED from classes** (`stagehand-diff-face`): the one
   class → SGR source — file-header bold-cyan, hunk-header bold-blue,
   add green, remove red, meta dim, context bare. The ANSI rides the
@@ -34,11 +38,15 @@ the #286 status buffer.
 - **The `d` dispatch** (`stagehand-status-diff`, bound to `d` in the
   status buffer-local keymap): a FILE row → that path (Staged rows →
   `--cached`; Unstaged/Conflicted → the worktree side; paths
-  shell-quoted). A SECTION header → the whole-section diff (same side
-  selection; the Untracked section has no diff side). Untracked rows
-  → status `untracked file — no diff` (v1 does not synthesize
-  full-file diffs). Git failure (exit ≥1) → status names exit +
-  stderr; the buffer is untouched.
+  shell-quoted). A SECTION header → **the section's OWN files** —
+  the paths are passed explicitly after one `--` (Staged → `--cached
+  -- p1 p2…`; Unstaged/Conflicted → `-- p1 p2…` on the worktree
+  side), never a whole-repo diff; the Untracked section has NO diff
+  side → status `untracked files — no diff` (gate r1: it must not
+  fall through to a pathless worktree diff). Untracked rows → status
+  `untracked file — no diff` (v1 does not synthesize full-file
+  diffs). Git failure (exit ≥1) → status names exit + stderr; the
+  buffer is untouched.
 - **The view** (`*Stagehand-Diff*`): faced lines under a one-line
   title; `n`/`p` navigate hunk-header lines (wrap — forward → first,
   backward → last); `q` closes (buffer-kill's recency survivor).
@@ -48,14 +56,20 @@ the #286 status buffer.
 
 ## Completion criteria
 
-- [x] Parser unit matrix: every class, `---`/`+++` precedence,
-      multi-file diffs, rename/copy headers, no-final-newline markers,
-      empty diffs
+- [x] Parser unit matrix: every class, `---`/`+++` precedence
+      (header-region only — `-- `-banner payloads classify remove/add;
+      second-file reset), multi-file diffs, rename/copy headers,
+      no-final-newline markers, empty diffs
 - [x] Faces: each class → its SGR open + reset; context bare (the
-      one-face-source mapping)
+      one-face-source mapping); staged AND unstaged views assert the
+      emitted ANSI
 - [x] Integration from real temp repos: staged (`--cached`) and
-      unstaged views render FACED; the untracked refusal; the
-      section-level `d` (both files in one diff); the `d` KEY
-      dispatches via handleKey
-- [x] n/p hunk navigation with wrap (real two-hunk diff); q closes;
-      the git-error path (status names the failure, buffer unchanged)
+      unstaged views render FACED; the untracked refusal (row AND
+      section header); the section-level `d` (the section's OWN
+      files — Conflicted excludes non-section files); a CONFLICTED
+      repo (section header + UU row); the `d` KEY dispatches via
+      handleKey
+- [x] n/p hunk navigation with wrap (forward AND backward, real
+      two-hunk diff); the no-hunks and empty-diff status paths; q
+      closes; the git-error path (status names the failure, buffer
+      unchanged)

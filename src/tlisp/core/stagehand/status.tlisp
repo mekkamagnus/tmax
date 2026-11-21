@@ -320,10 +320,12 @@ escaped newlines, ' (from ' literals) can never redirect RET."
 (defun stagehand-status-diff ()
   "d — the diff view for the row at point. A FILE row: that path
 (staged rows → --cached; unstaged/conflicted → the worktree side; a
-path argument is always quoted). A SECTION header: the whole-section
-diff (same side selection; the Untracked section has NO diff — v1
-does not synthesize full-file diffs). Untracked rows refuse with a
-status. Git failure → status names it; the buffer is untouched."
+path argument is always quoted). A SECTION header: the section's OWN
+files, side-selected (Staged → --cached + paths; Unstaged/
+Conflicted → paths on the worktree side) — never a whole-repo diff.
+The Untracked section has NO diff side (v1 does not synthesize
+full-file diffs) → refusal status. Git failure → status names it;
+the buffer is untouched."
   (let* ((idx (stagehand-current-index))
          (pairs (stagehand-visible-pairs))
          (pair (if (and (>= idx 0) (< idx (length pairs))) (nth idx pairs) nil)))
@@ -331,22 +333,54 @@ status. Git failure → status names it; the buffer is untouched."
       ((null pair)
         (editor-set-status "Stagehand: no row here"))
       ((null (car (cdr pair)))
-        ;; A section header — whole-section diff by side.
-        (stagehand-diff-run (stagehand-side-of-section (nth 3 pair)) nil (concat "section: " (nth 3 pair))))
+        ;; A section header — the section's own files, or the refusal.
+        (let ((name (nth 3 pair)))
+          (cond
+            ((string= name "Untracked")
+              (editor-set-status "untracked files — no diff"))
+            (t
+              (let ((entries (stagehand-entries-of-section name)))
+                (if (null entries)
+                  (editor-set-status "Stagehand: nothing to diff in this section")
+                  (stagehand-diff-run (stagehand-side-of-section name)
+                    (stagehand-paths-arg entries)
+                    (concat "section: " name))))))))
       ((string= (nth 2 pair) "??")
         (editor-set-status "untracked file — no diff"))
       (t
-        (stagehand-diff-run (stagehand-side-of-section (nth 3 pair)) (car (cdr pair)) (car (cdr pair)))))))
+        (stagehand-diff-run (stagehand-side-of-section (nth 3 pair))
+          (concat " -- " (stagehand-shq (car (cdr pair))))
+          (car (cdr pair)))))))
 
 (defun stagehand-side-of-section (section-name)
   ;; Staged rows carry index-side codes → --cached; everything else
   ;; with a diff reads the worktree side.
   (if (string= section-name "Staged") "cached" "worktree"))
 
-(defun stagehand-diff-run (side path title)
+(defun stagehand-entries-of-section (name)
+  ;; The section's entry triples from the live parse (nil if absent).
+  (stagehand-section-scan (stagehand-current-sections) name))
+
+(defun stagehand-section-scan (sections name)
+  (if (null sections)
+    nil
+    (if (string= (car (car sections)) name)
+      (car (cdr (car sections)))
+      (stagehand-section-scan (cdr sections) name))))
+
+(defun stagehand-paths-arg (entries)
+  ;; " -- 'p1' 'p2' ..." — every path shell-quoted after one --.
+  (stagehand-paths-scan entries ""))
+
+(defun stagehand-paths-scan (entries acc)
+  (if (null entries)
+    acc
+    (stagehand-paths-scan (cdr entries)
+      (concat acc " " (stagehand-shq (car (cdr (car entries))))))))
+
+(defun stagehand-diff-run (side paths-arg title)
   (let* ((flag (if (string= side "cached") " --cached" ""))
-         (patharg (if path (concat " -- " (stagehand-shq path)) ""))
-         (res (stagehand-git (concat "diff --no-color" flag patharg) stagehand-root))
+         (res (stagehand-git (concat "diff --no-color" flag paths-arg) stagehand-root))
          (out (car res))
          (err (car (cdr res)))
          (exit (car (cdr (cdr res)))))
