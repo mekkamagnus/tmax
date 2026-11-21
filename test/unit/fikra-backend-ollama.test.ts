@@ -844,10 +844,11 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     e(ed, '(fikra/chat/fikra-turn-send "settle")');
     fireCalls(ed, 183, [{ name: "bash", args: { command: "echo SETTLE-BASH" } }]);
     // The child ran and the sentinel emitted the RESULT row (the
-    // command text also appears in the call row — match "→ ok", the
-    // result shape, per the r128 lesson codex re-raised here).
+    // command text also appears in the call row — bind the result
+    // marker to the → ok row itself; until() returns the last text on
+    // exhaustion, so a bare marker assert is fakeable by the call row).
     const row = await until(ed, "(buffer-text)", "→ ok", 60);
-    expect(row).toContain("SETTLE-BASH");
+    expect(row).toMatch(/→ ok\s*SETTLE-BASH/);
     // The sentinel's resume RE-FIRES (a new latest-id appears) — the
     // seeded reply must end the turn (throws if the re-fire never comes).
     await settleRefireFrom(ed, "183", "SETTLED-DONE");
