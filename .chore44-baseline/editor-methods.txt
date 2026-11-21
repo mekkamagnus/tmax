@@ -1,6 +1,9 @@
 # Refrozen 107->109 (issue #298): +getClientLaunchDir/+setClientLaunchDir — the
 # client's launch directory (connect-frame handshake) feeds fikra's
 # client-context thread-root resolution.
+# Refrozen 109->110 (issue #318): +tlispInterpreter — the typed read-only
+# accessor the RPC wire stamp uses (replaces as-unknown-as casts; verify-gate
+# final finding).
 activateMajorModeForFile
 activeTerminalId
 applyModel
@@ -104,6 +107,7 @@ start
 stop
 switchBufferSilent
 switchWindow
+tlispInterpreter
 toAppError
 touchBuffer
 trackCommand

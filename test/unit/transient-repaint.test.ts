@@ -214,4 +214,22 @@ describe("#318 — the wire: segment + revision through the REAL helper", () => 
     const wirePlain = editorStateToJson({ ...state, viewportTop: 0 }, 22, 100);
     expect(wirePlain.visibleLines!.length).toBe(22);
   });
+
+  test("the reservation survives word wrap (codex r5: the wrap walk must not swallow the extra row)", () => {
+    e(editor, `(buffer-insert "${Array.from({ length: 30 }, (_, i) => `line-${i}`).join("\\n")}\\n")`);
+    const state = editor.getEditorState();
+    // Wrap ON with a known width: short lines (no actual wrapping) → the
+    // wrap walk settles at exactly `rows`; the reservation must still
+    // add its +1 AFTER the walk (the old order reset it to Math.max).
+    const wrapped = { ...state, viewportTop: 0, config: { ...state.config, wordWrap: true }, transientSegment: "| working…" };
+    const wireWrap = editorStateToJson(wrapped, 22, 100);
+    expect(wireWrap.visibleLines!.length).toBe(23);
+    // And genuinely-wrapping long lines: the wrapped window + the +1.
+    e(editor, `(buffer-insert "${("x".repeat(200) + "\\n").repeat(5)}")`);
+    const state2 = editor.getEditorState();
+    const wrappedLong = { ...state2, viewportTop: 0, config: { ...state2.config, wordWrap: true }, transientSegment: "| working…" };
+    const wireLong = editorStateToJson(wrappedLong, 22, 100);
+    const plainLong = editorStateToJson({ ...state2, viewportTop: 0, config: { ...state2.config, wordWrap: true } }, 22, 100);
+    expect(wireLong.visibleLines!.length).toBe(plainLong.visibleLines!.length + 1);
+  });
 });

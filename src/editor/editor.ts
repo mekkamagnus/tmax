@@ -179,6 +179,15 @@ export class Editor {
   private caches: EditorRuntimeCaches = createEditorRuntimeCaches();
   private buffers: Map<string, TextBufferImpl> = new Map();
   private interpreter: TLispInterpreterImpl;
+
+  /** #318 (verify-gate final): the TYPED reach the RPC wire stamp uses.
+   *  The old `as unknown as { interpreter }` casts at the handler call
+   *  sites defeated typecheck — an Editor refactor moving/renaming the
+   *  field would have silently no-stamped the transient revision with
+   *  zero compile-time signal. */
+  get tlispInterpreter(): TLispInterpreterImpl {
+    return this.interpreter;
+  }
   private keyMappings: Map<string, KeyMapping[]>;
   private running: boolean = false;
   private coreBindingsLoaded: boolean = false;

@@ -79,9 +79,9 @@ export function createFramesHandlers(ctx: ServerContext): {
       const renderHeight = renderHeightForTerminalSize(
         ctx.frameObservability.get(params.frameId)?.terminalSize,
       );
-      return editorStateToJson(withTransientRevision(ctx.frameToEditorState(frame), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter), renderHeight);
+      return editorStateToJson(withTransientRevision(ctx.frameToEditorState(frame), ctx.editor.tlispInterpreter), renderHeight);
     }
-    return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter));
+    return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), ctx.editor.tlispInterpreter));
   };
 
   // ── capture (READ-ONLY) ─────────────────────────────────────────────────

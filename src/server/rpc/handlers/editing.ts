@@ -247,10 +247,10 @@ export function createEditingHandlers(ctx: ServerContext): {
           const renderHeight = renderHeightForTerminalSize(frameTermSize);
           if (workspaceOverride) {
             ctx.syncEditorToAllFrames();
-            return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter), renderHeight, frameTermSize?.width);
+            return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), ctx.editor.tlispInterpreter), renderHeight, frameTermSize?.width);
           }
           ctx.syncEditorToFrame(frame);
-          return editorStateToJson(withTransientRevision(ctx.frameToEditorState(frame), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter), renderHeight, frameTermSize?.width);
+          return editorStateToJson(withTransientRevision(ctx.frameToEditorState(frame), ctx.editor.tlispInterpreter), renderHeight, frameTermSize?.width);
         } finally {
           await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
         }
@@ -263,11 +263,11 @@ export function createEditingHandlers(ctx: ServerContext): {
       ctx.scheduleDirtyWorkspaceSave(ctx.getActiveWorkspaceId());
       // #318 (gate r2): EVERY response carries the transient stamp — the
       // no-frameId keypress path too.
-      return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter));
+      return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), ctx.editor.tlispInterpreter));
     } catch (error) {
       if (error instanceof Error && error.message === 'EDITOR_QUIT_SIGNAL') {
         ctx.syncEditorToAllFrames();
-        const state = editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter));
+        const state = editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), ctx.editor.tlispInterpreter));
         ctx.scheduleShutdown(50);
         return { ...state, quitSignal: true };
       }
