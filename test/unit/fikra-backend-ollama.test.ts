@@ -203,6 +203,29 @@ describe("ollama thread-switch routing (r111 — codex r110 P2)", () => {
   });
 });
 
+describe("ollama evidence honesty (r113 — codex r112 P1/P2)", () => {
+  test("a FAILING bash command renders → FAIL with the exit status; the model sees it", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "run it")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 91 "live")');
+    const r1 = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: JSON.stringify({ command: "echo BOOM; exit 42" }) } },
+    ] } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 91 "${r1}")`);
+    e(ed, `(fikra-http-complete 91 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toContain("FAIL");
+    expect(text).toContain("BOOM");
+    expect(text).toContain("exit 42");
+    expect(String(e(ed, "(editor-status)").value)).not.toContain("unreachable");
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 92 "live")');
+    const r2 = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "noted the failure" } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 92 "${r2}")`);
+    e(ed, `(fikra-http-complete 92 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+});
+
 describe("ollama tool-using loop (r112 — the 8.1 native loop)", () => {
   test("a tool_call round: the ⚙ rows render, the tool RUNS, the next request carries the exchange", async () => {
     const ed = await armed();

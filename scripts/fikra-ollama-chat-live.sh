@@ -56,6 +56,16 @@ printf '.tmax/\n' > "$LOG/repo/.gitignore"
 DAEMON_PID=$!
 for i in $(seq 1 40); do [ -S "$SOCK" ] && break; sleep 0.5; done
 [ -S "$SOCK" ] && ok "daemon up" || { bad "daemon socket never appeared"; exit 1; }
+# Readiness poll (r113, codex r112 P2#4): the socket can appear before
+# the shell-command surface is ready under load — an early eval died
+# 'sh' ENOENT. Wait for a working shell-command.
+READY=""
+for i in $(seq 1 20); do
+  # grep, not tail-1: the client prints a trailing blank line.
+  if ev '(condition-case nil (shell-command "echo ready") (error () ""))' | grep -q ready; then READY=1; break; fi
+  sleep 1
+done
+[ -n "$READY" ] && ok "shell ready" || { bad "daemon shell never became ready"; tail -5 "$LOG/daemon.log"; exit 1; }
 
 # DEBUG: early probes
 
@@ -85,6 +95,19 @@ CHAT=$(ev '(progn (buffer-switch "*Fikra*") (buffer-text))' | sed -e 's/\x1b\[[0
 echo "$CHAT" | grep -q "user › Reply with exactly" && ok "the user turn renders" || bad "user turn missing"
 echo "$CHAT" | grep -q "assistant › " && ok "the ASSISTANT reply rendered (the fikra-owned loop)" || bad "no assistant reply"
 echo "$CHAT" | grep -q "completed" && ok "the completed marker" || bad "no completion marker"
+
+# The TOOL ROUND (r113): ask for a tool use against the tools-capable
+# model; the ⚙ row + real evidence must render.
+ev '(fikra/chat/fikra-turn-send "Use the bash tool to run exactly: echo TOOL-ROUND-LIVE")' > /dev/null
+TOOL_DONE=""
+# qwen3 THINKS before tool use (its <think> block) — allow 6 minutes.
+for i in $(seq 1 360); do
+  OUT=$(ev '(fikra/thread/fikra-thread-status)' | tail -1)
+  case "$OUT" in idle|error) TOOL_DONE=1; break;; *) sleep 1;; esac
+done
+[ -n "$TOOL_DONE" ] && ok "tool turn settled ($OUT)" || bad "tool turn never settled"
+TOOLCHAT=$(ev '(progn (buffer-switch "*Fikra*") (buffer-text))' | sed -e 's/\x1b\[[0-9;]*m//g')
+echo "$TOOLCHAT" | grep -q "bash" && echo "$TOOLCHAT" | grep -q "TOOL-ROUND-LIVE"   && ok "the MODEL-DRIVEN tool round rendered (⚙ + real evidence)"   || bad "no tool round evidence"
 
 STATUS=$(ev '(editor-status)' | tail -1)
 echo "$STATUS" | grep -q "turn completed" && ok "status: $STATUS" || bad "status: $STATUS"

@@ -208,7 +208,11 @@ availability gate must be synchronous; the turn itself is async)."
       (fikra-ollama-calls-json calls (+ i 1)
         (concat acc (if (> i 0) ",")
                 "{\"function\":{\"name\":\"" (if name name "?")
-                "\",\"arguments\":" (if args args "{}") "}}")))))
+                ;; json-encode handles BOTH shapes (the reply's arguments
+                ;; arrive as a string OR a parsed object — raw concat
+                ;; stringified objects to "[object Object]", r113 live).
+                "\",\"arguments\":" (condition-case nil (json-encode args) (error () "{}"))
+                "}}")))))
 
 (defun fikra-ollama-run-calls (calls i acc)
   (if (>= i (length calls))
@@ -233,18 +237,52 @@ availability gate must be synchronous; the turn itself is async)."
 (defun fikra-ollama-run-bash (call args)
   (let* ((cmd (if (fikra-ollama-alist-get "command" args)
                 (fikra-ollama-alist-get "command" args) ""))
-         (dir (fikra/thread/fikra-thread-working-dir))
-         (out (string-trim (shell-command
-                 (concat "cd " (fikra/thread/fikra-thread-shq dir)
-                         " && (" cmd ") 2>&1 | head -30")))))
+         (dir (fikra/thread/fikra-thread-working-dir)))
+    ;; The call row FIRST (r113, codex r112 P2): a long-running command
+    ;; must show its row while it runs, not only after.
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-call") (list "tool" "bash")
             (list "summary" cmd)))
-    (fikra/event/fikra-event-emit
-      (list (list "kind" "tool-result") (list "ok" t)
-            (list "summary" out)))
-    ;; The tool message for the next round.
-    (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string out) "},")))
+    ;; r113 (codex r112 P1): the EXIT STATUS is captured and honest — a
+    ;; failing command renders FAIL and the model SEES the status.
+    (let* ((raw (shell-command
+                  ;; $? must read the COMMAND'S status — a pipe to head
+                  ;; reports head's 0 (the r113 test catch). Capture into
+                  ;; a var first (shell arithmetic keeps the pipeline's
+                  ;; own status out of $?).
+                  (concat "cd " (fikra/thread/fikra-thread-shq dir)
+                          " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e")))
+           (code (fikra-ollama-exit-code raw))
+           (ok (string= code "0"))
+           (out (string-trim (fikra-ollama-strip-exit raw))))
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "tool-result") (list "ok" ok)
+              (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
+      (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
+        (concat out (if ok "" (concat "\nexit code: " code)))) "},"))))
+
+;; The trailing EXIT:N line's N.
+(defun fikra-ollama-exit-code (raw)
+  (let* ((lines (string-split (string-trim raw) "\n"))
+         (last (if (> (length lines) 0) (nth (- (length lines) 1) lines) "")))
+    (if (string-prefix-p "EXIT:" last)
+      (substring last 5 (length last))
+      "0")))
+
+;; Everything before the trailing EXIT line.
+(defun fikra-ollama-strip-exit (raw)
+  (let* ((lines (string-split (string-trim raw) "\n"))
+         (kept (if (and (> (length lines) 0)
+                        (string-prefix-p "EXIT:" (nth (- (length lines) 1) lines)))
+                 (reverse (cdr (reverse lines)))
+                 lines)))
+    (fikra-ollama-join-lines kept "")))
+
+(defun fikra-ollama-join-lines (lines acc)
+  (if (null lines)
+    acc
+    (fikra-ollama-join-lines (cdr lines)
+      (concat acc (if (> (length acc) 0) "\n") (car lines)))))
 
 (defun fikra-ollama-run-edit (call args)
   (let* ((path (if (fikra-ollama-alist-get "path" args)
@@ -253,12 +291,12 @@ availability gate must be synchronous; the turn itself is async)."
                     (fikra-ollama-alist-get "content" args) ""))
          (dir (fikra/thread/fikra-thread-working-dir))
          (abs (concat dir "/" path)))
-    (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
-                                         (fikra/thread/fikra-thread-dirname abs))))
-    (write-file-content abs content)
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-call") (list "tool" "buffer-edit")
             (list "summary" (concat path " @" (number-to-string (length content))))))
+    (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
+                                         (fikra/thread/fikra-thread-dirname abs))))
+    (write-file-content abs content)
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-result") (list "ok" t)
             (list "summary" (concat "wrote " path))))
@@ -266,7 +304,7 @@ availability gate must be synchronous; the turn itself is async)."
 
 (defun fikra-ollama-tool-skip (call fname)
   (concat "{\"role\":\"tool\",\"content\":\"unknown tool: "
-          (if fname fname "?") "\"},"))
+          (if fname fname "?") "},"))
 
 ;; Events arrive OLDEST-FIRST; the history is every COMPLETED turn —
 ;; everything up to and including the LAST turn-end (the in-flight
