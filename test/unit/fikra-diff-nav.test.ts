@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -302,5 +302,31 @@ describe("#8.4 rename letter (r97 — codex r96 P2)", () => {
     const text = String(e(ed, "(buffer-text)").value);
     // The rename row carries R (not ±).
     expect(text).toMatch(/R (old-renamed\.txt => renamed\.txt|.*=> renamed\.txt)/);
+  });
+});
+
+describe("#8.4 brace-compressed renames (r98 — codex r97 P2)", () => {
+  test("a SAME-DIRECTORY rename renders R (git's src/{old => new}.txt decompresses)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    // Baseline: src/old-dir.txt in the tree.
+    mkdirSync(join(repoDir, "src"), { recursive: true });
+    writeFileSync(join(repoDir, "src", "old-dir.txt"), "content\n");
+    ref("nav", 1, "baseline", "line1\n");
+    // Completion: renamed within the SAME dir (brace compression).
+    rmSync(join(repoDir, "src", "old-dir.txt"));
+    writeFileSync(join(repoDir, "src", "new-dir.txt"), "content\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    const tree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "rd"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1", commit], { cwd: repoDir });
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-turn-diff-for 1)");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toMatch(/R .*old-dir\.txt => new-dir\.txt/);
   });
 });

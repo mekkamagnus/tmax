@@ -266,20 +266,38 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
 (defun or-with-rename (hit path)
   (if (and hit (> (length hit) 0))
     hit
-    (let ((pos (fikra-diff-arrow-pos path 0)))
-      (if (> pos 0)
-        (let ((tail (substring path (+ pos 4) (length path))))
-          (let ((h2 (hashmap-get fikra-diff-letters tail)))
-            (if (and h2 (> (length h2) 0)) h2 nil)))
-        nil))))
+    ;; r98 (codex r97 P2): same-directory renames print BRACE-COMPRESSED
+    ;; ("src/{old => new}.txt") — decompress to the new path before the
+    ;; lookup; plain "old => new" tails resolve directly.
+    (let ((br (fikra-diff-strpos path "{" 0)))
+      (if (> br 0)
+        (let* ((arrow (fikra-diff-strpos path " => " 0))
+               (close (fikra-diff-strpos path "}" 0)))
+          (if (and (> arrow 0) (> close arrow))
+            (let ((h2 (hashmap-get fikra-diff-letters
+                       (concat (substring path 0 br)
+                               (substring path (+ arrow 4) close)
+                               (substring path (+ close 1) (length path))))))
+              (if (and h2 (> (length h2) 0)) h2 nil))
+            nil))
+        (let ((arrow (fikra-diff-strpos path " => " 0)))
+          (if (> arrow 0)
+            (let ((h2 (hashmap-get fikra-diff-letters
+                       (substring path (+ arrow 4) (length path)))))
+              (if (and h2 (> (length h2) 0)) h2 nil))
+            nil))))))
 
-;; First index of " => " in S (a byte scan).
-(defun fikra-diff-arrow-pos (s i)
-  (if (> (- (length s) i) 3)
-    (if (string= (substring s i (+ i 4)) " => ")
+;; First index of NEEDLE in S from I (a byte scan — string-match returns
+;; the matched STRING, not a position); 0 when absent.
+(defun fikra-diff-strpos (s needle i)
+  (if (> (- (length s) i) (- (length needle) 1))
+    (if (string= (substring s i (+ i (length needle))) needle)
       i
-      (fikra-diff-arrow-pos s (+ i 1)))
+      (fikra-diff-strpos s needle (+ i 1)))
     0))
+
+(defun fikra-diff-arrow-pos (s i)
+  (fikra-diff-strpos s " => " i))
 
 ;; The mockup's footer hint — AFTER the patch (r97: the controls ride
 ;; below the content, not between the summary and the patch).
