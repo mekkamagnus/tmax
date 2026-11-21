@@ -19,7 +19,7 @@ const base: StopDeps = {
   close: () => {},
   sleep: async () => {},
   unlinkSocket: () => true,
-  recheckConnect: async () => false,
+  recheckRefusal: async () => "refused",
   socketGone: () => true,
   pidsOnSocket: () => ["100"],
   cmdline: () => "/usr/local/bin/tmax --daemon",
@@ -41,8 +41,8 @@ describe("#276 — the 8-row output matrix", () => {
   test("1) exists + refused + recheck still refused → unlink → 'Stale socket removed', exit 0", async () => {
     let unlinked = false;
     const o = await run({
-      identity: async () => { throw new Error("refused"); },
-      recheckConnect: async () => false,
+      identity: async () => { const e = new Error("connect ECONNREFUSED") as Error & { code?: string }; e.code = "ECONNREFUSED"; throw e; },
+      recheckRefusal: async () => "refused",
       unlinkSocket: () => { unlinked = true; return true; },
     });
     expect(row(o)).toEqual({ stream: "stdout", line: STOP_LINES.staleRemoved });
@@ -52,8 +52,8 @@ describe("#276 — the 8-row output matrix", () => {
 
   test("1b) refused but the RECHECK connects (a mid-start daemon) → proceeds to identity", async () => {
     const o = await run({
-      identity: async () => { throw new Error("refused"); },
-      recheckConnect: async () => true,
+      identity: async () => { const e = new Error("connect ECONNREFUSED") as Error & { code?: string }; e.code = "ECONNREFUSED"; throw e; },
+      recheckRefusal: async () => "accepted",
       // The post-recheck path re-asks identity: answer embedded.
       socketExists: () => true,
       requestShutdown: async () => {},
@@ -158,6 +158,35 @@ describe("#276 — the verification triple (replacement at each boundary)", () =
     expect(shutdown).toBe(false);
   });
 
+  test("MIXED errors (refused then timeout) → unresponsive, NO unlink (staleness needs TWO refusals)", async () => {
+    let unlinked = false;
+    const o = await run({
+      identity: async () => { const e = new Error("connect ECONNREFUSED") as Error & { code?: string }; e.code = "ECONNREFUSED"; throw e; },
+      recheckRefusal: async () => { const e = new Error("connect ETIMEDOUT") as Error & { code?: string }; throw e; },
+      unlinkSocket: () => { unlinked = true; return true; },
+    });
+    expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.unresponsive });
+    expect(unlinked).toBe(false);
+  });
+
+  test("the SIGNAL fails + the pid is GONE → SIGTERM-success row (exit between verify and signal)", async () => {
+    const o = await run({
+      socketGone: () => false,
+      signal: () => { throw new Error("ESRCH"); },
+      pidAlive: () => false,
+    });
+    expect(row(o)).toEqual({ stream: "stdout", line: STOP_LINES.stoppedSigterm });
+  });
+
+  test("the SIGNAL fails + the pid is ALIVE → the warning row", async () => {
+    const o = await run({
+      socketGone: () => false,
+      signal: () => { throw new Error("EPERM"); },
+      pidAlive: () => true,
+    });
+    expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.survived });
+  });
+
   test("a NON-refusal connect error (timeout/permission) → unresponsive, NO unlink", async () => {
     let unlinked = false;
     const o = await run({
@@ -171,6 +200,7 @@ describe("#276 — the verification triple (replacement at each boundary)", () =
   test("unlink FAILURE on a confirmed stale socket → owner-changed row (never claim removal)", async () => {
     const o = await run({
       identity: async () => { const e = new Error("connect ECONNREFUSED") as Error & { code?: string }; e.code = "ECONNREFUSED"; throw e; },
+      recheckRefusal: async () => "refused",
       unlinkSocket: () => false,
     });
     expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.ownerChanged });

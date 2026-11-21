@@ -60,8 +60,11 @@ export function realStopDeps(socket: string): StopDeps {
     },
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     unlinkSocket: () => { try { unlinkSync(socket); return !existsSync(socket); } catch { return false; } },
-    recheckConnect: async () => {
-      try { await connect(); return true; } catch { return false; }
+    recheckRefusal: async () => {
+      try { await connect(); return "accepted" as const; } catch (err) {
+        if ((err as { code?: string })?.code === "ECONNREFUSED") return "refused" as const;
+        throw err; // a DIFFERENT failure — never confirms staleness
+      }
     },
     socketGone: () => !existsSync(socket),
     pidsOnSocket: () => {

@@ -28,8 +28,10 @@ export interface StopDeps {
   sleep(ms: number): Promise<void>;
   /** Returns true when the socket was removed; false on failure. */
   unlinkSocket(): boolean;
-  /** The 250ms recheck for a mid-start daemon. */
-  recheckConnect(): Promise<boolean>;
+  /** The 250ms recheck: "refused" (ECONNREFUSED again — stale), a
+   *  thrown error (a DIFFERENT failure — timeouts/permissions never
+   *  confirm staleness), or "accepted". */
+  recheckRefusal(): Promise<"refused" | "accepted">;
   socketGone(): boolean;
   /** lsof -t -U on the socket: the pids, or null when lsof is unusable. */
   pidsOnSocket(): string[] | null;
@@ -86,8 +88,17 @@ export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
     // report without removing).
     if (!isRefusal(err)) return out("stderr", STOP_LINES.unresponsive);
     await deps.sleep(250);
-    const accepted = await deps.recheckConnect();
-    if (!accepted) {
+    // The recheck must ALSO be a confirmed refusal (codex r3 c1: a
+    // refused-then-timeout/permission sequence must NOT unlink — only
+    // two ECONNREFUSED confirm staleness; a DIFFERENT error on the
+    // recheck is the unresponsive row).
+    let recheckErr: "refused" | "accepted";
+    try {
+      recheckErr = await deps.recheckRefusal();
+    } catch {
+      return out("stderr", STOP_LINES.unresponsive);
+    }
+    if (recheckErr === "refused") {
       // The unlink can FAIL (permissions) — report it, never claim
       // success on a live socket (codex r2 c3).
       if (!deps.unlinkSocket()) return out("stderr", STOP_LINES.ownerChanged);
@@ -131,7 +142,16 @@ export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
   if (String(reidentified.pid) !== pid) return out("stderr", STOP_LINES.ownerChanged);
   const cmd = deps.cmdline(pid);
   if (cmd === null || !deps.isDaemonCmdline(cmd)) return out("stderr", STOP_LINES.ownerChanged);
-  deps.signal(pid, "SIGTERM");
+  try {
+    deps.signal(pid, "SIGTERM");
+  } catch {
+    // The daemon exited between verification and the signal, or a
+    // permission failure — a matrix outcome, never an escape (codex
+    // r3 c2). Re-derive from liveness: gone IS success here.
+    return deps.pidAlive(pid)
+      ? out("stderr", STOP_LINES.survived)
+      : out("stdout", STOP_LINES.stoppedSigterm);
+  }
   await deps.sleep(1000);
   return deps.pidAlive(pid)
     ? out("stderr", STOP_LINES.survived)
@@ -139,8 +159,9 @@ export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
 }
 
 function isRefusal(err: unknown): boolean {
-  const code = (err as { code?: string })?.code;
-  return code === "ECONNREFUSED" || String((err as Error)?.message ?? err).includes("refused");
+  // CODE-ONLY (codex r3 c1): the message heuristic admitted foreign
+  // errors — only the errno confirms a refusal.
+  return (err as { code?: string })?.code === "ECONNREFUSED";
 }
 
 function isValidIdentity(v: unknown): v is { mode: "daemon" | "embedded"; pid: number } {
