@@ -954,3 +954,12 @@ The standing 6 predated the screen's r24-r37 evolution (verified patch generatio
 - **r110 (`5bf3864`, PASS-on-claims 7/10)**: latest-request identity (the ghost lesson applied — only the latest fired request may land) + the turn-end history boundary (completed turns only; the open turn excluded exactly once).
 
 **Named**: the tool-using loop (the model-driven ⚙/evidence/checkpoint sequence through the L2 gate — the ollama tools API is the path), thread-switch routing (the bg-settle pattern), capture-based regressions, the streaming cursor. Board stays **70/80** pending the section re-grade.
+
+## Rounds 116-119 — the L2 gate + per-action checkpoints in the native loop
+
+- **r116 (`758c2a8`, 5/10)**: the gate PARKS destructive model bash calls at the approval panel (the r70 field set, origin: native-loop); the decide seam resumes (allow executes; reject teaches the model); model edits capture checkpoints with INLINE markers. LIVE 17/0. Codex found six P1s.
+- **r117 (`dcf36ef`, 5/10)**: five closed — the guarded seam, halted rounds (no leak-through), the widened deletion classifier (find -delete/xargs rm/glob-rm/shred), edit containment (../ refuses), thread-bound decisions.
+- **r118 (`0536bdf`, 6/10)**: the executor unexported; the park thread-stamped (the assignment was lost in churn); refusals RETURN (no false "wrote" to the model).
+- **r119 (`50ca291`, PASS 6/10)**: settle-home — decisions settle the ORIGINATING thread (no stranding after a focus switch).
+
+**The native loop now mediates its own model actions.** Named: per-action ref independence, parked-reply resumption, async exec, streaming, buffer-read. Board stays **70/80** pending the section re-grade.
