@@ -8,22 +8,23 @@ import { editorStateToJson, jsonToEditorState, withTransientRevision } from "../
 
 /**
  * @file transient-repaint.test.ts
- * @description #318 — the display-layer repaint cadence. The transient
- * layer (fikra/transient): daemon-side state OUTSIDE the buffer/event
- * log; ticks bump a revision carried in the poll response beside
- * bufferRevision; the interval runs ONLY while ≥1 thread runs. Gate r2 /
- * codex r1 hardening: the lifecycle drives through the REAL thread
- * state machine, the tick's auto-stop asks the AUTHORITATIVE registry
- * (a missed notification is caught), the glyph rotation is pinned
- * directly, the REAL 200ms interval shell fires, and the segment
- * survives the FULL wire round-trip into the client EditorState (what
- * render() reads) — including the per-frame viewed-thread resolution.
+ * @description #318 — the display-layer repaint cadence (updated for
+ * #319's indicator semantics: the tick carries the TS clock, and the
+ * interval stops ONE TICK AFTER the last terminal — the frozen frame
+ * rides a poll, the next tick clears + stops). The REAL 200ms shell is
+ * silenced after setup in most tests (a live tick racing the manual
+ * ones made aging nondeterministic); the tick's reconcile branch
+ * re-activates the state machine on the first manual tick. The cadence
+ * test alone runs the live shell (that is its subject).
  */
 
 type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 const e = (ed: Editor, expr: string) => executeTlisp(ed, expr);
 const strip = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "");
 const active = (ed: Editor) => String(e(ed, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value);
+const tick = (ed: Editor) => e(ed, "(fikra/transient/fikra-transient-tick (editor-time-now))");
+const silence = (ed: Editor) => e(ed, "(fikra/transient/fikra-transient-stop)");
+const GERUND = /pondering|reading|editing/;
 
 const dirs: string[] = [];
 const originalCwd = process.cwd();
@@ -45,36 +46,46 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
-describe("#318 — interval lifecycle (the REAL state machine drives it)", () => {
-  test("starts on the first running thread; a terminal of ONE keeps it while another runs; the LAST terminal stops it", () => {
+describe("#318/#319 — interval lifecycle (the REAL state machine drives it)", () => {
+  test("starts on the first running thread; a terminal of ONE keeps it while another runs; the LAST terminal stops it one tick later", () => {
     expect(active(editor)).toBe("0");
-    // First running thread starts the interval (main → running).
+    // First running thread starts the interval.
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     expect(active(editor)).toBe("1");
     // A SECOND running thread (fix-1 → running).
     e(editor, "(fikra/thread/fikra-thread-new)");
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    // Silence the live shell — manual ticks drive deterministically from
+    // here (the tick's reconcile branch re-activates the state machine).
+    silence(editor);
     // Terminal of ONE (main → idle) keeps the interval: fix-1 still runs.
     e(editor, '(fikra/thread/fikra-thread-focus "main")');
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    tick(editor);
     expect(active(editor)).toBe("1");
-    // Terminal of the LAST running thread stops it.
+    // Terminal of the LAST running thread: the stop is DEFERRED — the
+    // frozen frame rides a poll, the tick after clears + stops (#319).
     e(editor, '(fikra/thread/fikra-thread-focus "fix-1")');
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
-    expect(active(editor)).toBe("0");
+    expect(active(editor)).toBe("1"); // frozen still rideable
+    tick(editor);
+    expect(active(editor)).toBe("1"); // one more poll cycle
+    tick(editor);
+    expect(active(editor)).toBe("0"); // cleared + stopped
   });
 
   test("a tick auto-stops on a MISSED terminal (registry-authoritative hardening)", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     expect(active(editor)).toBe("1");
+    silence(editor);
     // Simulate the missed hook: the registry goes idle WITHOUT status-set's
-    // notification path (set-field bypasses the state machine's notify).
+    // notification path (set-field bypasses the state machine's notify) —
+    // so NO frozen frame exists either.
     e(editor, '(fikra/thread/fikra-thread-set-field "status" "idle")');
-    expect(active(editor)).toBe("1"); // the interval is STILL live (missed)
-    e(editor, "(fikra/transient/fikra-transient-tick)");
+    tick(editor);
     expect(active(editor)).toBe("0"); // the tick caught it from the REGISTRY
-    // A further tick is a no-op (the inactive guard).
-    expect(String(e(editor, "(fikra/transient/fikra-transient-tick)").value)).toBe("null");
+    // A further tick is a no-op (the inactive guard kills the shell).
+    expect(String(tick(editor).value)).toBe("null");
   });
 
   test("RECONCILE: a tick with the layer inactive but a thread RUNNING re-activates it (module-reload resume)", () => {
@@ -82,12 +93,14 @@ describe("#318 — interval lifecycle (the REAL state machine drives it)", () =>
     expect(active(editor)).toBe("1");
     // The post-reload state shape: active flag gone (defvars reset /
     // explicit stop) while the REGISTRY still says running.
-    e(editor, "(fikra/transient/fikra-transient-stop)");
+    silence(editor);
     expect(active(editor)).toBe("0");
     // The next tick RECONCILES instead of killing the interval.
-    e(editor, "(fikra/transient/fikra-transient-tick)");
+    tick(editor);
     expect(active(editor)).toBe("1");
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    tick(editor);
+    tick(editor);
     expect(active(editor)).toBe("0");
   });
 });
@@ -95,11 +108,12 @@ describe("#318 — interval lifecycle (the REAL state machine drives it)", () =>
 describe("#318 — frame changes with the log byte-identical", () => {
   test("≥3 ticks bump the transient revision; the event log is UNCHANGED (byte-compare)", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    silence(editor);
     const logPath = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
     e(editor, '(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" "marker")))');
     const before = readFileSync(logPath, "utf8");
     const rev0 = Number(e(editor, "(fikra/transient/fikra-transient-revision)").value);
-    for (let i = 0; i < 3; i++) e(editor, "(fikra/transient/fikra-transient-tick)");
+    for (let i = 0; i < 3; i++) tick(editor);
     const rev3 = Number(e(editor, "(fikra/transient/fikra-transient-revision)").value);
     expect(rev3 - rev0).toBe(3);
     // THE contract: the log is byte-identical across ticks.
@@ -107,15 +121,14 @@ describe("#318 — frame changes with the log byte-identical", () => {
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
   });
 
-  test("the REAL 200ms interval shell ticks on its own (the cadence is live, the log stays frozen)", async () => {
+  test("the REAL 200ms interval shell ticks on its own (the cadence is live, the log stays frozen, the stop self-settles)", async () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     const logPath = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
     const before = readFileSync(logPath, "utf8");
     const c0 = Number(e(editor, "(fikra/transient/fikra-transient-count)").value);
     try {
       // 900ms window at a 200ms cadence = ~4 expected ticks; asserting
-      // ≥2 leaves 4.5x slack for timer coalescing on a loaded runner
-      // (gate r3 flake note).
+      // ≥2 leaves 4.5x slack for timer coalescing on a loaded runner.
       await new Promise((r) => setTimeout(r, 900));
       const c1 = Number(e(editor, "(fikra/transient/fikra-transient-count)").value);
       expect(c1 - c0).toBeGreaterThanOrEqual(2);
@@ -123,12 +136,16 @@ describe("#318 — frame changes with the log byte-identical", () => {
     } finally {
       e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
     }
+    // The shell settles the deferred stop itself (frozen ages over ~2
+    // ticks ≈ 400ms; 800ms is a 2x window).
+    await new Promise((r) => setTimeout(r, 800));
     expect(active(editor)).toBe("0");
   });
 
   test("the spinner GLYPH rotates across ticks (pinned directly, not via the revision-bearing segment)", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
-    const glyphs = [0, 1, 2, 3, 4].map(() => strip(String(e(editor, "(progn (fikra/transient/fikra-transient-tick) (fikra/transient/fikra-transient-spinner-glyph))").value)));
+    silence(editor);
+    const glyphs = [0, 1, 2, 3, 4].map(() => strip(String(e(editor, "(progn (fikra/transient/fikra-transient-tick (editor-time-now)) (fikra/transient/fikra-transient-spinner-glyph))").value)));
     // 4-frame rotation: the 5th tick returns to the 1st frame.
     expect(new Set(glyphs.slice(0, 4)).size).toBe(4);
     expect(glyphs[4]).toBe(glyphs[0]);
@@ -136,38 +153,45 @@ describe("#318 — frame changes with the log byte-identical", () => {
   });
 });
 
-describe("#318 — the wire: segment + revision through the REAL helper", () => {
+describe("#318/#319 — the wire: segment + revision through the REAL helper", () => {
   const interpOf = (ed: Editor) => (ed as unknown as { interpreter: { execute: (x: string) => unknown } }).interpreter;
 
-  test("the stamp rides the wire for the VIEWED thread's buffer; a mid-turn attach sees the CURRENT revision", () => {
+  test("the stamp rides the wire for the VIEWED thread's buffer; a mid-turn attach sees the CURRENT revision; the terminal sequence is frozen→clear", () => {
     // View main's *Fikra* buffer, start a turn, tick.
     e(editor, "(fikra/thread/fikra-thread-open)");
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
-    e(editor, "(fikra/transient/fikra-transient-tick)");
+    silence(editor);
+    tick(editor);
     const state = withTransientRevision(editor.getEditorState(), interpOf(editor));
     const wire = editorStateToJson(state, 22, 100) as { transientRevision?: number; transientSegment?: string };
     expect(typeof wire.transientRevision).toBe("number");
     expect(wire.transientRevision!).toBeGreaterThan(0);
-    expect(wire.transientSegment).toContain("working");
+    expect(wire.transientSegment).toMatch(GERUND);
     // MID-TURN ATTACH: a fresh poll (a client attaching now) sees the
     // CURRENT revision — three more ticks land on the next stamp.
     const revAtAttach = wire.transientRevision!;
-    for (let i = 0; i < 3; i++) e(editor, "(fikra/transient/fikra-transient-tick)");
+    for (let i = 0; i < 3; i++) tick(editor);
     const wire2 = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100) as { transientRevision?: number };
     expect(wire2.transientRevision!).toBe(revAtAttach + 3);
-    // Idle viewed thread → NO segment on the wire (the focused rule).
+    // TERMINAL SEQUENCE (#319): the first frame after terminal is FROZEN
+    // (✓ + the final counts); the tick after clears it.
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
-    const wire3 = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100) as { transientSegment?: string };
-    expect(wire3.transientSegment).toBeUndefined();
+    const wireFrozen = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100) as { transientSegment?: string };
+    expect(wireFrozen.transientSegment).toMatch(/^✓/);
+    tick(editor);
+    tick(editor);
+    const wireClear = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100) as { transientSegment?: string };
+    expect(wireClear.transientSegment).toBeUndefined();
   });
 
   test("PER-FRAME viewed threads: main's buffer gets the spinner; an idle fix-1's gets none — concurrently", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)"); // main running
     e(editor, "(fikra/thread/fikra-thread-new)"); // fix-1 exists, idle
-    e(editor, "(fikra/transient/fikra-transient-tick)");
+    silence(editor);
+    tick(editor);
     // The T-Lisp resolution (what the helper evaluates per frame):
     const segMain = String(e(editor, '(fikra/transient/fikra-transient-viewed-segment-for "*Fikra*")').value);
-    expect(segMain).toContain("working");
+    expect(segMain).toMatch(GERUND);
     const segFix = String(e(editor, '(fikra/transient/fikra-transient-viewed-segment-for "*Fikra-fix-1*")').value);
     expect(segFix).toBe("null");
     // A NON-fikra buffer gets no spinner.
@@ -175,7 +199,7 @@ describe("#318 — the wire: segment + revision through the REAL helper", () => 
     expect(segScratch).toBe("null");
     // The HELPER path with a frame state viewing each buffer:
     const sMain = withTransientRevision({ ...editor.getEditorState(), currentBufferName: "*Fikra*" }, interpOf(editor)) as { transientSegment?: string };
-    expect(sMain.transientSegment).toContain("working");
+    expect(sMain.transientSegment).toMatch(GERUND);
     const sFix = withTransientRevision({ ...editor.getEditorState(), currentBufferName: "*Fikra-fix-1*" }, interpOf(editor)) as { transientSegment?: string };
     expect(sFix.transientSegment).toBeUndefined();
     e(editor, '(fikra/thread/fikra-thread-focus "main")');
@@ -183,28 +207,25 @@ describe("#318 — the wire: segment + revision through the REAL helper", () => 
   });
 
   test("the CLIENT half: jsonToEditorState carries the segment — render()'s field survives the round-trip", () => {
-    // THE gate-r2 CRITICAL regression pin: the wire half was live but the
-    // client deserializer dropped the field — the spinner was dead code
-    // in the live TUI.
     e(editor, "(fikra/thread/fikra-thread-open)");
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
-    e(editor, "(fikra/transient/fikra-transient-tick)");
+    silence(editor);
+    tick(editor);
     const wire = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100);
     const clientState = jsonToEditorState(wire) as { transientRevision?: number; transientSegment?: string };
-    expect(clientState.transientSegment).toContain("working");
+    expect(clientState.transientSegment).toMatch(GERUND);
     expect(clientState.transientRevision!).toBeGreaterThan(0);
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    tick(editor);
+    tick(editor);
     const wireIdle = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100);
     expect((jsonToEditorState(wireIdle) as { transientSegment?: string }).transientSegment).toBeUndefined();
   });
 
   test("the spinner reservation over-sends ONE row: the former bottom line survives the client's viewport advance (codex r4)", () => {
-    // A 30-line buffer; the wire normally carries the 22-row window
-    // (lines 0-21). With the segment present the client reserves the
-    // spinner row and may display 1-22 — the wire must cover line 22.
     e(editor, `(buffer-insert "${Array.from({ length: 30 }, (_, i) => `line-${i}`).join("\\n")}\\n")`);
     const state = editor.getEditorState();
-    const withSeg = { ...state, viewportTop: 0, transientSegment: "| working…" };
+    const withSeg = { ...state, viewportTop: 0, transientSegment: "| pondering · 3 chunks · 4s" };
     const wireSeg = editorStateToJson(withSeg, 22, 100);
     expect(wireSeg.visibleLines!.length).toBe(23); // rows + the reserved row
     const client = jsonToEditorState(wireSeg);
@@ -218,16 +239,13 @@ describe("#318 — the wire: segment + revision through the REAL helper", () => 
   test("the reservation survives word wrap (codex r5: the wrap walk must not swallow the extra row)", () => {
     e(editor, `(buffer-insert "${Array.from({ length: 30 }, (_, i) => `line-${i}`).join("\\n")}\\n")`);
     const state = editor.getEditorState();
-    // Wrap ON with a known width: short lines (no actual wrapping) → the
-    // wrap walk settles at exactly `rows`; the reservation must still
-    // add its +1 AFTER the walk (the old order reset it to Math.max).
-    const wrapped = { ...state, viewportTop: 0, config: { ...state.config, wordWrap: true }, transientSegment: "| working…" };
+    const wrapped = { ...state, viewportTop: 0, config: { ...state.config, wordWrap: true }, transientSegment: "| pondering · 3 chunks · 4s" };
     const wireWrap = editorStateToJson(wrapped, 22, 100);
     expect(wireWrap.visibleLines!.length).toBe(23);
     // And genuinely-wrapping long lines: the wrapped window + the +1.
     e(editor, `(buffer-insert "${("x".repeat(200) + "\\n").repeat(5)}")`);
     const state2 = editor.getEditorState();
-    const wrappedLong = { ...state2, viewportTop: 0, config: { ...state2.config, wordWrap: true }, transientSegment: "| working…" };
+    const wrappedLong = { ...state2, viewportTop: 0, config: { ...state2.config, wordWrap: true }, transientSegment: "| pondering" };
     const wireLong = editorStateToJson(wrappedLong, 22, 100);
     const plainLong = editorStateToJson({ ...state2, viewportTop: 0, config: { ...state2.config, wordWrap: true } }, 22, 100);
     expect(wireLong.visibleLines!.length).toBe(plainLong.visibleLines!.length + 1);

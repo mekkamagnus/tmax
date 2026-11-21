@@ -292,8 +292,33 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
               (fikra-norm-assistant obj))
             ((string= type "user")
               (fikra-norm-user obj))
+            ((string= type "result")
+              (fikra-norm-result obj))
             (t nil)))))
     (error nil)))
+
+;; result → the USAGE final-count event (#319): provider-reported usage
+;; (input+output tokens) persisted as a normal FAEP event — the honest
+;; final `✓ N tokens` line, replay-identical from the log. No usage on
+;; the result (interrupted turns) → NO event → no line (the recorded
+;; absent-usage path).
+(defun fikra-norm-result (obj)
+  (let* ((usage (fikra-afield obj "usage"))
+         (in-tok (if (listp usage) (fikra-afield usage "input_tokens") nil))
+         (out-tok (if (listp usage) (fikra-afield usage "output_tokens") nil))
+         (in-n (fikra-tokens-to-number in-tok))
+         (out-n (fikra-tokens-to-number out-tok)))
+    (if (and in-n out-n)
+      (list (list (list "kind" "usage")
+                  (list "tokens" (number-to-string (+ in-n out-n)))))
+      nil)))
+
+;; The CLI's usage numbers arrive as JSON numbers OR strings — accept both.
+(defun fikra-tokens-to-number (v)
+  (cond
+    ((numberp v) v)
+    ((stringp v) (string-to-number v))
+    (t nil)))
 
 ;; system/init → session event (the resume handle).
 (defun fikra-norm-system (obj)

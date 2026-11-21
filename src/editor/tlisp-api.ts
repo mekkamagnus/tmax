@@ -153,7 +153,10 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         // stop an interval; the tick body is T-Lisp's fikra-transient-tick
         // — the logic lives in T-Lisp, the timing in TS). 200ms cadence.
         ops.set("editor-transient-timer-start", (): Either<AppError, TLispValue> => {
-          const tickExpr = "(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-tick)) (error () nil))";
+          // #319: the tick carries the TS clock (ms) — the transient layer
+          // stamps `now` per tick (elapsed renders at tick resolution; the
+          // FIRST-event start uses editor-time-now directly for precision).
+          const tickExpr = "(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-tick (editor-time-now))) (error () nil))";
           // Prime the MODULE (require only — NOT a tick; the gate caught
           // the start bumping the revision once).
           ctx.evalTlisp?.("(condition-case nil (require-module fikra/transient) (error () nil))");
@@ -161,6 +164,8 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           transientTimer = setInterval(() => { ctx.evalTlisp?.(tickExpr); }, 200);
           return Either.right(createNil());
         });
+        ops.set("editor-time-now", (): Either<AppError, TLispValue> =>
+          Either.right(createNumber(Date.now())));
         ops.set("editor-transient-timer-stop", (): Either<AppError, TLispValue> => {
           if (transientTimer) {
             clearInterval(transientTimer);

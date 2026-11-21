@@ -46,6 +46,26 @@
         ((string= k "turn-start") (setq fikra-event-turn-tools-v 0))
         ((string= k "tool-call") (setq fikra-event-turn-tools-v (+ fikra-event-turn-tools-v 1)))))))
 
+;; #319 — the STREAMING CHUNK COUNTER hook: text-delta + tool-call are
+;; THE two counted kinds (the issue's named rule — nothing else counts).
+;; Called from both emit paths beside count-tools (the same funnel
+;; precedent). Lazy require + swallow: the indicator must never kill an
+;; emit. ID = the thread the batch routes to (emit-batch-for) or the
+;; focused thread (emit-batch).
+(defun fikra-event-count-chunks (events id)
+  (let ((n 0))
+    (dolist (e events)
+      (let ((k (fikra-event-get-str e "kind")))
+        (if (or (string= k "text-delta") (string= k "tool-call"))
+          (setq n (+ n 1)))))
+    (if (> n 0)
+      (condition-case nil
+        (progn
+          (require-module fikra/transient)
+          (fikra/transient/fikra-transient-note-chunks id n))
+        (error () nil))
+      nil)))
+
 (defvar fikra-text-open nil
   "Whether a text-delta run is open (adjacent deltas join into one line).")
 
@@ -278,6 +298,13 @@ round-12 approvals catch)."
                       "(auto-accept-edits / full-access), then re-ask."))
           "\n"))
 
+;; #319 — thousands separators for the token line (1234 → "1,234").
+(defun fikra-event-format-tokens (s)
+  (if (<= (length s) 3)
+    s
+    (concat (fikra-event-format-tokens (substring s 0 (- (length s) 3)))
+            "," (substring s (- (length s) 3) (length s)))))
+
 ;; ── render: one event → display text ("" = nothing) ─────────────────
 ;; RFC §D2 table. Adjacent text-deltas join: the first opens a "You/AI: "
 ;; run, followers append without re-rendering the prefix; any other event
@@ -312,6 +339,12 @@ round-12 approvals catch)."
                               (if (string= m "") "" (concat " · " m)))
                             " ──")) "\n"))
       ((string= kind "session") "")
+      ((string= kind "usage")
+        ;; #319 — the honest final count: PROVIDER-REPORTED usage from the
+        ;; turn-end result, persisted as a normal FAEP event so replay
+        ;; renders it identically (no transient state in the final line).
+        (concat (fikra-face "\e[32m"
+                  (concat "✓ " (fikra-event-format-tokens (fikra-event-get-str event "tokens")) " tokens")) "\n"))
       ((string= kind "text-delta")
         (fikra-event-get-str event "text"))
       ((string= kind "thought")
@@ -479,6 +512,7 @@ bumps the revision the TUI poll consumes."
 (defun fikra-event-emit-batch-for (id events)
   (require-module fikra/thread)
   (fikra-event-count-tools events)
+  (fikra-event-count-chunks events id)
   (let ((target-root (fikra/thread/fikra-thread-field-root-of id))
         (target-buffer (fikra/thread/fikra-thread-buffer-name-of id)))
     ;; Gate round-2: unknown id (nil root) → DROP, never guess.
@@ -538,6 +572,7 @@ text-deltas inside the batch join into the same line."
   ;; (thread requires event; the cycle forbids a top-level require).
   (require-module fikra/thread)
   (fikra-event-count-tools events)
+  (fikra-event-count-chunks events (fikra/thread/fikra-thread-current))
   (if (null events)
     nil
     (progn

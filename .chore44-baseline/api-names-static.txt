@@ -1,6 +1,7 @@
 # Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
 # r88 L2-token arc's primitive landed without the refreeze — caught at the #318
 # rebase re-verify; also carries #318's editor-transient-timer-start/-stop).
+# #319: 433 -> 434 — editor-time-now (the transient clock primitive).
 add-hook
 append-file
 aref
@@ -169,6 +170,7 @@ editor-set-command-line
 editor-set-mode
 editor-set-status
 editor-status
+editor-time-now
 editor-transient-timer-start
 editor-transient-timer-stop
 enable-local-variables-p
