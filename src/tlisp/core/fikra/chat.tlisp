@@ -215,7 +215,7 @@ context flakiness)."
 ;; navigable (rendered by FAEP's §D2 table).
 (defun fikra-follow-link ()
   "Follow the file path under cursor in *Fikra*."
-  (let ((line (buffer-current-line-text)))
+  (let ((line (buffer-line (cursor-line))))
     (let ((path (fikra-extract-file-path line)))
       (if path
         (find-file path)

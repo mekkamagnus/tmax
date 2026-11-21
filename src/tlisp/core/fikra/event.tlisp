@@ -5,7 +5,7 @@
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
           fikra-event-get-str
-          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
+          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel) fikra-gate-panel fikra-event-get)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
@@ -585,8 +585,13 @@ bumps the revision the TUI poll consumes."
             ;; replay path — the INLINE ckpt merge (the marker onto its
             ;; edit row) lands in the finished transcript, matching the
             ;; mockup; the streaming shape stays append-only mid-turn.
+            ;; #320 (codex r1 c3): the thought-collapse marker joins the
+            ;; rebuild triggers — the threshold-crossing batch must not
+            ;; vanish from the live buffer (a background thread's rebuild
+            ;; correctly defers to its next view).
             (if (or (fikra-event-batch-has-tombstone-p events)
-                    (fikra-event-batch-has-end-p events))
+                    (fikra-event-batch-has-end-p events)
+                    (fikra-event-batch-has-kind-p events "thought-collapse"))
               (fikra-event-rebuild-fikra-buffer))))
         t))))
 
@@ -650,6 +655,10 @@ text-deltas inside the batch join into the same line."
 ;; Rebuild the *Fikra* buffer from the log (must be current when called).
 (defun fikra-event-rebuild-fikra-buffer ()
   (require-module fikra/thread)
+  ;; #320 (codex r1 c5): a REPLAY resets collapse to the length-derived
+  ;; default — the toggles survive only inside the TAB handler's rebuild.
+  (if (not fikra-thought-keep-toggles)
+    (setq fikra-thought-toggles (list)))
   (let ((was-ro (buffer-read-only-p))
         (text (fikra-event-replay)))
     (buffer-set-read-only nil)
@@ -678,6 +687,9 @@ text-deltas inside the batch join into the same line."
   "TOGGLED thought first-lines (display-only; never persisted, never a
 replay-parity input — the byte-parity compare runs under DEFAULT
 collapse; a rebuild RESETS to lengths unless toggled).")
+(defvar fikra-thought-keep-toggles nil
+  "t only inside the TAB handler's rebuild — every OTHER replay resets
+the toggles to the length-derived default (codex r1 c5).")
 
 (defun fikra-thought-line-count (s)
   (length (string-split s "\n")))
@@ -723,14 +735,37 @@ default, inverted by a live TAB toggle on its first line."
 ;; #320 — TAB on a thought line: toggle that segment's collapse and
 ;; rebuild (the toggle list is display-only; replay parity compares
 ;; under DEFAULT collapse — toggles are explicitly not a parity input).
+;; Strip ANSI faces (rendered lines carry them — the key must match the
+;; render key, which derives from PLAIN text; gate r1 catch).
+(defun fikra-strip-ansi (s)
+  (fikra-strip-ansi-scan s 0 (length s) ""))
+
+(defun fikra-strip-ansi-scan (s i len out)
+  (if (>= i len)
+    out
+    (if (string= (substring s i (+ i 1)) "\e")
+      ;; Skip to the 'm' that closes the escape.
+      (fikra-strip-ansi-scan s (fikra-ansi-end s i len) len out)
+      (fikra-strip-ansi-scan s (+ i 1) len (concat out (substring s i (+ i 1)))))))
+
+(defun fikra-ansi-end (s i len)
+  (if (or (>= i len) (string= (substring s i (+ i 1)) "m"))
+    (+ i 1)
+    (fikra-ansi-end s (+ i 1) len)))
+
 (defun fikra-thought-tab ()
-  (let* ((raw (buffer-current-line-text))
-         (line (if (>= (length raw) 2) (substring raw 2 (length raw)) raw)))
+  (let* ((raw0 (buffer-line (cursor-line)))
+         (raw (fikra-strip-ansi raw0))
+         (line (if (and (>= (length raw) 2) (string= (substring raw 0 2) "· "))
+                (substring raw 2 (length raw))
+                raw)))
     (let ((key (fikra-thought-tab-key-of line)))
       (if key
         (progn
           (fikra-thought-toggle-at key)
-          (fikra-event-rebuild-fikra-buffer)
+          (setq fikra-thought-keep-toggles t)
+          (condition-case nil (fikra-event-rebuild-fikra-buffer) (error () nil))
+          (setq fikra-thought-keep-toggles nil)
           (editor-set-status "Fikra: thought toggled"))
         (editor-set-status "Fikra: not a thought line")))))
 

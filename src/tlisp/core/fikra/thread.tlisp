@@ -777,6 +777,9 @@ thread→adapter has no cycle but keep the lazy convention)."
   ;; Validate the transition FIRST — an illegal begin must not bump the
   ;; persisted turn count (checked-state hygiene, gate catch).
   (fikra-thread-status-set "running")
+  ;; #320 (codex r1 c2): the turn boundary RESETS the thought
+  ;; accumulator — the CLI's content-block indices restart per message.
+  (fikra-thought-reset-for (fikra-thread-current))
   (let* ((state (fikra-thread-state))
          (n (+ 1 (hashmap-get state "turn-count"))))
     (editor/keymaps/keymap-mutable-set! state "turn-count" n)
@@ -905,11 +908,36 @@ thread→adapter has no cycle but keep the lazy convention)."
           rows))
       nil)))
 
+;; #320: a turn's end closes any open thinking block — the flush's
+;; marker (if the block crossed the collapse threshold) rides through
+;; the normal emit path so the final rebuild lands the collapsed line.
+;; Lazy requires (the cycle discipline); errors swallowed — the flush
+;; must never kill a turn end.
+(defun fikra-thought-flush-for (id)
+  (condition-case nil
+    (progn
+      (require-module fikra/thought)
+      (require-module fikra/event)
+      (let ((evs (fikra/thought/fikra-thought-flush id (list))))
+        (if (> (length evs) 0)
+          (fikra/event/fikra-event-emit-batch-for id evs))))
+    (error () nil)))
+
+;; #320 (codex r1 c2): a NEW TURN resets the thought accumulator — the
+;; CLI's content-block indices restart per message; without the reset a
+;; later turn's block 0 reads as a closed-block redelivery.
+(defun fikra-thought-reset-for (id)
+  (condition-case nil
+    (progn
+      (require-module fikra/thought)
+      (fikra/thought/fikra-thought-reset id))
+    (error () nil)))
+
 (defun fikra-thread-turn-end (status)
   "STATUS: completed | error | interrupted (the turn-end event's status)."
   ;; #320: close any open thinking block FIRST (its marker renders inside
   ;; the completing turn, before the end marker).
-  (condition-case nil (fikra-thought-flush-for (fikra-thread-current)) (error () nil))
+  (fikra-thought-flush-for (fikra-thread-current))
   ;; Changed files render inside the completing turn (before the marker).
   (condition-case nil (fikra-thread-emit-file-changes) (error () nil))
   ;; Emitted via the EXPLICIT-PATH batch emitter: turn-end runs from the
