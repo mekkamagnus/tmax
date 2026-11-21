@@ -106,12 +106,18 @@ clears) when the cursor left the suggestion's anchor."
       nil)))
 
 (defun fikra-ghost-accept-word ()
-  "C-n: accept the ghost's first word only (partial accept)."
+  "C-n: accept the ghost's first word; the REMAINDER stays as the new
+ghost (r92, codex r91 P3 — dismissing it all made a second C-n lose the
+suggestion; repeated partial accepts walk the ghost word by word)."
   (interactive)
   (if (fikra-ghost-anchored-p)
-    (progn
-      (buffer-insert (fikra-ghost-word-prefix fikra-ghost-current 0 ""))
-      (fikra-ghost-dismiss)
+    (let* ((word (fikra-ghost-word-prefix fikra-ghost-current 0 ""))
+           (rest (substring fikra-ghost-current
+                            (length word) (length fikra-ghost-current))))
+      (buffer-insert word)
+      (if (> (length rest) 0)
+        (fikra-ghost-set rest)
+        (fikra-ghost-dismiss))
       t)
     (progn
       (fikra-ghost-dismiss)
@@ -231,9 +237,14 @@ sets on arrival). The model resolves from /api/tags on first use."
   nil)
 
 (defun fikra-ghost-ollama-tags ()
-  (http-request (concat fikra-ghost-ollama-url "/api/tags")
-                :method "GET"
-                :filter "fikra/ghost/fikra-ghost-http-filter"))
+  ;; r92 (codex r91 P1): the tags request IS the latest request until its
+  ;; follow-up generate restamps — it must carry the identity or the
+  ;; completion guard discards it and first-use discovery dies.
+  (let ((id (http-request (concat fikra-ghost-ollama-url "/api/tags")
+                          :method "GET"
+                          :filter "fikra/ghost/fikra-ghost-http-filter")))
+    (setq fikra-ghost-latest-id id)
+    id))
 
 (defun fikra-ghost-ollama-generate (prefix)
   (let* ((esc (fikra-ghost-json-escape prefix 0 ""))
@@ -365,6 +376,12 @@ sets on arrival). The model resolves from /api/tags on first use."
     (if (not (= id (if fikra-ghost-latest-id fikra-ghost-latest-id -1)))
       nil
     (progn
+    ;; r92 (codex r91 P2): the source check precedes the status branch —
+    ;; a mid-flight switch to none cancels EVERYTHING, including the
+    ;; error footer.
+    (if (not (string= fikra-ghost-source-name "fikra/ghost/fikra-ghost-source-ollama"))
+      (progn (setq fikra-ghost-pending-prefix nil) nil)
+    (progn
     ;; r90: the latency belongs to THIS request — absent start means
     ;; UNMEASURED (nil), never a reused older number.
     (if start
@@ -396,10 +413,7 @@ sets on arrival). The model resolves from /api/tags on first use."
                   (fikra-ghost-ollama-generate fikra-ghost-pending-prefix))))
             t)
           ;; the generate reply: the "response" field completes the line.
-          ;; The LATEST-request guard ran at the fn's top (r91); the
-          ;; source-selection guard (r90) still applies here.
-          (if (not (string= fikra-ghost-source-name "fikra/ghost/fikra-ghost-source-ollama"))
-            (progn (setq fikra-ghost-pending-prefix nil) nil)
+          ;; Both guards (latest-request, source-selected) ran above.
           (let ((resp (condition-case nil
                          (fikra-alist-get-ghost "response" parsed)
                          (error () nil))))
@@ -422,7 +436,7 @@ sets on arrival). The model resolves from /api/tags on first use."
               (fikra-ghost-dismiss))
             ;; clear AFTER the anchor check/strip (r89: clearing first
             ;; failed anchor-holds' own pending-prefix read).
-            (setq fikra-ghost-pending-prefix nil))))))))))
+            (setq fikra-ghost-pending-prefix nil)))))))))))
 
 (provide "fikra-ghost")
 )

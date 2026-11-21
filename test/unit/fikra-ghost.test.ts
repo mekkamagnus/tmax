@@ -38,7 +38,12 @@ describe("#8.8 ghost text", () => {
     e(editor, '(fikra/ghost/fikra-ghost-set " brave new world")');
     e(editor, "(fikra/ghost/fikra-ghost-accept-word)");
     expect(String(e(editor, "(buffer-text)").value)).toBe("hello brave ");
-    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
+    // r92 (codex r91 P3): the REMAINDER stays as the new ghost — a second
+    // C-n walks the next word instead of losing the suggestion.
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-text)").value)).toBe("new world");
+    e(editor, "(fikra/ghost/fikra-ghost-accept-word)");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("hello brave new ");
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-text)").value)).toBe("world");
   });
 
   test("the local source completes from a matching longer line elsewhere in the buffer", async () => {
