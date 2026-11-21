@@ -857,3 +857,106 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     expect(text).toContain("SETTLED-DONE");
   });
 });
+
+describe("ollama async ownership + interruption (r131 — codex r130 P1#1/P1#3)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireCalls = (ed: Editor, seed: number, calls: { name: string; args: unknown }[]) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls:
+      calls.map((c) => ({ function: { name: c.name, arguments: c.args } })) } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  // P1#1: a focus switch DURING the async run must not reroute the
+  // result or the continuation — the sentinel resumes under HOME.
+  tt("a focus switch mid-run: the sentinel resumes the ORIGINATING thread", async () => {
+    const ed = await armed();
+    e(ed, "(require-module fikra/threads)");
+    e(ed, '(fikra/chat/fikra-turn-send "slow then home")');
+    fireCalls(ed, 171, [{ name: "bash", args: { command: "sleep 1 && echo HOME-RESUME" } }]);
+    // The call row rendered = the child runs; switch focus mid-run.
+    expect(String(e(ed, "(buffer-text)").value)).toContain("sleep 1");
+    e(ed, '(fikra/thread/fikra-thread-focus "away")');
+    expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
+    // The sentinel fires under AWAY focus: the re-fire (a NEW
+    // latest-id) must appear while focus is STILL away — the resume
+    // ran home-bound, not on whatever is focused.
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    let now = before;
+    for (let i = 0; i < 60; i++) {
+      now = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+      if (now !== before && now !== "null") break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(now).not.toBe(before);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
+    // The result row rendered (the evidence landed HOME's transcript).
+    const row = strip(await until(ed, "(buffer-text)", "→ ok", 60));
+    expect(row).toMatch(/→ ok\s*HOME-RESUME/);
+    // Seed the re-fire under HOME focus (the real request was stamped
+    // home at fire time; the seed must match).
+    e(ed, '(fikra/thread/fikra-thread-focus "main")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${now} "live")`);
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "HOME-DONE" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${now} "${reply}")`);
+    e(ed, `(fikra-http-complete ${now} 200 "${hex("{}")}")`);
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    expect(strip(String(e(ed, "(buffer-text)").value))).toContain("HOME-DONE");
+    // The AWAY thread never ran anything (the home dance only borrowed
+    // its focus for the resume, and restored it).
+    e(ed, '(fikra/thread/fikra-thread-focus "away")');
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+
+  // P1#3: the interrupt KILLS the child and INVALIDATES its sentinel —
+  // no result row, no resume, no re-fire.
+  tt("an interrupt kills the child: the late sentinel drops everything", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "interrupt me")');
+    fireCalls(ed, 172, [{ name: "bash", args: { command: "sleep 2 && echo NEVER-LANDS" } }]);
+    expect(String(e(ed, "(buffer-text)").value)).toContain("sleep 2");
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    const abort = e(ed, "(fikra/backend-ollama/fikra-backend-ollama-abort)");
+    expect(String(abort.value)).toBe("true");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
+    // Wait past the child's full 2s sleep — the (killed) sentinel fires.
+    await new Promise((r) => setTimeout(r, 2500));
+    // No RESULT row (the command text in the call row is expected; the
+    // result shape never renders).
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text).not.toMatch(/→ (ok|FAIL)\s*NEVER-LANDS/);
+    // No re-fire ever happened (latest-id frozen at the aborted turn's).
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value)).toBe(before);
+    // The tool RESULT message never entered the accumulator (the
+    // command text rides the tool_calls echo; the result would be a
+    // tool message whose content is exactly the output).
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value))
+      .not.toContain('"role":"tool","content":"NEVER-LANDS"');
+  });
+
+  // P1#3 (the other supersede path): a REPLACEMENT turn invalidates the
+  // old turn's in-flight child the same way.
+  tt("a replacement turn supersedes the old turn's in-flight child", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "old turn")');
+    fireCalls(ed, 173, [{ name: "bash", args: { command: "sleep 1 && echo STALE-OUTPUT" } }]);
+    expect(String(e(ed, "(buffer-text)").value)).toContain("sleep 1");
+    // Replace: a NEW turn bumps the epoch — the old child's sentinel
+    // becomes stale the moment the new turn begins.
+    e(ed, '(fikra/chat/fikra-turn-send "new turn")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 174 "live")');
+    const r2 = hex(JSON.stringify({ message: { role: "assistant", content: "new answer" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 174 "${r2}")`);
+    e(ed, `(fikra-http-complete 174 200 "${hex("{}")}")`);
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // The stale child exited by now; its RESULT must NOT have landed.
+    await new Promise((r) => setTimeout(r, 1500));
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text).not.toMatch(/→ (ok|FAIL)\s*STALE-OUTPUT/);
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value))
+      .not.toContain('"role":"tool","content":"STALE-OUTPUT"');
+    // And the stale sentinel never re-fired a request of its own.
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value)).toBe("174");
+  });
+});

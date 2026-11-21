@@ -63,13 +63,19 @@ decision resumes the remainder — they were dropped).")
   "The results ALREADY collected when the park hit (r121, codex r120
 P2#2: 'echo BEFOREPARK' before a parked pair was dropped — the acc must
 ride too).")
-(defvar fikra-ollama-async-out ""
-  "r126: the pending async bash's accumulated stdout (the filter
-appends; the sentinel consumes).")
-(defvar fikra-ollama-async-cont nil
-  "r126: the round continuation while an async bash runs —
-(calls i acc); the sentinel resumes run-calls from i with acc + the
-tool message, then the round tail (re-fire/park).")
+(defvar fikra-ollama-epoch 0
+  "r131 (codex r130 P1#3): the turn GENERATION. Bumped at every
+start-turn and abort — an async bash sentinel whose spawn-time epoch
+differs is SUPERSEDED: no result row, no resume, no re-fire (the turn
+it belonged to is gone).")
+(defvar fikra-ollama-async-procs (hashmap)
+  "r131 (codex r130 P1#1): pid → {epoch home out cont} — the async
+bash's OWNERSHIP record, stamped at spawn: the turn generation, the
+ORIGINATING thread (the sentinel renders + resumes under that focus
+no matter what is focused at exit), the accumulated stdout (the
+filter appends per-pid — concurrent children never share output), and
+the round continuation (calls i acc) when the spawn holds a round.
+Entries tombstone (nil) when their sentinel fires.")
 (defvar fikra-ollama-round 0
   "The current tool round (the loop cap guard).")
 (defvar fikra-ollama-max-rounds 4
@@ -137,6 +143,9 @@ availability gate must be synchronous; the turn itself is async)."
   completion re-fires the chat for the still-pending message."
   (setq fikra-ollama-pending-message message)
   (setq fikra-ollama-round 0)
+  ;; r131: a new turn supersedes the previous one's in-flight async
+  ;; children (their sentinels drop on epoch mismatch).
+  (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
   (fikra/thread/fikra-thread-turn-begin)
   ;; The model resolves SYNCHRONOUSLY (a light curl, like the probe) —
   ;; no tags round-trip through the async machinery.
@@ -271,13 +280,17 @@ availability gate must be synchronous; the turn itself is async)."
     (if acc acc "")
     (let ((res (fikra-ollama-run-tool (nth i calls))))
       (cond
-        ((and (symbolp res) (string= (symbol-name res) "async"))
+        ((numberp res)
           ;; r126: an async bash holds the round — the sentinel resumes
           ;; from i+1 (the tool message lands at exit). r127 (codex
           ;; catch 2): the ACC rides too (a buffer_read BEFORE the bash
-          ;; vanished from the model's messages).
+          ;; vanished from the model's messages). r131: the continuation
+          ;; rides the pid's OWNERSHIP entry (run-bash-now returns the
+          ;; pid now) — no shared stash for concurrent children.
           (progn
-            (setq fikra-ollama-async-cont (list calls (+ i 1) acc))
+            (keymap-mutable-set!
+              (hashmap-get fikra-ollama-async-procs (number-to-string res))
+              "cont" (list calls (+ i 1) acc))
             'async))
         ((and (symbolp res) (string= (symbol-name res) "parked"))
           ;; r120: the REMAINDER rides the park — the decision resumes
@@ -393,7 +406,6 @@ availability gate must be synchronous; the turn itself is async)."
   (fikra/event/fikra-event-emit
     (list (list "kind" "tool-call") (list "tool" "bash")
           (list "summary" cmd)))
-  (setq fikra-ollama-async-out "")
   (let ((pid (condition-case nil
               (make-process
                 :command (list "sh" "-c"
@@ -404,9 +416,18 @@ availability gate must be synchronous; the turn itself is async)."
                 :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
               (error () nil))))
     (if pid
-      'async
+      ;; r131: stamp the OWNERSHIP entry (spawn-time epoch + home) and
+      ;; return the PID — callers detect async by numberp; the round's
+      ;; continuation (if any) is stashed into this entry by run-calls.
+      (progn
+        (keymap-mutable-set! fikra-ollama-async-procs (number-to-string pid)
+          (hashmap "epoch" fikra-ollama-epoch
+                   "home" (fikra/thread/fikra-thread-current)
+                   "out" ""
+                   "cont" nil))
+        pid)
       ;; r127 (codex catch 4): a FAILED spawn reports an honest FAIL
-      ;; row — never 'async (the turn would strand).
+      ;; row — never a pid (the turn would strand).
       (progn
         (fikra/event/fikra-event-emit
           (list (list "kind" "tool-result") (list "ok" nil)
@@ -414,38 +435,79 @@ availability gate must be synchronous; the turn itself is async)."
         "{\"role\":\"tool\",\"content\":\"spawn failed\"},"))))
 
 (defun fikra-ollama-bash-filter (pid output)
-  (setq fikra-ollama-async-out
-    (concat fikra-ollama-async-out output))
+  ;; r131: the output accumulates on the PID's own entry (concurrent
+  ;; children never share a buffer).
+  (let ((entry (hashmap-get fikra-ollama-async-procs (number-to-string pid))))
+    (if entry
+      (keymap-mutable-set! entry "out"
+        (concat (hashmap-get entry "out") output))))
   t)
 
-;; The sentinel: render the result, build the tool message, RESUME the
-;; stashed continuation (or, for a decision-executed call with no
-;; stash, append + fire the next request directly).
+;; r131: the turn is still awaiting this async chain (a sentinel that
+;; fires after the turn ended renders its evidence but resumes nothing).
+(defun fikra-ollama-turn-live-p ()
+  (and fikra-ollama-pending-message
+       (string= (fikra/thread/fikra-thread-status) "running")))
+
+;; r131 (codex r130 P1#1/P1#3): the sentinel is TURN- and THREAD-bound.
+;; The per-pid entry carries the spawn-time epoch + HOME thread. A
+;; sentinel whose turn was aborted/replaced (epoch mismatch) drops
+;; everything — no result row, no resume, no re-fire (abort also KILLED
+;; the child). A live sentinel renders and resumes under the HOME focus
+;; (a mid-run focus switch must not reroute evidence or the next
+;; request), and only continues the round while the turn still runs.
 (defun fikra-ollama-bash-sentinel (pid exit-code)
-  (let* ((raw fikra-ollama-async-out)
-         (raw-code (fikra-ollama-exit-code raw))
-         ;; r128 (codex r127 catch 3): a MISSING EXIT: marker defaulted
-         ;; to success — the child's own exit-code is the truth when the
-         ;; marker never printed (a kill, a crash).
-         (code (if (fikra-ollama-has-exit-p raw)
-                 raw-code
-                 (number-to-string exit-code)))
-         (ok (string= code "0"))
-         (out (string-trim (fikra-ollama-strip-exit raw)))
-         (msg (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
-                       (concat out (if ok "" (concat "\nexit code: " code)))) "},"))
-         (cont fikra-ollama-async-cont))
-    (setq fikra-ollama-async-out "")
-    (setq fikra-ollama-async-cont nil)
-    (fikra/event/fikra-event-emit
-      (list (list "kind" "tool-result") (list "ok" ok)
-            (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
-    (if (not cont)
+  (let* ((key (number-to-string pid))
+         (entry (hashmap-get fikra-ollama-async-procs key))
+         (home (if entry (hashmap-get entry "home") nil))
+         (cont (if entry (hashmap-get entry "cont") nil))
+         (same-epoch (and entry
+                        (string= (number-to-string (hashmap-get entry "epoch"))
+                                 (number-to-string fikra-ollama-epoch))))
+         (prev (fikra/thread/fikra-thread-current)))
+    ;; The entry dies with this sentinel (tombstone).
+    (keymap-mutable-set! fikra-ollama-async-procs key nil)
+    (if (not same-epoch)
+      'superseded
       (progn
-        (setq fikra-ollama-messages
-          (concat fikra-ollama-messages msg))
-        (fikra-ollama-chat fikra-ollama-pending-message))
-      (fikra-ollama-resume-from cont msg))))
+        ;; The HOME focus for everything this sentinel does.
+        (if (and home (not (string= home prev)))
+          (fikra/thread/fikra-thread-focus home))
+        (let* ((raw (if entry (hashmap-get entry "out") ""))
+               (raw-code (fikra-ollama-exit-code raw))
+               ;; r128 (codex r127 catch 3): a MISSING EXIT: marker
+               ;; defaulted to success — the child's own exit-code is
+               ;; the truth when the marker never printed (a kill, a
+               ;; crash).
+               (code (if (fikra-ollama-has-exit-p raw)
+                       raw-code
+                       (number-to-string exit-code)))
+               (ok (string= code "0"))
+               (out (string-trim (fikra-ollama-strip-exit raw)))
+               (msg (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
+                             (concat out (if ok "" (concat "\nexit code: " code)))) "},"))
+               (r (if (not (fikra-ollama-turn-live-p))
+                    ;; The turn ENDED while this child ran (e.g. the
+                    ;; allow-path race): the evidence renders, nothing
+                    ;; resumes — there is no turn to continue.
+                    (progn
+                      (fikra/event/fikra-event-emit
+                        (list (list "kind" "tool-result") (list "ok" ok)
+                              (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
+                      'turn-over)
+                    (progn
+                      (fikra/event/fikra-event-emit
+                        (list (list "kind" "tool-result") (list "ok" ok)
+                              (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
+                      (if (not cont)
+                        (progn
+                          (setq fikra-ollama-messages
+                            (concat fikra-ollama-messages msg))
+                          (fikra-ollama-chat fikra-ollama-pending-message))
+                        (fikra-ollama-resume-from cont msg))))))
+          (if (and home (not (string= home prev)))
+            (fikra/thread/fikra-thread-focus prev))
+          r)))))
 
 ;; Resume run-calls from the stash's index (the message already
 ;; appended).
@@ -783,8 +845,13 @@ availability gate must be synchronous; the turn itself is async)."
               ;; then the remainder appends; the decision never appends
               ;; out of order again.
               (let ((approved (fikra-ollama-run-bash-now cmd dir)))
-                (setq fikra-ollama-parked-acc
-                  (concat fikra-ollama-parked-acc approved))
+                ;; r131: an async spawn returns the PID — the result
+                ;; arrives via the sentinel (appending the pid would
+                ;; corrupt the acc; 'async used to append junk).
+                (if (numberp approved)
+                  nil
+                  (setq fikra-ollama-parked-acc
+                    (concat fikra-ollama-parked-acc approved)))
                 ;; r120-r121: the remainder resumes; a RE-PARK holds the
                 ;; next model request until ITS decision.
                 (fikra-ollama-continue-home home-thread)))))))))
@@ -849,6 +916,15 @@ availability gate must be synchronous; the turn itself is async)."
   ;; The async request cannot be cancelled (the http primitive has no
   ;; abort) — but the turn state settles: a late reply for an aborted
   ;; turn is guarded by pending-message.
+  ;; r131 (codex r130 P1#3): the interrupt also INVALIDATES the turn's
+  ;; async children — the epoch bump makes their sentinels drop, and
+  ;; the children are KILLED (the model's command stops running).
+  (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
+  (dolist (k (hashmap-keys fikra-ollama-async-procs))
+    (if (hashmap-get fikra-ollama-async-procs k)
+      (condition-case nil
+        (signal (string-to-number k) "SIGKILL")
+        (error () nil))))
   (if fikra-ollama-pending-message
     (progn
       (setq fikra-ollama-pending-message nil)
