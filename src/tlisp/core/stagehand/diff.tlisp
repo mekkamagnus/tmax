@@ -254,7 +254,7 @@ since the last 'diff --git') verbatim + the hunk verbatim (@@ header
           ;; ended). 'diff --git' resets; index/---/+++ extend.
           (if cur
             ;; Inside a hunk: a new file header ends it.
-            (if (= count (- target 1))
+            (if (= (- count 1) target)
               (string-join "\n" (append header (reverse cur)))
             (stagehand-diff-collect (cdr pairs) header count target nil (list)))
             (if (string-prefix-p "diff --git " line)
@@ -266,8 +266,7 @@ since the last 'diff --git') verbatim + the hunk verbatim (@@ header
           ;; them made the patch module-shaped and `git apply` staged
           ;; a PHANTOM dev/null path into the index (the gate's
           ;; live-reproduced corruption).
-          (if (and cur (= (- count 1) target)
-            t)
+          (if (and cur (= (- count 1) target))
             (string-join "\n" (append header (reverse cur)))
             (stagehand-diff-collect (cdr pairs) (append header (list line))
               count target nil (list))))
@@ -309,11 +308,11 @@ with the reconstructed patch on stdin."
   "D (worktree view) — discard the hunk at point in the WORKTREE:
 git apply -R - (a worktree mutation, NOT an index op). Confirms via
 the n-first y/n."
-  (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
-    (if (null idx)
-      (editor-set-status "Stagehand: no hunk at point")
-      (if (not (string= stagehand-diff-side "worktree"))
-        (editor-set-status "Stagehand: D discards worktree hunks")
+  (if (not (string= stagehand-diff-side "worktree"))
+    (editor-set-status "Stagehand: D discards worktree hunks")
+    (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
+      (if (null idx)
+        (editor-set-status "Stagehand: no hunk at point")
         (progn
           (setq stagehand-diff-pending idx)
           (completing-read
@@ -397,7 +396,6 @@ the n-first y/n."
                     :sentinel "stagehand/diff/stagehand-diff-apply-sentinel")))
         (setq stagehand-diff-apply-err nil)
         (setq stagehand-diff-apply-exit nil)
-        (setq stagehand-diff-apply-op op)
         (process-write pid (concat patch "\n"))
         (process-close-stdin pid)
         (editor-set-status "Stagehand: applying hunk…")))
@@ -415,7 +413,43 @@ the n-first y/n."
     (t nil)))
 
 (defun stagehand-diff-patch-has (needle)
-  (stagehand-diff-scan-for (string-split (or stagehand-diff-raw "") "\n") needle))
+  ;; Scoped to the TARGET FILE's section (a rename on an unrelated
+  ;; file in the view must not block this hunk — the r1/r2 gate
+  ;; catch, live-reproduced).
+  (stagehand-diff-scan-for
+    (string-split (or (stagehand-diff-file-section) "") "\n") needle))
+
+(defun stagehand-diff-file-section ()
+  "The target file's raw section: from its 'diff --git' line to the
+next one (the whole raw when the boundary is not found)."
+  (let ((lines (string-split (or stagehand-diff-raw "") "\n")))
+    (if stagehand-diff-paths
+      (stagehand-diff-section-of lines (car stagehand-diff-paths) nil (list))
+      (or stagehand-diff-raw ""))))
+
+(defun stagehand-diff-section-of (lines path collecting out)
+  (if (null lines)
+    (string-join "\n" (reverse out))
+    (let ((line (car lines)))
+      (if (string-prefix-p "diff --git " line)
+        (if collecting
+          (string-join "\n" (reverse out))
+          (if (stagehand-diff-header-names-p line path)
+            (stagehand-diff-section-of (cdr lines) path t (list line))
+            (stagehand-diff-section-of (cdr lines) path nil (list))))
+        (if collecting
+          (stagehand-diff-section-of (cdr lines) path t (cons line out))
+          (stagehand-diff-section-of (cdr lines) path nil (list)))))))
+
+(defun stagehand-diff-header-names-p (header-line path)
+  ;; 'diff --git a/<old> b/<new>' names PATH on EITHER side (renames:
+  ;; the path may be the new side) — or the quoted form.
+  (or (string-prefix-p (concat "diff --git a/" path " ") header-line)
+      (string= (concat "diff --git a/" path) header-line)
+      (string-prefix-p (concat "diff --git \"" path "\" ") header-line)
+      (string-prefix-p (concat " b/" path " ") header-line)
+      (string-suffix-p (concat " b/" path) header-line)
+      (string-prefix-p (concat " b/\"" path "\"") header-line)))
 
 (defun stagehand-diff-scan-for (lines needle)
   (if (null lines)
@@ -433,7 +467,6 @@ apply's diagnostics go to stderr; the merge is what makes the
 failure message's first line possible)."
   (setq stagehand-diff-apply-err
     (concat (or stagehand-diff-apply-err "") output)))
-(defvar stagehand-diff-apply-op nil "The in-flight apply's op.")
 
 (defun stagehand-diff-apply-exit-get ()
   "The last apply's exit code (a VALUE getter — tests poll this)."
@@ -517,6 +550,7 @@ refresh-and-retry hint's action — bound to g)."
         (editor/keymaps/keymap-set-key kmap "s" "(stagehand/diff/stagehand-diff-stage-hunk)")
         (editor/keymaps/keymap-set-key kmap "u" "(stagehand/diff/stagehand-diff-unstage-hunk)")
         (editor/keymaps/keymap-set-key kmap "D" "(stagehand/diff/stagehand-diff-discard-hunk)")
+        (editor/keymaps/keymap-set-key kmap "g" "(stagehand/diff/stagehand-diff-refresh-view)")
         (editor/keymaps/buffer-set-keymap (stagehand-diff-buffer-name) kmap))))
   t)
 

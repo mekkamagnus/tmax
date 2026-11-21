@@ -307,21 +307,23 @@ describe("#291 — gate r1 regressions", () => {
     commit("base");
     execFileSync("git", ["mv", "ren.txt", "renamed.txt"], { cwd: process.cwd() });
     writeFileSync(join(process.cwd(), "f.txt"), "v1\nCHANGED\nv3\n");
-    // The whole-worktree section diff (via the Unstaged header).
+    // The r2 gate's exact shape: the STAGED section (the rename AND
+    // f.txt's staged content hunk in ONE view — the Unstaged section
+    // can never show a staged rename, making the old test vacuous).
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
     e(editor, "(stagehand/status/stagehand-status)");
     const ls = strip(bufferText(editor)).split("\n");
-    const hdr = ls.findIndex((l) => l.startsWith("Unstaged ("));
+    const hdr = ls.findIndex((l) => l.startsWith("Staged ("));
     e(editor, `(cursor-move ${hdr} 0)`);
     e(editor, "(stagehand/status/stagehand-status-diff)");
-    // Find f.txt's hunk in the multi-file view: navigate to the first
-    // hunk whose following --- line names f.txt... simply stage hunk 1
-    // (ren.txt's rename has NO hunk — f.txt's is the only one).
+    // f.txt's staged content hunk is the ONLY hunk (the rename has
+    // none) — unstage it; the unrelated rename must NOT refuse it.
     e(editor, "(cursor-move 0 0)");
     e(editor, "(stagehand/diff/stagehand-diff-next)");
-    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
     const st = await waitApply(editor);
     expect(st).toContain("hunk applied"); // NOT the rename refusal
-    expect(git("diff", "--cached")).toContain("CHANGED");
+    expect(git("diff", "--cached")).not.toContain("CHANGED");
   });
 });
 
