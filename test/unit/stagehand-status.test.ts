@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
@@ -412,6 +412,53 @@ describe("#286 — folding + navigation", () => {
     e(editor, "(cursor-move 3 0)"); // first file row = newdir/inner.txt
     e(editor, "(stagehand/status/stagehand-status-open-file)");
     expect(strip(bufferText(editor))).toContain("inner content");
+  });
+
+  test("an UNSTAGED modification as the FIRST record parses correctly (codex r4 #1 — the shell-exec trim bug)", () => {
+    // Tracked + modified + unstaged = the porcelain stream LEADS with
+    // " M f.txt". shell-exec used to .trim() stdout, destroying the
+    // leading space: the record read as code "M " + path "file-with-
+    // first-char-lost" — wrong section AND wrong RET target.
+    const c = process.cwd();
+    writeFileSync(join(c, "f.txt"), "original\n");
+    execFileSync("git", ["add", "."], { cwd: c });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"], { cwd: c });
+    writeFileSync(join(c, "f.txt"), "MODIFIED CONTENT\n");
+    const t = statusOf(editor);
+    expect(t).toContain("Unstaged (1)");
+    expect(t).toContain(" M f.txt");
+    e(editor, "(cursor-move 4 0)"); // the file row (line 3 = Unstaged hdr)
+    e(editor, "(stagehand/status/stagehand-status-open-file)");
+    expect(strip(bufferText(editor))).toContain("MODIFIED CONTENT");
+  });
+
+  test("a FILELESS buffer uses the CLIENT launch dir, not the daemon cwd (codex r4 #2)", () => {
+    const repoA = process.cwd();
+    const repoB = mkdtempSync(join(tmpdir(), "i286b-"));
+    dirs.push(repoB);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repoB });
+    writeFileSync(join(repoB, "b-only.txt"), "b content\n");
+    // cwd STAYS in A; the client launched in B (a scratch buffer).
+    editor.setClientLaunchDir(repoB);
+    const t = statusOf(editor);
+    expect(t).toContain("b-only.txt");
+    // macOS: git canonicalizes /var → /private/var — compare real paths.
+    expect(String(e(editor, "(stagehand/status/stagehand-status-root)").value)).toBe(realpathSync(repoB));
+    editor.setClientLaunchDir(repoA);
+  });
+
+  test("a BROKEN repo detects from a SUBDIRECTORY (codex r4 #3)", () => {
+    const top = process.cwd();
+    mkdirSync(join(top, "inner"));
+    writeFileSync(join(top, ".git", "HEAD"), "garbage\n");
+    process.chdir(join(top, "inner"));
+    editor.setClientLaunchDir(join(top, "inner"));
+    e(editor, "(stagehand/status/stagehand-status)");
+    // The ancestor .git makes this a BROKEN repo — the honest git
+    // failure, not a false 'not in a repository'.
+    expect(String(e(editor, "(editor-status)").value)).toContain("git status failed");
+    process.chdir(top);
+    editor.setClientLaunchDir(top);
   });
 
   test("the KEYS: SPC g opens; n/p/TAB/g/q/RET dispatch in the buffer", async () => {

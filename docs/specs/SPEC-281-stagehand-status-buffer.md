@@ -23,23 +23,32 @@ buffer's keymap.
 - **Sections**: `??` → Untracked; worktree-side column → Unstaged;
   index-side column → Staged; the conflicted set (DD AU UD UA DU AA UU)
   → a distinct fourth Conflicted section.
-- **Repository + error states** (codex r3): fresh detection every
+- **Repository + error states** (codex r3+r4): fresh detection every
   invocation via `git rev-parse --show-toplevel` from the current
-  file's directory (NOT the generic project-detect-root — a nested
-  package.json marker must not win, since porcelain paths are relative
-  to the REPO root and RET joins would mis-target in a monorepo); a
-  failing rev-parse with a `.git` entry present = a BROKEN repo → the
-  render path reports the honest git failure; no `.git` → status
-  message, no buffer. Git failure (exit ≥1) → status names exit +
-  first stderr line, no buffer. Unborn → buffer renders, header
-  `unborn: <branch>` (symbolic-ref resolves on unborn repos;
-  `rev-parse --verify HEAD` failing is the discriminator — a bare
-  symbolic-ref failure means DETACHED, giving `HEAD detached at
-  <sha>`). Empty → the four empty sections + `nothing to commit,
-  working tree clean`. No upstream → the ` no upstream` suffix.
-  Untracked directories list their FILES individually
-  (`--untracked-files=all` — git's default `?? dir/` collapsing hides
-  them from navigation and RET).
+  file's directory, falling back to the CLIENT's launch dir for
+  fileless buffers (a daemon's process cwd is not the user's repo),
+  then `.`; the start dir is absolutized (`cd + pwd`) so the
+  broken-repo walk can ascend. NOT the generic project-detect-root —
+  a nested package.json marker must not win, since porcelain paths
+  are relative to the REPO root and RET joins would mis-target in a
+  monorepo. A failing rev-parse with a `.git` entry HERE OR IN ANY
+  ANCESTOR = a BROKEN repo → the render path reports the honest git
+  failure; none anywhere → status message, no buffer. Git failure
+  (exit ≥1) → status names exit + first stderr line, no buffer.
+  Unborn → buffer renders, header `unborn: <branch>` (symbolic-ref
+  resolves on unborn repos; `rev-parse --verify HEAD` failing is the
+  discriminator — a bare symbolic-ref failure means DETACHED, giving
+  `HEAD detached at <sha>`). Empty → the four empty sections +
+  `nothing to commit, working tree clean`. No upstream → the `
+  no upstream` suffix. Untracked directories list their FILES
+  individually (`--untracked-files=all`).
+- **Byte-faithful capture** (codex r4): `shell-exec` no longer trims
+  stdout/stderr — porcelain `-z` records can LEAD with a space
+  (` M file`), and a trimmed stream corrupted the first record's
+  status column (wrong section, wrong RET target). Consumers trim
+  where they mean to (markdown execution now does, preserving its
+  single-line results comment). Tested with an unstaged modification
+  as the FIRST record.
 - **Folding + navigation**: TAB on a section header toggles fold state
   keyed by SECTION NAME in a hashmap — survives refresh (g re-parses in
   place). The rendered buffer is fold-aware (a folded section shows its

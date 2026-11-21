@@ -67,3 +67,15 @@ Two engine realities surfaced during the build and shaped the design:
   row, fikra chat's RET) is out of scope here — noted as a follow-up
   observation for the cluster: if those keys are dead via the normal
   handler, they need the same spelling fix in their own issues.
+- **`shell-exec` is byte-faithful** (codex r4): the primitive no
+  longer trims stdout/stderr — a porcelain `-z` stream can LEAD with
+  a space (` M file`), and trimming corrupted the first record. The
+  markdown execution consumer trims explicitly to preserve its
+  single-line results-comment shape (SPEC-039 suite green); any
+  future consumer that wants trimmed output must trim itself.
+- **Repository selection is git-anchored** (`rev-parse
+  --show-toplevel` from the file's dir → the client's launch dir →
+  `.`), with an ancestor `.git` walk to distinguish a BROKEN repo
+  (honest git failure) from no repo at all — NOT the generic
+  project-detect-root, whose package-marker roots would mis-join
+  porcelain paths in monorepos.

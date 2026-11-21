@@ -329,26 +329,50 @@ cursor's row is synced BEFORE the re-render so j/k position survives)."
 
 ;; ── the entry point ────────────────────────────────────────────────
 (defun stagehand-detect-root ()
-  "The GIT repository root for the current file/cwd (`rev-parse
---show-toplevel`), or nil outside a repository. NOT the generic
-project-detect-root: porcelain paths are relative to the REPO root,
-so a nested package.json marker must not win (a monorepo package
-would mis-join every RET path), and a marker-only directory with no
-.git must report 'not in a repository', not a git failure."
-  (let* ((dir (or (stagehand-dir-of (buffer-filename)) "."))
+  "The GIT repository root for the current file / client launch dir /
+cwd (`rev-parse --show-toplevel`), or nil outside a repository. NOT
+the generic project-detect-root: porcelain paths are relative to the
+REPO root, so a nested package.json marker must not win (a monorepo
+package would mis-join every RET path), and a marker-only directory
+with no .git must report 'not in a repository', not a git failure.
+Fileless buffers fall back to the CLIENT's launch dir (a daemon's
+process cwd is NOT the user's repo — #298), then '.'."
+  (let* ((start (or (stagehand-dir-of (buffer-filename))
+                    (client-launch-dir)
+                    "."))
+         (dir (stagehand-abs start))
          (res (shell-exec
                 (concat "cd " (stagehand-shq dir)
                         " && git rev-parse --show-toplevel")))
          (out (car res))
-         (exit (car (cdr (cdr res)))))
+         (exit (car (cdr (cdr res))))
+         ;; A .git entry (here or in any ANCESTOR — a corrupted repo's
+         ;; rev-parse fails from every subdir) with a failing rev-parse
+         ;; = a BROKEN repo: the render path reports the honest git
+         ;; failure, not a false 'not in a repository'.
+         (broken (stagehand-broken-repo-root dir)))
     (cond
       ((and (numberp exit) (= exit 0))
         (string-trim (stagehand-first-line out)))
-      ;; A .git entry with a failing rev-parse = a BROKEN repo — return
-      ;; the directory itself so the render path reports the honest git
-      ;; failure (exit + stderr), not a false 'not in a repository'.
-      ((file-exists-p (concat dir "/.git")) dir)
+      (broken broken)
       (t nil))))
+
+(defun stagehand-abs (dir)
+  ;; The absolute form of DIR (cd + pwd); DIR unchanged on failure.
+  (let* ((res (shell-exec (concat "cd " (stagehand-shq dir) " && pwd")))
+         (out (car res))
+         (exit (car (cdr (cdr res)))))
+    (if (and (numberp exit) (= exit 0))
+      (string-trim (stagehand-first-line out))
+      dir)))
+
+(defun stagehand-broken-repo-root (dir)
+  ;; The nearest ancestor of DIR (DIR included) holding a .git entry.
+  (if (or (null dir) (string= dir "") (string= dir "/"))
+    nil
+    (if (file-exists-p (concat dir "/.git"))
+      dir
+      (stagehand-broken-repo-root (stagehand-dir-of dir)))))
 
 (defun stagehand-dir-of (path)
   ;; The directory portion of PATH (up to the LAST '/'), else nil.

@@ -1478,8 +1478,12 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             const cmd = String(args[0]!.value);
             const t0 = Date.now();
             const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
-            const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
-            const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
+            // BYTE-FAITHFUL capture (#286 codex r4): no trim — git
+            // porcelain -z records can LEAD with a space (' M file'),
+            // and a trimmed stream corrupts the first record's status
+            // column. Consumers trim where they mean to.
+            const stdout = output.stdout ? new TextDecoder().decode(output.stdout) : '';
+            const stderr = output.stderr ? new TextDecoder().decode(output.stderr) : '';
             const exitCode = output.exitCode ?? 1;
             ctx.logProgram?.('shell', {
               level: exitCode === 0 ? 'info' : 'error',
