@@ -575,7 +575,14 @@ bumps the revision the TUI poll consumes."
                     (buffer-append text)
                     (buffer-set-read-only was-ro)
                     (buffer-switch prev)))
-                (error () nil)))))
+                (error () nil))))
+          ;; #320 (codex r4 c1): a marker batch that SKIPS the incremental
+          ;; render still THREADS the run state (the discarded text is
+          ;; fine — the rebuild replaces the buffer — but a stale
+          ;; open-state made the next block's fragments fold against a
+          ;; dead run: a stray blank line, live ≠ replay until the next
+          ;; rebuild).
+          (condition-case nil (fikra-event-render-batch events) (error () nil)))
         (fikra-event-run-hook)
         ;; Memory + in-memory log pointer stay FOCUS-scoped (replay reads
         ;; the log FILE, so the background thread's history is intact).
