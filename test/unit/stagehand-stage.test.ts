@@ -251,7 +251,7 @@ describe("#287 — header-wide runs", () => {
     cursorTo("Unstaged (2)");
     e(editor, "(stagehand/stage/stagehand-stage-section)");
     const st = String(e(editor, "(editor-status)").value);
-    expect(st).toContain("applied 0 of 2 visited, failed at a.txt"); // FIRST row top-to-bottom
+    expect(st).toContain("applied 0 of 1 visited, failed at a.txt"); // FIRST row top-to-bottom; the FAILED row counts as visited
     chmodSync(join(process.cwd(), ".git"), 0o755);
     // Idempotent re-run succeeds after the fix.
     cursorTo("Unstaged (2)");
@@ -357,6 +357,44 @@ describe("#287 — gate r1 coverage", () => {
     await editor.handleKey("D");
     await editor.handleKey("C-g"); // minibuffer cancel — accept never fires
     expect(file("f.txt")).toBe("v2\n"); // untouched
+  });
+});
+
+describe("#287 — codex r1 fixes", () => {
+  test("a PATHSPEC-MAGIC filename cannot glob its siblings (:(literal) everywhere)", () => {
+    writeFileSync(join(process.cwd(), "base.txt"), "base\n");
+    commit("base");
+    // The attack shape the grader reproduced: a file whose NAME is a
+    // pathspec — without :(literal), add/checkout glob the siblings.
+    writeFileSync(join(process.cwd(), ":(glob)*.txt"), "weird\n");
+    writeFileSync(join(process.cwd(), "abc.txt"), "sibling\n");
+    statusOf();
+    cursorTo(":(glob)*.txt");
+    e(editor, "(stagehand/stage/stagehand-stage-file)");
+    const staged = git("diff", "--cached", "--name-only");
+    expect(staged).toContain(":(glob)*.txt");
+    expect(staged).not.toContain("abc.txt"); // the sibling untouched
+  });
+
+
+  test("s REFUSES on a Staged row (the split row's Staged copy)", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "f.txt"), "v3\n");
+    statusOf();
+    // The STAGED copy of the split row — both sections render "MM
+    // f.txt"; target the row directly under the Staged header.
+    const lines = strip(bufferText(editor)).split("\n");
+    const sHdr = lines.findIndex((l) => l.startsWith("Staged ("));
+    const row = sHdr + 1;
+    expect(lines[row]).toContain("f.txt");
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/stage/stagehand-stage-file)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("s stages Untracked/Unstaged rows");
+    expect(git("diff", "--cached")).toContain("+v2"); // index unchanged
+    expect(file("f.txt")).toBe("v3\n");
   });
 });
 

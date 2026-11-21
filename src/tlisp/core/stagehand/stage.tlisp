@@ -39,9 +39,17 @@ straight to spawn, never through a shell."
   (stagehand/status/stagehand-status-root))
 
 ;; ── per-row actions ─────────────────────────────────────────────────
+(defun stagehand-literal (path)
+  ;; The path wrapped in git's :(literal) pathspec magic — argv alone
+  ;; does NOT disable pathspec interpretation (a tracked file named
+  ;; ':(glob)*.txt' would otherwise glob its siblings; codex r1
+  ;; reproduced wrong-file staging). Safe inside argv (no shell).
+  (concat ":(literal)" path))
+
 (defun stagehand-stage-file ()
-  "s — stage the row at point (Untracked/Unstaged → git add -- path).
-Conflicted rows refuse."
+  "s — stage the row at point (Untracked/Unstaged → git add -- the
+literal path). Staged rows refuse (the Staged copy of a split row is
+NOT an s target — codex r1); Conflicted rows refuse."
   (let ((pair (stagehand-row)))
     (cond
       ((null pair) (editor-set-status "Stagehand: no row here"))
@@ -49,13 +57,18 @@ Conflicted rows refuse."
         (editor-set-status "resolve conflicts first"))
       ((null (nth 1 pair))
         (editor-set-status "Stagehand: s stages file rows"))
+      ((not (or (string= (nth 3 pair) "Untracked")
+                (string= (nth 3 pair) "Unstaged")))
+        (editor-set-status "Stagehand: s stages Untracked/Unstaged rows"))
       (t
         (stagehand-apply-one
-          (list "add" "--" (nth 1 pair)))))))
+          (list "add" "--" (stagehand-literal (nth 1 pair))))))))
 
 (defun stagehand-unstage-file ()
-  "u — unstage the Staged row at point (git restore --staged -- path;
-a staged rename contributes BOTH paths to one invocation)."
+  "u — unstage the Staged row at point (git restore --staged -- the
+literal paths; a staged rename contributes BOTH paths to one
+invocation). On an UNBORN repo (no HEAD for restore to resolve —
+codex r1) the index-only removal `git rm --cached` serves."
   (let ((pair (stagehand-row)))
     (cond
       ((null pair) (editor-set-status "Stagehand: no row here"))
@@ -64,9 +77,15 @@ a staged rename contributes BOTH paths to one invocation)."
       ((not (string= (nth 3 pair) "Staged"))
         (editor-set-status "Stagehand: u unstages Staged rows"))
       (t
-        (stagehand-apply-one
-          (cons "restore" (cons "--staged"
-            (cons "--" (stagehand-row-paths pair)))))))))
+        (stagehand-apply-one (stagehand-unstage-argv pair))))))
+
+(defun stagehand-unstage-argv (pair)
+  ;; restore --staged resolves HEAD — unborn repos need rm --cached
+  ;; (index-only, worktree preserved).
+  (let ((paths (stagehand-literal-paths (stagehand-row-paths pair))))
+    (if (= (stagehand/status/stagehand-has-commits-p (stagehand-root)) 0)
+      (cons "rm" (cons "--cached" (cons "--" paths)))
+      (cons "restore" (cons "--staged" (cons "--" paths))))))
 
 (defun stagehand-discard-file ()
   "D — discard the WORKTREE change on the Unstaged row at point,
@@ -121,7 +140,7 @@ C-g cancel) is a no-op."
       (setq stagehand-discard-pending nil)
       (setq stagehand-discard-root nil)
       (if (and path root)
-        (stagehand-apply-one-at (list "checkout" "--" path) root)
+        (stagehand-apply-one-at (list "checkout" "--" (stagehand-literal path)) root)
         (editor-set-status "Stagehand: no discard pending")))
     (progn
       (setq stagehand-discard-pending nil)
@@ -135,15 +154,13 @@ Unstaged sections; others no-op). Top-to-bottom; the first failure
 STOPS the run with a per-row report (already-applied rows stay
 applied — idempotent re-run). Conflicted rows are never visited."
   (stagehand-run-section '("Untracked" "Unstaged")
-    (lambda (pair) (list "add" "--" (nth 1 pair)))))
+    (lambda (pair) (list "add" "--" (stagehand-literal (nth 1 pair))))))
 
 (defun stagehand-unstage-section ()
   "U — unstage every row in the Staged section at point (other
 sections no-op). Same run semantics as S."
   (stagehand-run-section '("Staged")
-    (lambda (pair)
-      (cons "restore" (cons "--staged"
-        (cons "--" (stagehand-row-paths pair)))))))
+    (lambda (pair) (stagehand-unstage-argv pair))))
 
 (defun stagehand-run-section (eligible mk-argv)
   ;; Visit the CURRENT section's rows top-to-bottom ONLY when its name
@@ -176,7 +193,7 @@ sections no-op). Same run semantics as S."
           (stagehand/status/stagehand-status-refresh)
           (editor-set-status
             (concat "applied " (number-to-string applied) " of "
-              (number-to-string (+ applied (length rows))) " visited, failed at "
+              (number-to-string (+ applied 1)) " visited, failed at "
               (nth 1 pair) ": " (stagehand-first-line (nth 1 res)))))))))
 
 ;; ── shared plumbing ─────────────────────────────────────────────────
@@ -205,6 +222,12 @@ sections no-op). Same run semantics as S."
   (if (nth 4 pair)
     (list (nth 1 pair) (nth 4 pair))
     (list (nth 1 pair))))
+
+(defun stagehand-literal-paths (paths)
+  (if (null paths)
+    (list)
+    (cons (stagehand-literal (car paths))
+      (stagehand-literal-paths (cdr paths)))))
 
 (defun stagehand-section-row-pairs (name)
   ;; The section's FILE-row pairs (headers filtered), display order.
