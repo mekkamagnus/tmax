@@ -8,7 +8,8 @@
           stagehand-diff-unstage-hunk stagehand-diff-discard-hunk
           stagehand-diff-table stagehand-diff-accept
           stagehand-diff-apply-filter stagehand-diff-apply-sentinel
-          stagehand-diff-apply-exit-get stagehand-diff-side-get)
+          stagehand-diff-apply-exit-get stagehand-diff-side-get
+          stagehand-diff-refresh-view)
 
 ;; #289 — Stagehand T0: the diff GRAMMAR + faces. `git diff
 ;; --no-color` output is PARSED into line classes (never ANSI
@@ -259,6 +260,17 @@ since the last 'diff --git') verbatim + the hunk verbatim (@@ header
             (if (string-prefix-p "diff --git " line)
               (stagehand-diff-collect (cdr pairs) (list line) count target nil (list))
               (stagehand-diff-collect (cdr pairs) (append header (list line)) count target nil (list)))))
+        ((or (string-prefix-p "new file mode" line)
+             (string-prefix-p "deleted file mode" line))
+          ;; #291 gate r1: mode lines RIDE IN THE HEADER — dropping
+          ;; them made the patch module-shaped and `git apply` staged
+          ;; a PHANTOM dev/null path into the index (the gate's
+          ;; live-reproduced corruption).
+          (if (and cur (= (- count 1) target)
+            t)
+            (string-join "\n" (append header (reverse cur)))
+            (stagehand-diff-collect (cdr pairs) (append header (list line))
+              count target nil (list))))
         ((string= cls "hunk-header")
           (if (= count target)
             ;; The TARGET hunk starts.
@@ -369,10 +381,17 @@ the n-first y/n."
              ;; the patch would parse as a second patch). Each flag
              ;; is its own argv element ("--cached -R" as ONE string
              ;; was a usage error; exit 129).
-             (argv (append (list "git" "apply") (append flags (list "-"))))
+             ;; #291 gate r1: git apply's diagnostics go to STDERR,
+             ;; and make-process filters see STDOUT only — so the
+             ;; apply runs `sh -c "git apply <flags> - 2>&1"` (a
+             ;; FIXED constant — no user data crosses the shell; the
+             ;; patch rides stdin) and the filter captures the
+             ;; merged diagnostics for the failure message.
+             (cmd (concat "git apply "
+                          (string-join " " flags) " - 2>&1"))
              (patch (stagehand-diff-hunk-patch idx))
              (pid (make-process
-                    :command argv
+                    :command cmd
                     :cwd (or stagehand-diff-root ".")
                     :filter "stagehand/diff/stagehand-diff-apply-filter"
                     :sentinel "stagehand/diff/stagehand-diff-apply-sentinel")))
@@ -405,7 +424,15 @@ the n-first y/n."
       t
       (stagehand-diff-scan-for (cdr lines) needle))))
 
-(defvar stagehand-diff-apply-err nil "The last apply's stderr.")
+(defvar stagehand-diff-apply-err nil "The last apply's diagnostics.")
+
+(defun stagehand-diff-apply-filter (pid output)
+  "The apply's MERGED stdout+stderr (the 2>&1 shell redirect in the
+apply command — make-process filters see stdout only, and git
+apply's diagnostics go to stderr; the merge is what makes the
+failure message's first line possible)."
+  (setq stagehand-diff-apply-err
+    (concat (or stagehand-diff-apply-err "") output)))
 (defvar stagehand-diff-apply-op nil "The in-flight apply's op.")
 
 (defun stagehand-diff-apply-exit-get ()
@@ -434,22 +461,35 @@ the n-first y/n."
     (if (and l (> (length l) 0)) l "")))
 
 (defun stagehand-diff-refresh-view ()
-  ;; Re-render in place (fold/nav state resets with the new hunks —
-  ;; the #289 contract: hunks re-derived from the fresh diff).
-  (let* ((flag (if (string= stagehand-diff-side "cached") " --cached" ""))
+  "Re-render in place on the SAME side (the #289 contract; the
+refresh-and-retry hint's action — bound to g)."
+  (let* ((cached (string= stagehand-diff-side "cached"))
          (res (shell-exec-argv
-                (append (list "git" "diff" "--no-color" flag)
-                  (if stagehand-diff-paths
-                    (append (list "--") stagehand-diff-paths)
-                    (list)))
+                (append (list "git" "diff" "--no-color")
+                  (append (if cached (list "--cached") (list))
+                    (if stagehand-diff-paths
+                      (append (list "--") stagehand-diff-paths)
+                      (list))))
                 (or stagehand-diff-root "."))))
     (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
-      (stagehand-diff-open (car res)
-        (concat "Stagehand-Diff: " (or (car stagehand-diff-paths) "diff"))
-        stagehand-diff-side stagehand-diff-root stagehand-diff-paths)
+      (if (string= (string-trim (car res)) "")
+        ;; Nothing left on this side: the clean EMPTY notice + state
+        ;; cleared (no stale silent no-op).
+        (progn
+          (setq stagehand-diff-hunks (list))
+          (setq stagehand-diff-raw nil)
+          (stagehand-diff-ensure-buffer)
+          (buffer-set-read-only nil)
+          (stagehand-diff-clear)
+          (buffer-append (concat "Stagehand-Diff: "
+            (or (car stagehand-diff-paths) "diff")
+            " — no changes on this side\n"))
+          (buffer-set-read-only t)
+          (editor-set-status "Stagehand: no changes on this side"))
+        (stagehand-diff-open (car res)
+          (concat "Stagehand-Diff: " (or (car stagehand-diff-paths) "diff"))
+          stagehand-diff-side stagehand-diff-root stagehand-diff-paths))
       (editor-set-status "Stagehand: refresh failed"))))
-
-
 
 (defun stagehand-diff-ensure-buffer ()
   (if (not (string= (buffer-current) (stagehand-diff-buffer-name)))

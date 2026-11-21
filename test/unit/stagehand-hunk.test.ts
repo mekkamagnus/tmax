@@ -54,7 +54,7 @@ const openDiff = (path: string) => {
 const waitApply = async (ed: Editor, ms = 6000) => {
   for (let i = 0; i < ms / 25; i++) {
     const st = String(e(ed, "(editor-status)").value);
-    if (st.includes("hunk applied") || st.includes("apply failed")) return st;
+    if (st.includes("hunk applied") || st.includes("apply failed") || st.includes("no changes on this side")) return st;
     await new Promise((r) => setTimeout(r, 25));
   }
   return "TIMEOUT:" + String(e(ed, "(editor-status)").value);
@@ -206,6 +206,122 @@ describe("#291 — refusals + failures", () => {
     const st = await waitApply(editor);
     expect(st).toContain("apply failed");
     expect(git("diff", "--cached")).toBe("");
+  });
+});
+
+describe("#291 — gate r1 regressions", () => {
+  test("a staged NEW FILE's hunk unstages WITHOUT the phantom dev/null (the corruption repro)", async () => {
+    // keep.txt commits; new.txt stages AFTER (a genuine A row).
+    writeFileSync(join(process.cwd(), "keep.txt"), "k\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "new.txt"), "fresh content\n");
+    execFileSync("git", ["add", "new.txt"], { cwd: process.cwd() });
+    // Open the CACHED view for new.txt.
+    e(editor, "(stagehand/status/stagehand-status)");
+    const ls = strip(bufferText(editor)).split("\n");
+    const row = ls.findIndex((l) => l.startsWith("A  new.txt"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toMatch(/hunk applied|no changes on this side/);
+    // NO phantom dev/null entry in the index (the gate's corruption).
+    expect(git("ls-files")).not.toContain("dev/null");
+    expect(git("diff", "--cached", "--name-only")).not.toContain("new.txt");
+  });
+
+  test("a WORKTREE-DELETED file's hunk stages without the phantom", async () => {
+    writeFileSync(join(process.cwd(), "gone.txt"), "v\n");
+    commit("base");
+    rmSync(join(process.cwd(), "gone.txt"));
+    openDiff("gone.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("ls-files")).not.toContain("dev/null");
+    // The deletion IS staged (the intended change).
+    expect(git("diff", "--cached", "--name-only")).toContain("gone.txt");
+  });
+
+  test("the post-apply refresh RENDERS the updated view (same side, no 'refresh failed')", async () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= 30; i++) lines.push(`line${i}`);
+    writeFileSync(join(process.cwd(), "f.txt"), lines.join("\n") + "\n");
+    commit("base");
+    lines[2] = "CHANGED-A";
+    lines[25] = "CHANGED-B";
+    writeFileSync(join(process.cwd(), "f.txt"), lines.join("\n") + "\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    await waitApply(editor);
+    // The refreshed view still shows hunk B (A left the worktree diff).
+    const t = strip(bufferText(editor));
+    expect(t).toContain("CHANGED-B");
+    expect(t).not.toContain("CHANGED-A");
+    expect(String(e(editor, "(editor-status)").value)).not.toContain("refresh failed");
+  });
+
+  test("the last hunk's apply → the clean EMPTY notice (no stale state)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    await waitApply(editor);
+    expect(strip(bufferText(editor))).toContain("no changes on this side");
+    expect(String(e(editor, "(length (stagehand/diff/stagehand-diff-hunk-lines))").value)).toBe("0");
+  });
+
+  test("the failure message carries the apply's stderr line", async () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= 10; i++) lines.push(`l${i}`);
+    writeFileSync(join(process.cwd(), "f.txt"), lines.join("\n") + "\n");
+    commit("base");
+    lines[4] = "X";
+    writeFileSync(join(process.cwd(), "f.txt"), lines.join("\n") + "\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    // Diverge the index AFTER the render (stale).
+    const other: string[] = [];
+    for (let i = 1; i <= 10; i++) other.push(i === 5 ? "CONFLICT" : `l${i}`);
+    writeFileSync(join(process.cwd(), "f.txt"), other.join("\n") + "\n");
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("apply failed");
+    expect(st).toMatch(/apply failed \(\d+\) \S/); // a stderr line present
+  });
+
+  test("the REFUSAL scope: a rename on ANOTHER file does not block this file's hunk", async () => {
+    writeFileSync(join(process.cwd(), "ren.txt"), "r\n");
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nv2\nv3\n");
+    commit("base");
+    execFileSync("git", ["mv", "ren.txt", "renamed.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nCHANGED\nv3\n");
+    // The whole-worktree section diff (via the Unstaged header).
+    e(editor, "(stagehand/status/stagehand-status)");
+    const ls = strip(bufferText(editor)).split("\n");
+    const hdr = ls.findIndex((l) => l.startsWith("Unstaged ("));
+    e(editor, `(cursor-move ${hdr} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    // Find f.txt's hunk in the multi-file view: navigate to the first
+    // hunk whose following --- line names f.txt... simply stage hunk 1
+    // (ren.txt's rename has NO hunk — f.txt's is the only one).
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied"); // NOT the rename refusal
+    expect(git("diff", "--cached")).toContain("CHANGED");
   });
 });
 

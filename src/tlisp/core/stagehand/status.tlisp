@@ -347,13 +347,15 @@ the buffer is untouched."
                   (editor-set-status "Stagehand: nothing to diff in this section")
                   (stagehand-diff-run (stagehand-side-of-section name)
                     (stagehand-paths-arg entries)
-                    (concat "section: " name))))))))
+                    (concat "section: " name)
+                    (stagehand-section-path-list entries))))))))
       ((string= (nth 2 pair) "??")
         (editor-set-status "untracked file — no diff"))
       (t
         (stagehand-diff-run (stagehand-side-of-section (nth 3 pair))
           (stagehand-row-paths-arg pair)
-          (car (cdr pair)))))))
+          (car (cdr pair))
+          (list (car (cdr pair))))))))
 
 (defun stagehand-side-of-section (section-name)
   ;; Staged rows carry index-side codes → --cached; everything else
@@ -370,6 +372,18 @@ the buffer is untouched."
     (if (string= (car (car sections)) name)
       (car (cdr (car sections)))
       (stagehand-section-scan (cdr sections) name))))
+
+(defun stagehand-section-path-list (entries)
+  ;; The section's distinct paths (the view's -- arguments for
+  ;; refresh/hunk-op scoping).
+  (stagehand-section-paths-scan entries (list)))
+
+(defun stagehand-section-paths-scan (entries out)
+  (if (null entries)
+    (reverse out)
+    (let ((p (car (cdr (car entries)))))
+      (stagehand-section-paths-scan (cdr entries)
+        (if (member p out) out (cons p out))))))
 
 (defun stagehand-paths-arg (entries)
   ;; " -- ':(literal)p1' ':(literal)p2' ..." — one -- separator
