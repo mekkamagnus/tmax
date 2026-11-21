@@ -112,6 +112,8 @@
   ;; #288: Stagehand commit (loads AFTER status — it consumes status's
   ;; helpers; status's keymap binds c/C/R into it lazily).
   (require-module stagehand/commit)
+  ;; #287: stage/unstage/discard (same one-way shape: consumes status).
+  (require-module stagehand/stage)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.

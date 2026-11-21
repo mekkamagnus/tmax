@@ -1,0 +1,234 @@
+(defmodule stagehand/stage
+  (export stagehand-stage-file stagehand-unstage-file
+          stagehand-discard-file stagehand-stage-section
+          stagehand-unstage-section stagehand-discard-accept
+          stagehand-discard-table stagehand-discard-confirm)
+
+  (require-module stagehand/status)
+
+;; #287 — Stagehand T0: file-level STAGE / UNSTAGE / DISCARD from the
+;; status buffer. Every git invocation is ARGV-BASED
+;; (stagehand-git-argv → shell-exec-argv — no shell between the
+;; values and the process; spaces, leading dashes, and unicode are
+;; structurally safe; `--` precedes every path).
+;;
+;; Matrix: s on Untracked/Unstaged → git add; u on Staged → git
+;; restore --staged (a staged rename unstages BOTH paths in one
+;; invocation); D on Unstaged → git checkout -- (worktree restore,
+;; INDEX PRESERVED) behind a y/n completing-read (empty/C-g = no-op);
+;; D on Untracked REFUSES (no clean -f in v1); Conflicted rows refuse
+;; everything ("resolve conflicts first"; #295's conditional-s
+;; exception arrives with #295). Header-wide S/U visit only eligible
+;; sections top-to-bottom, stop at the first failure with a per-row
+;; report, EXCLUDE conflicted rows (they live in their own section),
+;; and count only visited rows. Success auto-refreshes (#286's
+;; fold/cursor-preserving refresh).
+
+(defvar stagehand-discard-pending nil
+  "The path awaiting the y/n answer (nil when nothing pendings).")
+(defvar stagehand-discard-root nil
+  "The root captured at confirm time — the discard targets it.")
+
+;; ── the argv git helper (NO shell, NO quoting needed) ───────────────
+(defun stagehand-git-argv (args root)
+  "Run `git <args...>` with ARGS an argv LIST at ROOT — the values go
+straight to spawn, never through a shell."
+  (shell-exec-argv (cons "git" args) root))
+
+(defun stagehand-root ()
+  (stagehand/status/stagehand-status-root))
+
+;; ── per-row actions ─────────────────────────────────────────────────
+(defun stagehand-stage-file ()
+  "s — stage the row at point (Untracked/Unstaged → git add -- path).
+Conflicted rows refuse."
+  (let ((pair (stagehand-row)))
+    (cond
+      ((null pair) (editor-set-status "Stagehand: no row here"))
+      ((string= (nth 3 pair) "Conflicted")
+        (editor-set-status "resolve conflicts first"))
+      ((null (nth 1 pair))
+        (editor-set-status "Stagehand: s stages file rows"))
+      (t
+        (stagehand-apply-one
+          (list "add" "--" (nth 1 pair)))))))
+
+(defun stagehand-unstage-file ()
+  "u — unstage the Staged row at point (git restore --staged -- path;
+a staged rename contributes BOTH paths to one invocation)."
+  (let ((pair (stagehand-row)))
+    (cond
+      ((null pair) (editor-set-status "Stagehand: no row here"))
+      ((string= (nth 3 pair) "Conflicted")
+        (editor-set-status "resolve conflicts first"))
+      ((not (string= (nth 3 pair) "Staged"))
+        (editor-set-status "Stagehand: u unstages Staged rows"))
+      (t
+        (stagehand-apply-one
+          (cons "restore" (cons "--staged"
+            (cons "--" (stagehand-row-paths pair)))))))))
+
+(defun stagehand-discard-file ()
+  "D — discard the WORKTREE change on the Unstaged row at point,
+behind a y/n confirm (empty/C-g = no-op). Untracked refuses (no
+clean -f in v1); Staged refuses (the index side is u's domain);
+Conflicted refuses. The restore touches the worktree only — staged
+content is preserved."
+  (let ((pair (stagehand-row)))
+    (cond
+      ((null pair) (editor-set-status "Stagehand: no row here"))
+      ((string= (nth 3 pair) "Conflicted")
+        (editor-set-status "resolve conflicts first"))
+      ((string= (nth 3 pair) "Untracked")
+        (editor-set-status "refusing to discard untracked file"))
+      ((not (string= (nth 3 pair) "Unstaged"))
+        (editor-set-status "Stagehand: D discards unstaged changes"))
+      (t
+        (stagehand-discard-confirm (nth 1 pair))))))
+
+;; ── the destructive confirm (async y/n completing-read) ─────────────
+(defun stagehand-discard-table (input action)
+  "The y/n completion table (the kill-buffer-yes-no pattern)."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "y" "display" "y" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "n" "display" "n" "annotation" "" "metadata" (hashmap)))))
+
+(defun stagehand-discard-confirm (path)
+  ;; completing-read is ASYNC — the discard defers to the accept
+  ;; handler (empty/C-g accept handlers receive "" → no-op).
+  (setq stagehand-discard-pending path)
+  (setq stagehand-discard-root (stagehand-root))
+  (completing-read
+    (concat "Discard worktree changes to " path "? (y/n)")
+    "stagehand/stage/stagehand-discard-table"
+    nil
+    t
+    ""
+    "stagehand-discard-history"
+    "stagehand/stage/stagehand-discard-accept"))
+
+(defun stagehand-discard-accept (answer)
+  "The y/n accept handler: y discards, anything else (incl. empty =
+C-g cancel) is a no-op."
+  (if (string= answer "y")
+    (let ((path stagehand-discard-pending)
+          (root stagehand-discard-root))
+      (setq stagehand-discard-pending nil)
+      (setq stagehand-discard-root nil)
+      (if (and path root)
+        (stagehand-apply-one-at (list "checkout" "--" path) root)
+        (editor-set-status "Stagehand: no discard pending")))
+    (progn
+      (setq stagehand-discard-pending nil)
+      (setq stagehand-discard-root nil)
+      (editor-set-status "Stagehand: discard cancelled"))))
+
+;; ── header-wide runs ────────────────────────────────────────────────
+(defun stagehand-stage-section ()
+  "S — stage every eligible row in the section at point (Untracked +
+Unstaged sections; others no-op). Top-to-bottom; the first failure
+STOPS the run with a per-row report (already-applied rows stay
+applied — idempotent re-run). Conflicted rows are never visited."
+  (stagehand-run-section '("Untracked" "Unstaged")
+    (lambda (pair) (list "add" "--" (nth 1 pair)))))
+
+(defun stagehand-unstage-section ()
+  "U — unstage every row in the Staged section at point (other
+sections no-op). Same run semantics as S."
+  (stagehand-run-section '("Staged")
+    (lambda (pair)
+      (cons "restore" (cons "--staged"
+        (cons "--" (stagehand-row-paths pair)))))))
+
+(defun stagehand-run-section (eligible mk-argv)
+  ;; Visit the CURRENT section's rows top-to-bottom ONLY when its name
+  ;; is eligible; stop at the first failure with the per-row report.
+  (let* ((pair (stagehand-row))
+         (name (if pair (nth 3 pair) nil)))
+    (cond
+      ((null pair) (editor-set-status "Stagehand: no row here"))
+      ((null (member name eligible))
+        (editor-set-status (concat "Stagehand: nothing to do for " name)))
+      (t
+        (let ((rows (stagehand-section-row-pairs name)))
+          (stagehand-run-rows rows mk-argv 0))))))
+
+(defun stagehand-run-rows (rows mk-argv applied)
+  (if (null rows)
+    ;; Done: the report counts only VISITED rows (conflicted rows were
+    ;; never in this section's list).
+    (progn
+      (stagehand/status/stagehand-status-refresh)
+      (editor-set-status
+        (concat "applied " (number-to-string applied) " of "
+          (number-to-string (+ applied (length rows))) " visited")))
+    (let* ((pair (car rows))
+           (res (stagehand-git-argv (funcall mk-argv pair) (stagehand-root))))
+      (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+        (stagehand-run-rows (cdr rows) mk-argv (+ applied 1))
+        ;; PARTIAL FAILURE stops the run; applied rows stay applied.
+        (progn
+          (stagehand/status/stagehand-status-refresh)
+          (editor-set-status
+            (concat "applied " (number-to-string applied) " of "
+              (number-to-string (+ applied (length rows))) " visited, failed at "
+              (nth 1 pair) ": " (stagehand-first-line (nth 1 res)))))))))
+
+;; ── shared plumbing ─────────────────────────────────────────────────
+(defun stagehand-apply-one (argv)
+  (stagehand-apply-one-at argv (stagehand-root)))
+
+(defun stagehand-apply-one-at (argv root)
+  (let ((res (stagehand-git-argv argv root)))
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      (progn
+        (stagehand/status/stagehand-status-refresh)
+        (editor-set-status "Stagehand: done"))
+      (editor-set-status
+        (concat "Stagehand: git failed ("
+          (if (numberp (nth 2 res)) (number-to-string (nth 2 res)) "?")
+          ") " (stagehand-first-line (nth 1 res)))))))
+
+(defun stagehand-row ()
+  ;; The (display path code section origin) pair under the cursor.
+  (let* ((idx (stagehand/status/stagehand-current-index))
+         (pairs (stagehand/status/stagehand-visible-pairs)))
+    (if (and (>= idx 0) (< idx (length pairs))) (nth idx pairs) nil)))
+
+(defun stagehand-row-paths (pair)
+  ;; The path + rename origin (both sides for staged renames).
+  (if (nth 4 pair)
+    (list (nth 1 pair) (nth 4 pair))
+    (list (nth 1 pair))))
+
+(defun stagehand-section-row-pairs (name)
+  ;; The section's FILE-row pairs (headers filtered), display order.
+  (stagehand-filter-rows name
+    (stagehand-scan-sections (stagehand/status/stagehand-current-sections) name)))
+
+(defun stagehand-scan-sections (secs name)
+  (if (null secs)
+    nil
+    (if (string= (car (car secs)) name)
+      (car (cdr (car secs)))
+      (stagehand-scan-sections (cdr secs) name))))
+
+(defun stagehand-filter-rows (name entries)
+  ;; entries → ((display path code name origin) ...) row pairs.
+  (if (null entries)
+    (list)
+    (let* ((e (car entries))
+           (code (car e))
+           (path (car (cdr e)))
+           (origin (car (cdr (cdr e)))))
+      (cons (list (stagehand/status/stagehand-render-row code path origin)
+                  path code name origin)
+        (stagehand-filter-rows name (cdr entries))))))
+
+(defun stagehand-first-line (s)
+  (let ((l (car (string-split (concat (or s "") "\n") "\n"))))
+    (if (and l (> (length l) 0)) l "")))
+
+(provide "stagehand-stage"))

@@ -8,7 +8,8 @@
           stagehand-status-rows-of stagehand-visible-rows
           stagehand-render-row stagehand-status-diff
           stagehand-git stagehand-shq stagehand-has-commits-p
-          stagehand-current-sections stagehand-git-line)
+          stagehand-current-sections stagehand-git-line
+          stagehand-visible-pairs stagehand-current-index)
 
   (require-module stagehand/diff)
 
@@ -678,6 +679,11 @@ arg; the quoting is the apostrophe-escape pattern)."
         (editor/keymaps/keymap-set-key kmap "c" "(stagehand/commit/stagehand-commit-new)")
         (editor/keymaps/keymap-set-key kmap "C" "(stagehand/commit/stagehand-commit-amend)")
         (editor/keymaps/keymap-set-key kmap "R" "(stagehand/commit/stagehand-commit-reword)")
+        (editor/keymaps/keymap-set-key kmap "s" "(stagehand/stage/stagehand-stage-file)")
+        (editor/keymaps/keymap-set-key kmap "u" "(stagehand/stage/stagehand-unstage-file)")
+        (editor/keymaps/keymap-set-key kmap "D" "(stagehand/stage/stagehand-discard-file)")
+        (editor/keymaps/keymap-set-key kmap "S" "(stagehand/stage/stagehand-stage-section)")
+        (editor/keymaps/keymap-set-key kmap "U" "(stagehand/stage/stagehand-unstage-section)")
         (editor/keymaps/buffer-set-keymap (stagehand-status-buffer-name) kmap))))
   t)
 

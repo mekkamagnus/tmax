@@ -1471,6 +1471,49 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           }
         });
 
+        ops.set('shell-exec-argv', (args: TLispValue[]): Either<AppError, TLispValue> => {
+          // #287's safety contract: an ARGV-list exec with NO shell
+          // between the values and the process — filenames never cross
+          // string interpolation. Returns (stdout stderr exit) exactly
+          // like shell-exec (byte-faithful).
+          if (args.length < 1 || args[0]!.type !== 'list') {
+            return Either.left(createValidationError('FormatError', 'shell-exec-argv requires 1 argument: an argv list of strings'));
+          }
+          const rawArgv = args[0]!.value as TLispValue[];
+          if (rawArgv.some((v) => v.type !== 'string')) {
+            return Either.left(createValidationError('TypeError', 'shell-exec-argv requires every argv element to be a string'));
+          }
+          if (rawArgv.length === 0) {
+            return Either.left(createValidationError('FormatError', 'shell-exec-argv requires a non-empty argv list'));
+          }
+          if (args.length > 1 && args[1] && args[1].type !== 'nil' && args[1].type !== 'string') {
+            return Either.left(createValidationError('TypeError', 'shell-exec-argv cwd argument must be a string'));
+          }
+          const cwd = args.length > 1 && args[1]?.type === 'string' ? String(args[1].value) : undefined;
+          const argv = rawArgv.map((v) => String(v.value));
+          try {
+            const t0 = Date.now();
+            const output = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe', timeout: 30_000, ...(cwd ? { cwd } : {}) });
+            const stdout = output.stdout ? new TextDecoder().decode(output.stdout) : '';
+            const stderr = output.stderr ? new TextDecoder().decode(output.stderr) : '';
+            const exitCode = output.exitCode ?? 1;
+            ctx.logProgram?.('shell', {
+              level: exitCode === 0 ? 'info' : 'error',
+              text: argv.join(' '),
+              exitCode,
+              durationMs: Date.now() - t0,
+              outputTail: capTail(`${stdout}\n${stderr}`),
+            });
+            return Either.right(createList([
+              createString(stdout),
+              createString(stderr),
+              createNumber(exitCode),
+            ]));
+          } catch (e) {
+            return Either.left(createValidationError('FormatError', `shell-exec-argv failed: ${e instanceof Error ? e.message : String(e)}`));
+          }
+        });
+
         ops.set('shell-exec', (args: TLispValue[]): Either<AppError, TLispValue> => {
           if (args.length < 1) return Either.left(createValidationError('FormatError', 'shell-exec requires 1 argument: command'));
           if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-exec requires a string'));
