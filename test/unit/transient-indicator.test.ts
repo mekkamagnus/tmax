@@ -208,6 +208,24 @@ describe("#319 — the frozen→clear terminal sequence at EVERY terminal kind",
       expect(String(e(editor, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value)).toBe("0");
     });
   }
+  test("a NON-serving read (capture) does not acknowledge: the frame waits for the served poll", () => {
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    silence(editor);
+    for (let i = 0; i < 2; i++) e(editor, delta(`c${i} `));
+    tick(editor);
+    e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    const frozen = segment(editor, "main");
+    expect(frozen).toMatch(/^✓/);
+    // CAPTURE-STYLE reads (captureFrame bypasses the serve helper — the
+    // structural invariant documented on withTransientRevision): ticks
+    // alone never clear the frame.
+    for (let i = 0; i < 4; i++) tick(editor);
+    expect(segment(editor, "main")).toBe(frozen);
+    // The SERVED poll acknowledges; the next tick clears.
+    e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")');
+    tick(editor);
+    expect(segment(editor, "main")).toBe("null");
+  });
 });
 
 describe("#319 — the usage final line (provider-reported, persisted)", () => {

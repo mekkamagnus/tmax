@@ -20,14 +20,16 @@
 ;;
 ;; #319 — the ANIMATED WORKING INDICATOR rides the same layer:
 ;;   <glyph> <gerund> · <N> chunks · <elapsed>
-;; The chunk counter counts the TWO streaming FAEP kinds (text-delta +
-;; tool-call — the named rule; nothing else). Elapsed starts at the
-;; turn's FIRST streamed event (a transient timestamp, never persisted);
-;; a mid-turn attach reads the same daemon state. The terminal sequence
-;; is deterministic: the frozen frame (✓, elapsed stopped) rides the
-;; next poll, the tick after that clears it — the interval stops one
-;; tick AFTER the last running thread's terminal (the clear frame's
-;; carrier).
+;; The chunk counter counts the two DELTA kinds (text-delta +
+;; tool-input-delta — the issue's named rule; completions — tool-call,
+;; finished text — are not deltas and do not count). Elapsed starts at
+;; the turn's FIRST STREAMED event (any content kind; a transient
+;; timestamp, never persisted); a mid-turn attach reads the same daemon
+;; state. The terminal sequence is deterministic and RENDER-GATED: the
+;; frozen frame (✓, elapsed captured at the edge) rides polls until a
+;; client SERVES it, the tick after that clears it, and only then does
+;; the interval stop — both frames ride real poll cycles in either
+;; tick/poll order (a ~10-tick headless bound clears unserved frames).
 ;;
 ;; Lifecycle: the interval runs ONLY while ≥1 thread is running OR an
 ;; unrendered frozen frame remains (started on the first running
@@ -45,7 +47,7 @@
 
 ;; Per-thread indicator state (hashmap id → value).
 (defvar fikra-transient-chunks (hashmap)
-  "id → streamed-chunk count (text-delta + tool-call events).")
+  "id → streamed-chunk count (the two DELTA kinds: text-delta + tool-input-delta).")
 (defvar fikra-transient-starts (hashmap)
   "id → the turn's FIRST streamed event timestamp (ms; nil until then).")
 (defvar fikra-transient-frozen (hashmap)

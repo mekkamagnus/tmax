@@ -100,6 +100,11 @@ export function withTransientRevision<T extends object>(
   state: T,
   interp?: { execute: (expr: string) => unknown },
 ): T {
+  // #319 SERVE INVARIANT (codex r3): every caller of this helper is a
+  // CLIENT-RESPONSE path (the keypress and render-state handlers — each
+  // response flows to a client that renders it). `capture` deliberately
+  // does NOT use this helper (a read-off snapshot never acknowledges a
+  // frozen frame); keep it that way when adding paths.
   if (!interp) return state;
   const readTransient = (expr: string): unknown => {
     try {
