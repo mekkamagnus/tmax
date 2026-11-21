@@ -24,6 +24,12 @@
 
 (defvar stagehand-commit-variant "new"
   "The active compose's variant: new | amend | reword.")
+(defvar stagehand-commit-root nil
+  "The repository root CAPTURED AT COMPOSE-OPEN — the commit targets
+THIS root at dispatch no matter where the status buffer later points
+(a mid-compose repo switch must never redirect an existing compose;
+codex r1 reproduced exactly that). Preserved through failures and
+retries; cleared at close.")
 (defvar stagehand-commit-tmp-path nil
   "The last temp message file (the getter surfaces it; tests assert it
 is GONE after every sentinel — the orphan-file contract).")
@@ -89,8 +95,11 @@ created fixup sha."
 ;; ── the compose ─────────────────────────────────────────────────────
 (defun stagehand-commit-compose (variant seed)
   ;; Open (or reset) *Commit-Message*, seed it, and hand the user an
-  ;; insert-mode buffer with the commit chords.
+  ;; insert-mode buffer with the commit chords. The repository root is
+  ;; CAPTURED HERE — dispatch targets it even if the status buffer
+  ;; switches repositories while the compose is open.
   (setq stagehand-commit-variant variant)
+  (setq stagehand-commit-root (stagehand/status/stagehand-status-root))
   (if (not (member (stagehand-commit-buffer-name) (buffer-list)))
     (buffer-create (stagehand-commit-buffer-name)))
   (buffer-switch (stagehand-commit-buffer-name))
@@ -135,12 +144,6 @@ removed on EVERY exit — the write+run block is EXCEPTION-SAFE
   "C-c C-k / C-g — abandon: no commit, close + restore."
   (stagehand-commit-close))
 
-(defun stagehand-commit-close ()
-  ;; Kill the compose; buffer-kill's Editor path restores the recency
-  ;; survivor (the status buffer). The editor returns to normal mode.
-  (editor-set-mode "normal")
-  (buffer-kill (stagehand-commit-buffer-name)))
-
 (defun stagehand-commit-run (tmp)
   (let ((amend (if (or (string= stagehand-commit-variant "amend")
                        (string= stagehand-commit-variant "reword"))
@@ -148,7 +151,15 @@ removed on EVERY exit — the write+run block is EXCEPTION-SAFE
                  "")))
     (stagehand/status/stagehand-git
       (concat "commit -F " (stagehand/status/stagehand-shq tmp) amend)
-      (stagehand/status/stagehand-status-root))))
+      stagehand-commit-root)))
+
+(defun stagehand-commit-close ()
+  ;; Kill the compose; buffer-kill's Editor path restores the recency
+  ;; survivor (the status buffer). The editor returns to normal mode
+  ;; and the captured root/variant state is released.
+  (setq stagehand-commit-root nil)
+  (editor-set-mode "normal")
+  (buffer-kill (stagehand-commit-buffer-name)))
 
 ;; ── helpers ─────────────────────────────────────────────────────────
 (defun stagehand-mktemp ()

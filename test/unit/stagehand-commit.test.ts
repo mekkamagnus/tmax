@@ -243,6 +243,35 @@ describe("#288 — the commit flow", () => {
     expect(git("log", "-1", "--format=%B")).toContain("initial commit");
   });
 
+  test("a MID-COMPOSE repo switch never redirects the commit (codex r1 P1)", () => {
+    // Repository A: the compose's origin.
+    const repoA = process.cwd();
+    writeFileSync(join(repoA, "a.txt"), "a\n");
+    commit("base-a");
+    writeFileSync(join(repoA, "a.txt"), "a2\n");
+    execFileSync("git", ["add", "a.txt"], { cwd: repoA });
+    statusOf();
+    e(editor, "(stagehand/commit/stagehand-commit-new)");
+    type("message written in A");
+    // Repository B: open Stagehand there (the status root MOVES), then
+    // return to the compose and commit.
+    const repoB = mkdtempSync(join(tmpdir(), "i288b-"));
+    dirs.push(repoB);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repoB });
+    writeFileSync(join(repoB, "b.txt"), "b\n");
+    execFileSync("git", ["add", "b.txt"], { cwd: repoB });
+    process.chdir(repoB);
+    editor.setClientLaunchDir(repoB);
+    statusOf(); // B's status (root now B)
+    e(editor, `(buffer-switch "*Commit-Message*")`);
+    e(editor, "(stagehand/commit/stagehand-commit-dispatch)");
+    // A received the commit; B did NOT.
+    expect(execFileSync("git", ["log", "-1", "--format=%B"], { cwd: repoA }).toString()).toContain("message written in A");
+    expect(execFileSync("git", ["rev-list", "--count", "--all"], { cwd: repoB }).toString().trim()).toBe("0");
+    process.chdir(repoA);
+    editor.setClientLaunchDir(repoA);
+  });
+
   test("the c KEY dispatches from the status buffer", async () => {
     writeFileSync(join(process.cwd(), "a.txt"), "a\n");
     commit("base");
