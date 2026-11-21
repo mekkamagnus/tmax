@@ -76,6 +76,20 @@ describe("#318 — interval lifecycle (the REAL state machine drives it)", () =>
     // A further tick is a no-op (the inactive guard).
     expect(String(e(editor, "(fikra/transient/fikra-transient-tick)").value)).toBe("null");
   });
+
+  test("RECONCILE: a tick with the layer inactive but a thread RUNNING re-activates it (module-reload resume)", () => {
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    expect(active(editor)).toBe("1");
+    // The post-reload state shape: active flag gone (defvars reset /
+    // explicit stop) while the REGISTRY still says running.
+    e(editor, "(fikra/transient/fikra-transient-stop)");
+    expect(active(editor)).toBe("0");
+    // The next tick RECONCILES instead of killing the interval.
+    e(editor, "(fikra/transient/fikra-transient-tick)");
+    expect(active(editor)).toBe("1");
+    e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    expect(active(editor)).toBe("0");
+  });
 });
 
 describe("#318 — frame changes with the log byte-identical", () => {
@@ -99,9 +113,11 @@ describe("#318 — frame changes with the log byte-identical", () => {
     const before = readFileSync(logPath, "utf8");
     const c0 = Number(e(editor, "(fikra/transient/fikra-transient-count)").value);
     try {
-      await new Promise((r) => setTimeout(r, 650));
+      // 900ms window at a 200ms cadence = ~4 expected ticks; asserting
+      // ≥2 leaves 4.5x slack for timer coalescing on a loaded runner
+      // (gate r3 flake note).
+      await new Promise((r) => setTimeout(r, 900));
       const c1 = Number(e(editor, "(fikra/transient/fikra-transient-count)").value);
-      // 200ms cadence over a 650ms window: ≥2 autonomous ticks.
       expect(c1 - c0).toBeGreaterThanOrEqual(2);
       expect(readFileSync(logPath, "utf8")).toBe(before);
     } finally {

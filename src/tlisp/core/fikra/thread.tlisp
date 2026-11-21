@@ -644,11 +644,16 @@ tick's auto-stop asks this, not its own bookkeeping)."
     hit))
 
 (defun fikra-thread-id-of-buffer (name)
-  "The thread a *Fikra* buffer NAME displays (nil for non-fikra buffers)
-— the inverse of buffer-name-of; the frame-viewed thread resolution."
+  "The thread a *Fikra* buffer NAME displays (nil for non-fikra buffers).
+REGISTRY-ONLY resolution (gate r3): no disk listing, no shell — this
+runs on every poll response, and a fork per 200ms per client blocks
+daemon eval. A thread not in the in-memory registry cannot be RUNNING
+(status lives there), so nil is always the correct segment answer; the
+registry also holds threads from ANY project root, so cross-root frames
+resolve (the old fikra-thread-ids scan was current-root-scoped)."
   (if (not (stringp name))
     nil
-    (fikra-thread-id-of-buffer-scan (fikra-thread-ids) name)))
+    (fikra-thread-id-of-buffer-scan (hashmap-keys fikra-threads) name)))
 
 (defun fikra-thread-id-of-buffer-scan (ids name)
   (cond

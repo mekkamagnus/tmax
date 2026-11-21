@@ -20,6 +20,7 @@ import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
 import { makeWikiLinkResolver } from "../syntax/wiki-link-faces.ts";
 import type { HighlightSpan } from "../core/contracts/editor.ts";
 import { Either } from "../utils/task-either.ts";
+import { repaintSnapshot, shouldRepaint } from "./repaint-decision.ts";
 
 function enterAltScreen() {
   process.stdout.write("\x1b[?1049h");
@@ -240,34 +241,16 @@ Requires a running tmax daemon. Start one with:
   // Poll for external changes every 200ms. O(1) change detection (issue #46):
   // compare the daemon-side bufferRevision plus the display fields the render
   // actually depends on — never JSON.stringify the whole (potentially large)
-  // state.
-  const lastRevision = -1;  // forces a render on the first poll
-  let lastPollRevision = lastRevision;
+  // state. #318 (codex r2): the decision lives in the PURE shouldRepaint —
+  // pinned by unit tests (a transient-only change renders while the buffer
+  // revision stays fixed; an unchanged pair does not).
+  let lastSnap = repaintSnapshot(lastState, -1, -1); // -1 forces a first render
   pollInterval = setInterval(async () => {
     try {
       const current = await remote.refreshState();
-      const rev = remote.lastBufferRevision;
-      // #318: BOTH counters compared independently — a transient bump
-      // (5→6) renders while the buffer revision stays put.
-      const trev = remote.lastTransientRevision;
-      const changed =
-        rev !== lastPollRevision ||
-        trev !== lastTransientRevision ||
-        current.mode !== lastState.mode ||
-        current.viewportTop !== lastState.viewportTop ||
-        current.statusMessage !== lastState.statusMessage ||
-        current.cursorPosition.line !== lastState.cursorPosition.line ||
-        current.cursorPosition.column !== lastState.cursorPosition.column ||
-        // #231: flash onset, clear, AND supersede must re-render — a
-        // value-shape compare, not presence (two yy within one poll window
-        // otherwise drops the second flash; verify-gate retry 2). Flash
-        // arrays are tiny, so JSON compare is cheap.
-        JSON.stringify(current.flashSpans) !== JSON.stringify(lastState.flashSpans) ||
-        // §8.8: ghost onset/clear/supersede re-renders.
-        current.ghostText !== lastState.ghostText;
-      if (changed) {
-        lastPollRevision = rev;
-        lastTransientRevision = trev;
+      const snap = repaintSnapshot(current, remote.lastBufferRevision, remote.lastTransientRevision);
+      if (shouldRepaint(lastSnap, snap)) {
+        lastSnap = snap;
         lastState = current;
         render(current);
         await remote.sendEvent("render", { terminalSize: getDims() });
@@ -283,7 +266,6 @@ Requires a running tmax daemon. Start one with:
     }
   }, 200);
 
-  let lastTransientRevision = -1; // #318: the transient counter pair member
   let pendingInput = "";
 
   process.stdin.on("data", async (chunk: string) => {

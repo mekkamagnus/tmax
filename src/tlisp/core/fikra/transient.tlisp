@@ -71,9 +71,13 @@ old guarded stop leaked the live interval forever (gate r2)."
 ;; revision + tick count ONLY (no buffer/event mutations).
 (defun fikra-transient-tick ()
   (if (not fikra-transient-active)
-    ;; An inactive tick means the interval outlived its state (module
-    ;; reload) — KILL the leaked shell, not just no-op (gate r2).
-    (progn (editor-transient-timer-stop) nil)
+    ;; RECONCILE a leaked interval (module reload reset the defvars):
+    ;; a still-running thread RESUMES the layer (the spinner must not
+    ;; stay silent until the next ->running edge); none running → KILL
+    ;; the shell (gate r2/r3).
+    (if (fikra-any-thread-running-p)
+      (progn (setq fikra-transient-active t) (fikra-transient-tick))
+      (progn (editor-transient-timer-stop) nil))
     (progn
       (setq fikra-transient-ticks (+ 1 fikra-transient-ticks))
       (setq fikra-transient-rev (+ 1 fikra-transient-rev))
@@ -91,11 +95,12 @@ old guarded stop leaked the live interval forever (gate r2)."
 ;; answers for ONE thread id).
 (defun fikra-transient-segment (thread-id)
   "The spinner row for THREAD-ID's frame when it is running; nil for an
-idle/viewed-other thread (the focused-thread rule)."
+idle/viewed-other thread (the focused-thread rule). USER-VISIBLE text
+only (gate r3): the daemon-lifetime revision counter is test surface
+(fikra-transient-revision), NOT display text — users must not see
+'working… 41283' grow unboundedly."
   (if (and fikra-transient-active (fikra-thread-is-running-p thread-id))
-    (concat (fikra-transient-spinner-glyph)
-            " working… "
-            (number-to-string fikra-transient-rev))
+    (concat (fikra-transient-spinner-glyph) " working…")
     nil))
 
 (defun fikra-transient-spinner-glyph ()

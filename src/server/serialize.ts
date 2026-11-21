@@ -116,9 +116,12 @@ export function withTransientRevision<T extends object>(
   // #318 (gate r2 / codex r1 catch 2): resolve the segment for the
   // thread whose *Fikra* buffer THIS state views — a frame watching
   // *Fikra-fix-1* must not receive the daemon-current thread's spinner.
+  // The name crosses TS→T-Lisp HEX-ENCODED (gate r3): the reader strips
+  // backslash escapes in literals — the known pattern is hex-decode on
+  // the T-Lisp side.
   const viewedBuffer = (state as { currentBufferName?: unknown }).currentBufferName;
   const segExpr = typeof viewedBuffer === "string"
-    ? `(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-viewed-segment-for ${JSON.stringify(viewedBuffer)})) (error () nil))`
+    ? `(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-viewed-segment-for (hex-decode "${Buffer.from(viewedBuffer, "utf8").toString("hex")}"))) (error () nil))`
     : "(condition-case nil (progn (require-module fikra/transient) (fikra-transient-viewed-segment)) (error () nil))";
   const seg = readTransient(segExpr);
   if (typeof seg === "string" && seg.length > 0) (state as { transientSegment?: string }).transientSegment = seg;
