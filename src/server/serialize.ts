@@ -194,14 +194,23 @@ export function editorStateToJson(
       const cw = Math.max(20, renderWidth - 12);
       const rowLimit = rows * 6; // wire bound: pathological single-line walls
       let wrappedRows = 0;
+      let postCursorRows = 0; // wrapped rows FROM the cursor line onward
       let i = 0;
-      // +1 line of post-cursor slack: the client's whole-line advance can
-      // overshoot the cursor; a window ending EXACTLY at the cursor leaves
-      // blank rows below it (verify-gate r2).
-      while ((wrappedRows < rows || viewportTop + i <= cursorLine + 1) && i < rowLimit) {
+      // The window must fill THREE views: the screen at the current top,
+      // the cursor itself (+1 slack — the client's whole-line advance can
+      // overshoot), and a FULL SCREEN below the cursor — the wrap-aware
+      // viewport advance starts at/near the cursor line, so a window that
+      // stops at the cursor leaves the advanced frame's tail blank (codex:
+      // the reproduced cursor-21-on-100 case).
+      while ((wrappedRows < rows
+              || viewportTop + i <= cursorLine + 1
+              || postCursorRows < rows)
+             && i < rowLimit) {
         const lineResult = buffer.getLine(viewportTop + i);
         const text = lineResult && lineResult._tag === "Right" ? lineResult.right : "";
-        wrappedRows += Math.max(1, Math.ceil(Bun.stringWidth(text) / cw));
+        const w = Math.max(1, Math.ceil(Bun.stringWidth(text) / cw));
+        wrappedRows += w;
+        if (viewportTop + i >= cursorLine) postCursorRows += w;
         i++;
       }
       neededRows = Math.max(rows, i);

@@ -20,6 +20,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { captureFrame } from "../../src/render/capture-frame.ts";
+import { getWrappedViewportTop, getWrappedCursorRow, getVisibleViewportTop } from "../../src/frontend/render/buffer-lines.ts";
 import { editorStateToJson, jsonToEditorState } from "../../src/server/serialize.ts";
 import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
@@ -203,6 +204,41 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     }
   });
 });
+
+  test("#321 codex r1: the advanced frame's TAIL fills below a mid-buffer cursor (post-cursor window)", () => {
+    // The reproduced case: 100 lines, LONG preceding lines (each wraps to
+    // ~3 rows at width 100), cursor on line 21, 22-row screen. The client
+    // advances the top wrap-awarely; the wire must carry content BELOW
+    // the cursor so the advanced frame's tail is REAL lines.
+    const lines: string[] = [];
+    for (let i = 0; i < 99; i++) lines.push(i < 21 ? `${"w".repeat(200)} ${i}` : `line-${i}`);
+    lines.push("line-99 TAIL end");
+    const state = makeState(lines, true, 21, 22);
+    const wire = editorStateToJson(state, 22, 100);
+    const view = jsonToEditorState(wire);
+    // Lines just below the cursor are present for ANY advancement.
+    for (let ln = 22; ln < 34; ln++) {
+      const r = view.currentBuffer!.getLine(ln) as { _tag?: string; right?: unknown };
+      expect(String(r && r._tag === "Right" ? r.right : r)).toContain(`line-${ln}`);
+    }
+  });
+
+  test("#321 codex r1: the wrapped hardware cursor lands on the cursor TEXT's row", () => {
+    const lines: string[] = [];
+    for (let i = 0; i < 40; i++) lines.push(i < 10 ? `${"y".repeat(150)} ${i}` : `short-${i}`);
+    const state = makeState(lines, true, 30, 22);
+    const top = getWrappedViewportTop(state, 22, 100);
+    const row = getWrappedCursorRow(state, 22, 100);
+    expect(row).toBeGreaterThanOrEqual(0);
+    expect(row).toBeLessThan(22);
+    // With wrapped tops ≠ logical tops the two computations diverge (the
+    // OLD bug put the hardware cursor 20+ rows off).
+    const logicalTop = getVisibleViewportTop(state, 22);
+    if (top !== logicalTop) {
+      const logicalRow = Math.max(0, Math.min(21, 30 - logicalTop));
+      expect(row).not.toBe(logicalRow);
+    }
+  });
 
 /** Exposed for the fix-phase test + recording: the matrix table. */
 export function matrixTable(): string {

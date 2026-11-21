@@ -6,7 +6,7 @@
  */
 
 import { RemoteEditor } from "../editor/remote-editor.ts";
-import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
+import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop, getWrappedCursorRow, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
 import { mergeFlashSpans } from "../render/flash-merge.ts";
 export { mergeFlashSpans };
 import { renderStatusLine } from "../frontend/render/status-line.ts";
@@ -150,9 +150,14 @@ function render(state: EditorState) {
   if (minibuffer) {
     moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);
   } else {
-    const cursor = getCursorScreenOffset(state, bufferHeight, width);
-    const cursorRow = Math.max(0, Math.min(bufferHeight - 1, cursor.row));
-    const cursorCol = Math.max(0, Math.min(width - 1, cursor.col));
+    // #321 (codex): the hardware cursor rides the WRAPPED layout (the
+    // renderer advances the top wrap-awarely — a logical row put it on the
+    // wrong screen line). The COLUMN keeps the logical path's gutter-
+    // aware math in both modes.
+    const cursorRow = Math.max(0, Math.min(bufferHeight - 1,
+      state.config?.wordWrap ? getWrappedCursorRow(state, bufferHeight, width) : getCursorScreenOffset(state, bufferHeight, width).row));
+    const cursorCol = Math.max(0, Math.min(width - 1,
+      getCursorScreenOffset(state, bufferHeight, width).col));
     moveTo(cursorRow + tabBarHeight, cursorCol);
   }
 }

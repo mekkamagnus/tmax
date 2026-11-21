@@ -146,6 +146,31 @@ export function getVisibleViewportLeft(state: EditorState, contentWidth: number)
   return viewportLeft;
 }
 
+/**
+ * #321 (codex): the hardware cursor's row in the WRAPPED layout — the
+ * same wrapped-top math the renderer advances by, then the cursor's
+ * wrapped-row offset within [top, cursor]. Wrap off → the logical clamp.
+ */
+export function getWrappedCursorRow(
+  state: EditorState,
+  bufferHeight: number,
+  width: number,
+): number {
+  if (!state.config?.wordWrap) {
+    const top = getVisibleViewportTop(state, bufferHeight);
+    return Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - top));
+  }
+  const totalLines = getLineCount(state);
+  const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
+  const gw = gutterDisplayWidth(totalLines, gutterCfg);
+  const cw = Math.max(1, width - gw);
+  const rowsOf = makeFoldAwareRowsOf((ln: number) => getLine(state, ln), cw, state.foldRanges);
+  const top = getWrappedViewportTop(state, bufferHeight, width);
+  let row = 0;
+  for (let ln = top; ln < state.cursorPosition.line && ln < totalLines; ln++) row += rowsOf(ln);
+  return Math.max(0, Math.min(bufferHeight - 1, row));
+}
+
 export function getCursorScreenOffset(state: EditorState, bufferHeight: number, contentWidth: number): { row: number; col: number } {
   const viewportTop = getVisibleViewportTop(state, bufferHeight);
   // #248: the rendered frame prefixes every buffer line with the gutter
