@@ -20,7 +20,7 @@ import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
 import { makeWikiLinkResolver } from "../syntax/wiki-link-faces.ts";
 import type { HighlightSpan } from "../core/contracts/editor.ts";
 import { Either } from "../utils/task-either.ts";
-import { repaintSnapshot, shouldRepaint } from "./repaint-decision.ts";
+import { repaintSnapshot, shouldRepaint, spinnerRowReserved } from "./repaint-decision.ts";
 
 function enterAltScreen() {
   process.stdout.write("\x1b[?1049h");
@@ -74,7 +74,11 @@ function render(state: EditorState) {
   const tabBarHeight = hasTabBar ? 1 : 0;
   const minibuffer = state.minibufferView ? renderMinibuffer(state.minibufferView, width) : undefined;
   const commandHeight = minibuffer?.lines.length ?? ((state.mode === "command" || state.mode === "mx") ? 1 : 0);
-  const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight);
+  // #318 (codex r3): while the spinner renders, its row is RESERVED
+  // from the buffer — the last chat line stays visible for the whole
+  // turn (the row is given back when the segment clears).
+  const spinnerRow = spinnerRowReserved(state) ? 1 : 0;
+  const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight - spinnerRow);
   const vt = getVisibleViewportTop(state, bufferHeight);
   const getLine = (ln: number) => {
     const r = state.currentBuffer?.getLine(ln);

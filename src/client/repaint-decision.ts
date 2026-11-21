@@ -59,3 +59,22 @@ export function shouldRepaint(prev: RepaintSnapshot, next: RepaintSnapshot): boo
     prev.ghostText !== next.ghostText
   );
 }
+
+/**
+ * #318 (codex r3): the spinner row is RESERVED from the buffer — while
+ * the transient segment renders, the buffer loses its bottom row (the
+ * persistent occupant must not obscure the last chat line for a whole
+ * turn's duration; a momentary status message overlapping that row is
+ * the pre-existing echo-area convention, but a minutes-long spinner is
+ * not). The reservation holds for the WHOLE segment lifetime — status
+ * messages render INTO the reserved row when present — so the layout
+ * is stable (no per-message row flicker mid-turn).
+ */
+export function spinnerRowReserved(state: EditorState): boolean {
+  return Boolean(
+    state.transientSegment &&
+    !state.minibufferView &&
+    state.mode !== "command" &&
+    state.mode !== "mx",
+  );
+}
