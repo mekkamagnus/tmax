@@ -70,13 +70,17 @@ STATUS=$(ev '(editor-status)' | tail -1)
 echo "$STATUS" | grep -q "ollama (local," && ok "footer: $STATUS" || bad "footer missing latency: $STATUS"
 echo "$STATUS" | grep -Eq "[0-9]+ms" && ok "latency measured" || bad "no latency in footer"
 
-# ── TAB accepts it (the full loop) ────────────────────────────────────
-ev '(fikra/ghost/fikra-ghost-accept)' > /dev/null
-LINE=$(ev '(buffer-text)' | tail -1)
-case "$LINE" in
-  items.reduce*|*items.reduce*) ok "TAB accepted — line now: $LINE";;
-  *) bad "accept failed: $LINE";;
-esac
+# ── TAB accepts it — through the REAL key path (r90: the fn call proved
+# the mechanism; the daemon keypress dispatch proves the KEY) ──────────
+ev '(editor-set-mode "insert")' > /dev/null
+TMAX_SOCKET="$SOCK" "$REPO/bin/tmaxclient" --key TAB > /dev/null 2>&1
+LINE=$(ev '(buffer-line)' | tail -1)
+BEFORE="const total = items."
+if [ "${LINE#"$BEFORE"}" != "$LINE" ] && [ "${#LINE}" -gt "${#BEFORE}" ]; then
+  ok "TAB (real key) accepted — line now: $LINE"
+else
+  bad "accept failed: $LINE"
+fi
 
 say ""
 say "== RESULT: $PASS ok, $FAIL fail =="

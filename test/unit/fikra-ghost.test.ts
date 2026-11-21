@@ -264,3 +264,64 @@ describe("#8.8 ghost — the ollama source (r89)", () => {
     expect(String(e(editor, "(editor-status)").value)).toContain("Fikra ghost: off");
   });
 });
+
+describe("#8.8 ghost — landing guards (r90, codex r89 catches)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+
+  test("an OVERLAPPED older response never lands (and clears no state)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "const total = items.")');
+    // Request 7 fires, then a NEWER request 8 replaces it.
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 7 "const total = items." "http://127.0.0.1:1")');
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 8 "const total = items." "http://127.0.0.1:1")');
+    // The OLD response arrives late.
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: " OLD" }))}")`);
+    e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
+    // The newer request's pending state SURVIVED the stale arrival.
+    const after = e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 8 "const total = items." "http://127.0.0.1:1")');
+    expect(String(after.value)).toBe("8");
+  });
+
+  test("switching the source to none CANCELS the landing", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "const total = items.")');
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 7 "const total = items." "http://127.0.0.1:1")');
+    e(editor, '(fikra/ghost/fikra-ghost-set-source "fikra/ghost/fikra-ghost-source-none")');
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: " nope" }))}")`);
+    e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
+    expect(String(e(editor, "(editor-status)").value)).not.toContain("ollama");
+  });
+
+  test("the SAME prefix on another line does not satisfy the anchor", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "const total = items.\\nconst total = items.")');
+    e(editor, "(cursor-move 0 19)"); // line 0, end of its prefix
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 7 "const total = items." "http://127.0.0.1:1")');
+    e(editor, "(cursor-move 1 19)"); // line 1: IDENTICAL prefix, different ground
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: " wrong-line" }))}")`);
+    e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
+  });
+
+  test("the footer never claims a latency it did not measure", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "const total = items.")');
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 7 "const total = items." "http://127.0.0.1:1")');
+    // A first measured landing establishes last-ms...
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: " one" }))}")`);
+    e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
+    expect(String(e(editor, "(editor-status)").value)).toMatch(/local, \d+ms/);
+    // ...a SECOND request with NO start (the seam skips it) must not
+    // reuse it: fire the source with the starts map cleared, then land.
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 9 "const total = items." "no-start")');
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 9 "${hex(JSON.stringify({ response: " two" }))}")`);
+    e(editor, `(fikra-http-complete 9 200 "${hex("{}")}")`);
+    expect(String(e(editor, "(editor-status)").value)).toContain("latency unmeasured");
+  });
+});
