@@ -342,6 +342,45 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     expect(after).toBe(before); // each run's split closed on success
   });
 
+  test("codex r2: a SIGNAL-RESISTANT PTY child is reaped at the interrupt (the live ladder end)", async () => {
+    bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    // A pre-push hook that TRAPS INT/TERM (the grader's repro shape):
+    // C-c kills script; the group reap must take the resistant child.
+    writeFileSync(join(process.cwd(), ".git", "hooks", "pre-push"),
+      "#!/bin/sh\ntrap '' INT TERM HUP\nwhile true; do sleep 0.1; done # i293resist\n");
+    execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    await new Promise((r) => setTimeout(r, 600));
+    expect(String(e(editor, "(stagehand/remote/stagehand-remote-alive-p)").value)).toBe("true");
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)"); // SIGINT
+    await waitRemote(editor);
+    // The wrapper died (interrupt exit) AND the resistant child was
+    // reaped — the observable: no sh running our hook loop remains.
+    await new Promise((r) => setTimeout(r, 500));
+    const ps = execFileSync("/bin/sh", ["-c", "pgrep -fc i293resist || echo 0"]).toString().trim();
+    expect(Number(ps)).toBe(0);
+    // The remote got nothing.
+    expect(execFileSync("git", ["--git-dir", dirs[dirs.length - 1], "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
+  });
+
+  test("codex r2: focus moves mid-run — the popup window still closes on success", async () => {
+    bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    // Focus moves AWAY while the push runs.
+    e(editor, '(buffer-switch "*Stagehand*")');
+    await waitRemote(editor);
+    expect(String(e(editor, "(editor-status)").value)).toContain("pushed");
+    // The window count is back to baseline (the split closed despite
+    // the focus move).
+    expect(Number(String(e(editor, "(length (window-list))").value))).toBe(1);
+  });
+
   test("no repository → the refusal status", () => {
     const dir = mkdtempSync(join(tmpdir(), "i293nr-"));
     dirs.push(dir);

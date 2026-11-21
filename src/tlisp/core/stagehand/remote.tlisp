@@ -177,15 +177,30 @@ close the popup)."
       (editor-set-status "Stagehand: remote popup closed"))))
 
 (defun stagehand-remote-close-popup ()
-  ;; Close the WINDOW the split created (killBuffer only rebinds the
-  ;; pane to a survivor — repeated runs accumulated panes; the codex
-  ;; r1 catch), then kill the buffer. No status here — callers own it.
+  ;; Close the WINDOW the split created — found BY BUFFER (focus may
+  ;; have moved elsewhere mid-run; the codex r2 catch), then the
+  ;; buffer. No status here — callers own it.
   (condition-case nil
-    (if (string= (buffer-current) (stagehand-remote-buffer-name))
-      (editor/commands/windows/delete-window)
-      nil)
+    (progn
+      (stagehand-focus-popup-window)
+      (editor/commands/windows/delete-window))
     (error () nil))
   (condition-case nil (buffer-kill (stagehand-remote-buffer-name)) (error () nil)))
+
+(defun stagehand-focus-popup-window ()
+  ;; Focus the window SHOWING the popup buffer (wherever it is), the
+  ;; capture-refocus pattern.
+  (let ((wins (window-list)) (pos nil) (i 0))
+    (while (and (< i (length wins)) (not pos))
+      (if (string= (nth 2 (nth i wins)) (stagehand-remote-buffer-name))
+        (setq pos i)
+        (setq i (+ i 1))))
+    (if pos
+      (let ((guard 0))
+        (while (and (< guard 10) (not (= (window-current) pos)))
+          (editor/commands/windows/other-window)
+          (setq guard (+ guard 1))))
+      nil)))
 
 (defun stagehand-remote-ensure-popup ()
   ;; The capture geometry: a bottom split, the popup in the lower pane.

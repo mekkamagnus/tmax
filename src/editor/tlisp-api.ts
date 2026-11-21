@@ -1773,6 +1773,27 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // chunk received so far, fire the sentinel, and let straggler
               // chunks (rare; lingering children hold the pipe silently)
               // keep flowing through the serialized filter chain after.
+              // #293 codex r2: under :pty t the child lives in its OWN
+              // session (script setsid) — the wrapper's group kill
+              // never reaches it. Capture the CHILD's pgid shortly
+              // after spawn so interrupt-class deaths can reap it.
+              let ptyChildPgid: number | null = null;
+              if (ptyOn) {
+                setTimeout(() => {
+                  try {
+                    const wpid = (proc as { pid?: number }).pid;
+                    if (!wpid) return;
+                    const out = Bun.spawnSync(['pgrep', '-P', String(wpid)], { stdout: 'pipe' });
+                    const first = new TextDecoder().decode(out.stdout).trim().split('\n')[0];
+                    const cpid = Number(first);
+                    if (cpid > 0) {
+                      const ps = Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(cpid)], { stdout: 'pipe' });
+                      const pgid = Number(new TextDecoder().decode(ps.stdout).trim());
+                      if (pgid > 0) ptyChildPgid = pgid;
+                    }
+                  } catch { /* best effort */ }
+                }, 300);
+              }
               const drainPromise = (async () => {
                 try {
                   while (true) {
@@ -1832,6 +1853,22 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                 pid, exitCode, durationMs: Date.now() - spawnTime,
                 outputTail: capTail(tailBuf),
               });
+              // #293 codex r1/r2: under :pty t the wrapper (script)
+              // dies on the first group signal while a
+              // signal-resistant CHILD may survive it. Reap the whole
+              // group BEFORE the sentinel so 'finished' means every
+              // relevant process is gone (the interrupt-class exit is
+              // the trigger; normal exits leave the group already
+              // empty).
+              if (signum > 0) {
+                const wrapperPid = (proc as { pid?: number }).pid;
+                if (wrapperPid) {
+                  try { process.kill(-wrapperPid, 'SIGKILL'); } catch { /* group gone */ }
+                }
+                if (ptyChildPgid) {
+                  try { process.kill(-ptyChildPgid, 'SIGKILL'); } catch { /* group gone */ }
+                }
+              }
               if (sentinelName && ctx.evalTlisp) {
                 ctx.evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
               }
