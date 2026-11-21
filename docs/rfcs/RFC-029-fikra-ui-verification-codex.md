@@ -901,3 +901,12 @@ AI: DONE
 - **r86 (`96b3998`, FAIL 6/10)**: once-per-scope minting + abort-settles — codex then mapped the remaining token lifecycle: pre-mint retention, no L1 degradation on a declined mint, headless abort leaves the RPC parked, single-use tokens break per-action gating.
 
 **Sub-arc closed at cap+2.** Named follow-ups (the next sub-arc's spec): L2 token lifecycle (mint-time scope-liveness; degradation flags; denial-direction abort API; multi-use-within-scope tokens), frame-id provenance, queued-count generalization. Board: 57/80 with 8.3 live-verified at its r84 peak.
+
+## Rounds 89-92 — the ghost ollama sub-arc (8.8: 6 → 9)
+
+- **r89 (`08b8807`, 6/10)**: the ollama source — async land-at-anchor, tags-resolved model, echo-stripped remainder, honest measured-latency footer, SPC a o cycle; the http-transport HEX class fix (raw JSON.stringify chunks lost escapes to the reader). LIVE 7/0. Codex ran the live script itself and probed the landing contract.
+- **r90 (`191ccc1`, 7/10)**: five landing guards — latest-request-only, source-cancel, buffer+line anchor identity, structural script assertion + real-key TAB, per-request latency ownership.
+- **r91 (`7ab18f1`, 5/10)**: codex caught the second-order break — the hoisted guard killed the UNSTAMPED tags reply (first-use discovery dead; the test masked it by seeding). Also: the error footer bypassed the source check; C-n discarded the remainder.
+- **r92 (`2242204`, PASS 9/10)**: discovery stamps its identity, the source check precedes every branch, C-n walks word by word. Codex live-verified first-use 7/0 + 25/25, no gaps.
+
+**8.8 closes at 9.** Named: the 40ms-class latency needs a smaller/FIM model (the honest footer already carries the real number); multiline ghosts stay out of scope (the r38 single-line mirror). Board: **59/80**.
