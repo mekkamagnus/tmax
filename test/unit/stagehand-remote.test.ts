@@ -343,7 +343,7 @@ describe("#293 — push/pull flows (local bare remote)", () => {
   });
 
   test("codex r2: a SIGNAL-RESISTANT PTY child is reaped at the interrupt (the live ladder end)", async () => {
-    bareRemote();
+    const remote = bareRemote();
     writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
     commit("feat");
     // A pre-push hook that TRAPS INT/TERM (the grader's repro shape):
@@ -363,7 +363,7 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     const ps = execFileSync("/bin/sh", ["-c", "pgrep -fc i293resist || echo 0"]).toString().trim();
     expect(Number(ps)).toBe(0);
     // The remote got nothing.
-    expect(execFileSync("git", ["--git-dir", dirs[dirs.length - 1], "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
+    expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
   });
 
   test("codex r2: focus moves mid-run — the popup window still closes on success", async () => {
