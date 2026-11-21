@@ -191,7 +191,11 @@ export function editorStateToJson(
         rows * 6, // same wire bound as the estimated walk
       );
     } else {
-      const cw = Math.max(20, renderWidth - 12);
+      // A LOWER BOUND on wrapped rows: the widest content width the
+      // renderer uses (its gutter only SHRINKS cw → more rows). The old
+      // width-12 approximation over-counted rows, exiting the walk early
+      // (codex r2: 12 blank rows on the 90-col-after-long shape).
+      const cw = renderWidth;
       const rowLimit = rows * 6; // wire bound: pathological single-line walls
       let wrappedRows = 0;
       let postCursorRows = 0; // wrapped rows FROM the cursor line onward

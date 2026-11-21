@@ -6,7 +6,7 @@
  *
  * Each case drives the REAL paths with pure functions (no terminal needed):
  *   daemon wire  = editorStateToJson(state, renderHeight, renderWidth?)
- *                  (per path: render-state omits the width; keypress passes
+ *                  (per path: the width-less wire arm (the handler passes the frame width when known); keypress passes
  *                  the frame's terminalSize; the no-frame default passes
  *                  neither)
  *   client view  = jsonToEditorState(wire)  → the ViewportBuffer
@@ -20,7 +20,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { captureFrame } from "../../src/render/capture-frame.ts";
-import { getWrappedViewportTop, getWrappedCursorRow, getVisibleViewportTop } from "../../src/frontend/render/buffer-lines.ts";
+import { getWrappedViewportTop, getWrappedCursorRow, getWrappedCursorColumn, getVisibleViewportTop } from "../../src/frontend/render/buffer-lines.ts";
 import { editorStateToJson, jsonToEditorState } from "../../src/server/serialize.ts";
 import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
@@ -238,6 +238,36 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
       const logicalRow = Math.max(0, Math.min(21, 30 - logicalTop));
       expect(row).not.toBe(logicalRow);
     }
+  });
+
+  test("#321 codex r2: 90-col-after-long shape — the wire covers the advanced frame (no blank rows)", () => {
+    // The reproduced shape: long wrapped lines before the cursor, 90-col
+    // lines after. The width-12 row estimate over-counted → the walk
+    // exited at line 31 → 12 blank rows in the captured frame.
+    const lines: string[] = [];
+    for (let i = 0; i < 99; i++) lines.push(i < 21 ? `${"w".repeat(200)} ${i}` : `L${i} ${"z".repeat(84)}`);
+    lines.push("L99 TAIL end");
+    const state = makeState(lines, true, 21, 22);
+    const frame = captureFrame(state, 100, 24);
+    const flat = frame.join("\n");
+    // The frame holds REAL content near its end (no 12-blank-row tail):
+    // count trailing blank rows.
+    let blanks = 0;
+    for (let i = frame.length - 1; i >= 0 && frame[i]!.trim() === ""; i--) blanks++;
+    expect(blanks).toBeLessThan(4); // gutter rows may pad ≤ the status area
+    expect(flat).toContain("L2");
+  });
+
+  test("#321 codex r2: the cursor on the SECOND wrapped row of its line lands there", () => {
+    // One 400-char line + a short second line; cursor deep in line 0's
+    // wrapped tail (column 350 ≈ the 4th wrapped row at width ~95).
+    const long = `${"q".repeat(400)}`;
+    const state = makeState([long, "short"], true, 0, 22);
+    const withCol = { ...state, cursorPosition: { line: 0, column: 350 } };
+    const row = getWrappedCursorRow(withCol as any, 22, 100);
+    expect(row).toBeGreaterThanOrEqual(2); // deep in the wrapped tail
+    const col = getWrappedCursorColumn(withCol as any, 100);
+    expect(col).toBeLessThan(100); // within the segment
   });
 
 /** Exposed for the fix-phase test + recording: the matrix table. */

@@ -168,7 +168,38 @@ export function getWrappedCursorRow(
   const top = getWrappedViewportTop(state, bufferHeight, width);
   let row = 0;
   for (let ln = top; ln < state.cursorPosition.line && ln < totalLines; ln++) row += rowsOf(ln);
+  // The cursor line's OWN wrapped-row offset: the column maps into the
+  // wrapped segments (the renderer's word-boundary wrap — walk the same
+  // segments until the column fits; codex r2 c2: a cursor on the second
+  // wrapped row landed on the first).
+  const cursorText = getLine(state, state.cursorPosition.line) ?? "";
+  const segs = wrapLine(cursorText, cw);
+  let col = state.cursorPosition.column;
+  let segIdx = 0;
+  while (segIdx < segs.length - 1 && col > stringWidth(segs[segIdx]!)) {
+    col -= stringWidth(segs[segIdx]!) + 1; // the break consumes a boundary
+    segIdx++;
+    row++;
+  }
   return Math.max(0, Math.min(bufferHeight - 1, row));
+}
+
+/** The wrapped COLUMN within the cursor's wrapped segment. */
+export function getWrappedCursorColumn(state: EditorState, width: number): number {
+  if (!state.config?.wordWrap) return state.cursorPosition.column;
+  const totalLines = getLineCount(state);
+  const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
+  const gw = gutterDisplayWidth(totalLines, gutterCfg);
+  const cw = Math.max(1, width - gw);
+  const cursorText = getLine(state, state.cursorPosition.line) ?? "";
+  const segs = wrapLine(cursorText, cw);
+  let col = state.cursorPosition.column;
+  let segIdx = 0;
+  while (segIdx < segs.length - 1 && col > stringWidth(segs[segIdx]!)) {
+    col -= stringWidth(segs[segIdx]!) + 1;
+    segIdx++;
+  }
+  return col;
 }
 
 export function getCursorScreenOffset(state: EditorState, bufferHeight: number, contentWidth: number): { row: number; col: number } {

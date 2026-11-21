@@ -6,7 +6,7 @@
  */
 
 import { RemoteEditor } from "../editor/remote-editor.ts";
-import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop, getWrappedCursorRow, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
+import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop, getWrappedCursorRow, getWrappedCursorColumn, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
 import { mergeFlashSpans } from "../render/flash-merge.ts";
 export { mergeFlashSpans };
 import { renderStatusLine } from "../frontend/render/status-line.ts";
@@ -157,7 +157,7 @@ function render(state: EditorState) {
     const cursorRow = Math.max(0, Math.min(bufferHeight - 1,
       state.config?.wordWrap ? getWrappedCursorRow(state, bufferHeight, width) : getCursorScreenOffset(state, bufferHeight, width).row));
     const cursorCol = Math.max(0, Math.min(width - 1,
-      getCursorScreenOffset(state, bufferHeight, width).col));
+      state.config?.wordWrap ? getWrappedCursorColumn(state, width) : getCursorScreenOffset(state, bufferHeight, width).col));
     moveTo(cursorRow + tabBarHeight, cursorCol);
   }
 }
