@@ -534,3 +534,43 @@ describe("ollama resume + buffer-read (r120 — codex r119 P2s)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
   });
 });
+
+describe("ollama multi-park + pre-park results (r121 — codex r120 catches)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireCalls = (ed: Editor, seed: number, commands: string[]) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls:
+      commands.map((c) => ({ function: { name: "bash", arguments: { command: c } } })) } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  test("results BEFORE a park are kept; a SECOND park holds the model request", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "multi")');
+    fireCalls(ed, 141, [
+      "echo BEFOREPARK",
+      "rm -rf one/",
+      "rm -rf two/",
+      "echo AFTERPARK",
+    ]);
+    // First park: BEFOREPARK ran (kept); the first rm parks.
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    expect(String(e(ed, "(buffer-text)").value)).toContain("BEFOREPARK");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    // The SECOND rm parks again — AFTERPARK not yet, no model re-fire.
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    const mid = String(e(ed, "(buffer-text)").value);
+    expect(mid).not.toContain("AFTERPARK");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    // Now the rest completed; the model request fires; settle it.
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("BEFOREPARK");
+    expect(acc).toContain("AFTERPARK");
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 142 "live")');
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "all done" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 142 "${reply}")`);
+    e(ed, `(fikra-http-complete 142 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+});

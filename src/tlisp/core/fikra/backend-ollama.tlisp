@@ -58,6 +58,10 @@ destructive-bash mediation; the loop resumes on the decision).")
 (defvar fikra-ollama-parked-rest nil
   "The calls AFTER the parked one in its reply (r120, codex r119 P2: a
 decision resumes the remainder — they were dropped).")
+(defvar fikra-ollama-parked-acc ""
+  "The results ALREADY collected when the park hit (r121, codex r120
+P2#2: 'echo BEFOREPARK' before a parked pair was dropped — the acc must
+ride too).")
 (defvar fikra-ollama-round 0
   "The current tool round (the loop cap guard).")
 (defvar fikra-ollama-max-rounds 4
@@ -247,7 +251,9 @@ availability gate must be synchronous; the turn itself is async)."
       (if (and (symbolp res) (string= (symbol-name res) "parked"))
         (progn
           ;; r120: the REMAINDER rides the park — the decision resumes
-          ;; them (they were dropped).
+          ;; them (they were dropped). r121: the ACC rides too (results
+          ;; before the park were discarded — 'echo BEFOREPARK' vanished).
+          (setq fikra-ollama-parked-acc acc)
           (setq fikra-ollama-parked-rest
             (condition-case nil
               (fikra-ollama-calls-rest calls (+ i 1))
@@ -641,8 +647,9 @@ availability gate must be synchronous; the turn itself is async)."
             (concat fikra-ollama-messages
                     "{\"role\":\"tool\",\"content\":\"user rejected this command; do not retry it\"},"))
           (fikra-ollama-settle-home home-thread)
-          (fikra-ollama-resume-rest)
-          (fikra-ollama-chat fikra-ollama-pending-message))
+          (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
+            (fikra-ollama-chat fikra-ollama-pending-message)
+            nil))
         (progn
           (fikra/event/fikra-event-emit
             (list (list "kind" "permission-allowed")))
@@ -665,22 +672,35 @@ availability gate must be synchronous; the turn itself is async)."
               (setq fikra-ollama-messages
                 (concat fikra-ollama-messages
                         (fikra-ollama-run-bash-now cmd dir)))
-              ;; r120: the parked reply's REMAINDER resumes.
-              (fikra-ollama-resume-rest)
-              (fikra-ollama-chat fikra-ollama-pending-message))))))))
+              ;; r120-r121: the remainder resumes; a RE-PARK holds the
+              ;; next model request until ITS decision.
+              (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
+                (fikra-ollama-chat fikra-ollama-pending-message)
+                nil))))))))
 
 ;; r120: run the parked reply's remaining calls (their results append;
 ;; a SECOND destructive call parks again — the rest re-rides).
+;; Returns 'done or 'reparked (r121, codex r120 P1: the decision paths
+;; must NOT re-fire the model while a second action still parks).
 (defun fikra-ollama-resume-rest ()
-  (let ((rest fikra-ollama-parked-rest))
+  (let* ((rest fikra-ollama-parked-rest)
+         (acc fikra-ollama-parked-acc))
     (setq fikra-ollama-parked-rest nil)
+    (setq fikra-ollama-parked-acc "")
     (if (not rest)
-      nil
-      (let ((results (fikra-ollama-run-calls rest 0 "")))
-        (if (and (symbolp results) (string= (symbol-name results) "parked"))
-          nil
+      (progn
+        ;; Nothing to resume — the pre-park results still count.
+        (if (> (length acc) 0)
           (setq fikra-ollama-messages
-            (concat fikra-ollama-messages results)))))))
+            (concat fikra-ollama-messages acc)))
+        'done)
+      (let ((results (fikra-ollama-run-calls rest 0 acc)))
+        (if (and (symbolp results) (string= (symbol-name results) "parked"))
+          'reparked
+          (progn
+            (setq fikra-ollama-messages
+              (concat fikra-ollama-messages results))
+            'done))))))
 
 (defun fikra-backend-ollama-abort ()
   ;; The async request cannot be cancelled (the http primitive has no
