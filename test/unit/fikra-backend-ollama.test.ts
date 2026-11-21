@@ -55,6 +55,12 @@ async function until(ed: Editor, expr: string, marker: string, tries = 40): Prom
 }
 
 const e = (ed: Editor, expr: string) => executeTlisp(ed, expr);
+
+// r129: every test here polls (100ms cycles) and several run git
+// checkpoints through the allow path — under load the 5s default
+// budget false-fails them (codex's gate run hit exactly that). One
+// uniform 20s budget.
+const tt = (name: string, fn: () => Promise<void>) => test(name, fn, 20000);
 const strip = (s: string) => s.replace(/\[[0-9;]*m/g, "");
 const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
 
@@ -150,7 +156,7 @@ afterAll(() => {
 });
 
 describe("#8.1 raw-API ollama chat backend (r108)", () => {
-  test("the landed reply renders an ASSISTANT turn and ends it - the fikra-owned loop", async () => {
+  tt("the landed reply renders an ASSISTANT turn and ends it - the fikra-owned loop", async () => {
     const ed = await armed();
     // The REAL path: turn-send emits the user message then routes to the
     // backend (the claude contract — the caller owns the user's delta).
@@ -169,7 +175,7 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
     expect(text).toContain("completed");
   });
 
-  test("a dead server ends the turn as an ERROR with a visible status", async () => {
+  tt("a dead server ends the turn as an ERROR with a visible status", async () => {
     const ed = await armed();
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-start-turn "hello")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 22 "live")');
@@ -178,7 +184,7 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
     expect(String(e(ed, "(editor-status)").value)).toContain("unreachable");
   });
 
-  test("the modeline carries the backend; a backend without a model stays BARE", async () => {
+  tt("the modeline carries the backend; a backend without a model stays BARE", async () => {
     const ed = await armed();
     expect(String(e(ed, '(minor-mode-lighter "fikra")').value)).toContain("ollama");
     e(ed, '(fikra/adapter/fikra-set-backend-forced "replay")');
@@ -188,7 +194,7 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
     expect(bare).not.toMatch(/\(/);
   });
 
-  test("the capabilities are honest: no streaming, no approvals", async () => {
+  tt("the capabilities are honest: no streaming, no approvals", async () => {
     const ed = await armed();
     expect(String(e(ed, '(fikra/adapter/fikra-backend-capable-p "ollama" "streaming")').value)).toBe("null");
     expect(String(e(ed, '(fikra/adapter/fikra-backend-capable-p "ollama" "interactive-approvals")').value)).toBe("null");
@@ -196,7 +202,7 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
 });
 
 describe("ollama chat lifecycle (r109 — codex r108 catches)", () => {
-  test("a CONNECTION FAILURE (no chunks, unseeded-by-filter) still settles — fire-time ownership", async () => {
+  tt("a CONNECTION FAILURE (no chunks, unseeded-by-filter) still settles — fire-time ownership", async () => {
     const ed = await armed();
     // Drive via the REAL fire (start-turn) but with the URL pointed at a
     // dead port — the request fails with no body chunks; ownership was
@@ -209,7 +215,7 @@ describe("ollama chat lifecycle (r109 — codex r108 catches)", () => {
     expect(String(e(ed, "(editor-status)").value)).toContain("unreachable");
   });
 
-  test("a late reply whose turn was ABORTED discards (no ghost render)", async () => {
+  tt("a late reply whose turn was ABORTED discards (no ghost render)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "first question")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 42 "live")');
@@ -226,7 +232,7 @@ describe("ollama chat lifecycle (r109 — codex r108 catches)", () => {
     expect(after).not.toContain("stale answer");
   });
 
-  test("HISTORY rides the messages (the second turn sees the first exchange)", async () => {
+  tt("HISTORY rides the messages (the second turn sees the first exchange)", async () => {
     const ed = await armed();
     // First exchange in memory.
     e(ed, '(fikra/chat/fikra-turn-send "remember the word pineapple")');
@@ -244,7 +250,7 @@ describe("ollama chat lifecycle (r109 — codex r108 catches)", () => {
 });
 
 describe("ollama replacement turns (r110 — codex r109 P1)", () => {
-  test("abort turn 1, start turn 2, deliver reply 1 — the STALE reply discards", async () => {
+  tt("abort turn 1, start turn 2, deliver reply 1 — the STALE reply discards", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "first question")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 51 "live")');
@@ -268,7 +274,7 @@ describe("ollama replacement turns (r110 — codex r109 P1)", () => {
     expect(String(e(ed, "(buffer-text)").value)).toContain("fresh answer");
   });
 
-  test("history ORDER: first exchange before second; the in-flight message excluded", async () => {
+  tt("history ORDER: first exchange before second; the in-flight message excluded", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "first")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 61 "live")');
@@ -291,7 +297,7 @@ describe("ollama replacement turns (r110 — codex r109 P1)", () => {
 });
 
 describe("ollama thread-switch routing (r111 — codex r110 P2)", () => {
-  test("a reply arriving after the user SWITCHED AWAY settles ITS thread", async () => {
+  tt("a reply arriving after the user SWITCHED AWAY settles ITS thread", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "question on main")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 71 "live")');
@@ -312,7 +318,7 @@ describe("ollama thread-switch routing (r111 — codex r110 P2)", () => {
 });
 
 describe("ollama evidence honesty (r113 — codex r112 P1/P2)", () => {
-  test("a FAILING bash command renders → FAIL with the exit status; the model sees it", async () => {
+  tt("a FAILING bash command renders → FAIL with the exit status; the model sees it", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "run it")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 91 "live")');
@@ -335,7 +341,7 @@ describe("ollama evidence honesty (r113 — codex r112 P1/P2)", () => {
 });
 
 describe("ollama tool-using loop (r112 — the 8.1 native loop)", () => {
-  test("a tool_call round: the ⚙ rows render, the tool RUNS, the next request carries the exchange", async () => {
+  tt("a tool_call round: the ⚙ rows render, the tool RUNS, the next request carries the exchange", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "list the files")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 81 "live")');
@@ -366,7 +372,7 @@ describe("ollama tool-using loop (r112 — the 8.1 native loop)", () => {
     expect(final).toContain("── completed ──");
   });
 
-  test("buffer_edit WRITES the file and renders its row", async () => {
+  tt("buffer_edit WRITES the file and renders its row", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "create the file")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 83 "live")');
@@ -389,7 +395,7 @@ describe("ollama tool-using loop (r112 — the 8.1 native loop)", () => {
 });
 
 describe("ollama object-shaped arguments (r114 — codex r113 P1)", () => {
-  test("arguments arriving as an OBJECT (the live qwen3 shape) execute for real", async () => {
+  tt("arguments arriving as an OBJECT (the live qwen3 shape) execute for real", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "run it")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 95 "live")');
@@ -409,7 +415,7 @@ describe("ollama object-shaped arguments (r114 — codex r113 P1)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
   });
 
-  test("the MODEL-VISIBLE failure status rides the next request (codex r113 P2#5)", async () => {
+  tt("the MODEL-VISIBLE failure status rides the next request (codex r113 P2#5)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "run it")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 97 "live")');
@@ -435,7 +441,7 @@ describe("ollama L2 gate + per-action checkpoints (r116 — the 8.1 named follow
     e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
   };
 
-  test("a DESTRUCTIVE bash parks at the gate: the panel renders, the command does NOT run", async () => {
+  tt("a DESTRUCTIVE bash parks at the gate: the panel renders, the command does NOT run", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "clean it up")');
     fireTool(ed, 101, "rm -rf build/");
@@ -447,7 +453,7 @@ describe("ollama L2 gate + per-action checkpoints (r116 — the 8.1 named follow
     expect(panel).not.toMatch(/→ (ok|FAIL)/);
   });
 
-  test("ALLOW resumes: the command executes and the loop continues", async () => {
+  tt("ALLOW resumes: the command executes and the loop continues", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "clean it up")');
     fireTool(ed, 102, "rm -rf build/");
@@ -473,7 +479,7 @@ describe("ollama L2 gate + per-action checkpoints (r116 — the 8.1 named follow
     expect(refired).toBe(true);
   });
 
-  test("REJECT: the model LEARNS (the denial rides the next request)", async () => {
+  tt("REJECT: the model LEARNS (the denial rides the next request)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "clean it up")');
     fireTool(ed, 104, "rm -rf build/");
@@ -484,7 +490,7 @@ describe("ollama L2 gate + per-action checkpoints (r116 — the 8.1 named follow
     expect(String(e(ed, "(buffer-text)").value)).toContain("= denied");
   });
 
-  test("a model EDIT lands a checkpoint (the marker rides INLINE via the merge)", async () => {
+  tt("a model EDIT lands a checkpoint (the marker rides INLINE via the merge)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "make the file")');
     fireTool(ed, 105, "", "buffer_edit");
@@ -512,7 +518,7 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
     e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
   };
 
-  test("a PARKED call STOPS the round — later calls do not run", async () => {
+  tt("a PARKED call STOPS the round — later calls do not run", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "two calls")');
     fireCalls(ed, 111, [
@@ -525,7 +531,7 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
     expect(text).toContain("APPROVE ACTION");
   });
 
-  test("a DIRECT eval of the decide seam is DENIED (the L2 guard)", async () => {
+  tt("a DIRECT eval of the decide seam is DENIED (the L2 guard)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "x")');
     fireCalls(ed, 112, [{ name: "bash", args: { command: "rm -rf d/" } }]);
@@ -540,7 +546,7 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
   });
 
-  test("the refusal reaches the MODEL (no false 'wrote' after a refusal)", async () => {
+  tt("the refusal reaches the MODEL (no false 'wrote' after a refusal)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "escape")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 115 "live")');
@@ -554,7 +560,7 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
     expect(String(e(ed, "(buffer-text)").value)).not.toContain("wrote ../out.txt");
   });
 
-  test("an edit with ../ ESCAPE refuses (containment)", async () => {
+  tt("an edit with ../ ESCAPE refuses (containment)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "escape")');
     fireCalls(ed, 113, [{ name: "buffer_edit", args: { path: "../outside.txt", content: "nope" } }]);
@@ -570,7 +576,7 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
 });
 
 describe("ollama focus-switch lifecycle (r119 — codex r118 P1)", () => {
-  test("park → switch → allow: the ORIGINATING thread settles (not stranded confirming)", async () => {
+  tt("park → switch → allow: the ORIGINATING thread settles (not stranded confirming)", async () => {
     const ed = await armed();
     e(ed, "(require-module fikra/threads)");
     e(ed, '(fikra/chat/fikra-turn-send "dangerous")');
@@ -600,7 +606,7 @@ describe("ollama resume + buffer-read (r120 — codex r119 P2s)", () => {
     e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
   };
 
-  test("ALLOW resumes the parked reply's REMAINING calls (they were dropped)", async () => {
+  tt("ALLOW resumes the parked reply's REMAINING calls (they were dropped)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "two step")');
     fireCalls(ed, 131, [
@@ -620,7 +626,7 @@ describe("ollama resume + buffer-read (r120 — codex r119 P2s)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
   });
 
-  test("buffer_read returns the file's content to the model (and not-found is honest)", async () => {
+  tt("buffer_read returns the file's content to the model (and not-found is honest)", async () => {
     const ed = await armed();
     e(ed, '(shell-command "printf \'hello-read-target\' > read-me.txt")');
     e(ed, '(fikra/chat/fikra-turn-send "read it")');
@@ -653,7 +659,7 @@ describe("ollama multi-park + pre-park results (r121 — codex r120 catches)", (
     e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
   };
 
-  test("results BEFORE a park are kept; a SECOND park holds the model request", async () => {
+  tt("results BEFORE a park are kept; a SECOND park holds the model request", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "multi")');
     fireCalls(ed, 141, [
@@ -690,7 +696,7 @@ describe("ollama multi-park + pre-park results (r121 — codex r120 catches)", (
 
 describe("ollama resumed-remainder dir binding (r123 — codex r122 P1)", () => {
   const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
-  test("calls resumed after a focus switch run in the ORIGINATING dir", async () => {
+  tt("calls resumed after a focus switch run in the ORIGINATING dir", async () => {
     const ed = await armed();
     e(ed, "(require-module fikra/threads)");
     // A second thread with its own root.
@@ -714,7 +720,7 @@ describe("ollama resumed-remainder dir binding (r123 — codex r122 P1)", () => 
 
 describe("ollama next-round ownership (r124 — codex r123 P1)", () => {
   const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
-  test("the NEXT model request after a switched-away decision stamps the ORIGINATING thread", async () => {
+  tt("the NEXT model request after a switched-away decision stamps the ORIGINATING thread", async () => {
     const ed = await armed();
     e(ed, "(require-module fikra/threads)");
     e(ed, '(fikra/chat/fikra-turn-send "park then continue")');
@@ -738,7 +744,7 @@ describe("ollama next-round ownership (r124 — codex r123 P1)", () => {
 
 describe("ollama async exec (r126 — the codex-named responsiveness gap)", () => {
   const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
-  test("a LONG bash does NOT block the daemon — another eval answers while it runs", async () => {
+  tt("a LONG bash does NOT block the daemon — another eval answers while it runs", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "long work")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 171 "live")');
@@ -769,7 +775,7 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
   };
 
-  test("a buffer_read BEFORE an async bash rides the resume (its result never vanishes)", async () => {
+  tt("a buffer_read BEFORE an async bash rides the resume (its result never vanishes)", async () => {
     const ed = await armed();
     writeFileSync(join(process.cwd(), "pre.txt"), "READ-BEFORE-ASYNC");
     e(ed, '(fikra/chat/fikra-turn-send "mixed")');
@@ -787,7 +793,7 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     expect(bashMsg).toBeGreaterThan(readMsg);
   });
 
-  test("a FAILED spawn renders an honest FAIL row + the model-visible message (never 'async)", async () => {
+  tt("a FAILED spawn renders an honest FAIL row + the model-visible message (never 'async)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "bad dir")');
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 191 "live")');
@@ -806,7 +812,7 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     e(ed, '(fikra/thread/fikra-thread-set-field "worktree" nil)');
   });
 
-  test("the non-blocking proof is DURING: the eval answers BEFORE the 2s command finishes", async () => {
+  tt("the non-blocking proof is DURING: the eval answers BEFORE the 2s command finishes", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "slow")');
     fireCalls(ed, 182, [{ name: "bash", args: { command: "sleep 2 && echo SLOW-END" } }]);
@@ -833,12 +839,15 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
   // condition-case and live turns stuck "running" after the tool
   // result; every unit test stopped at the result row, so the suite
   // was green. This is the first consumer of settleRefireFrom.
-  test("the async round SETTLES: the re-fire reply completes the turn", async () => {
+  tt("the async round SETTLES: the re-fire reply completes the turn", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "settle")');
     fireCalls(ed, 183, [{ name: "bash", args: { command: "echo SETTLE-BASH" } }]);
-    // The child ran and the sentinel emitted the result row.
-    await until(ed, "(buffer-text)", "SETTLE-BASH", 60);
+    // The child ran and the sentinel emitted the RESULT row (the
+    // command text also appears in the call row — match "→ ok", the
+    // result shape, per the r128 lesson codex re-raised here).
+    const row = await until(ed, "(buffer-text)", "→ ok", 60);
+    expect(row).toContain("SETTLE-BASH");
     // The sentinel's resume RE-FIRES (a new latest-id appears) — the
     // seeded reply must end the turn (throws if the re-fire never comes).
     await settleRefireFrom(ed, "183", "SETTLED-DONE");
