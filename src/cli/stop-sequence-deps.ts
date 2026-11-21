@@ -3,6 +3,13 @@
  * @description #276 — the REAL effects for cli/stop-sequence.ts (the
  * production wiring: TmaxClient over the fixed socket, lsof/ps/kill).
  * Kept separate so the sequence itself stays a pure decision machine.
+ *
+ * Connection discipline (codex r1): ONE HELD CONNECTION carries
+ * identity → graceful shutdown (an owner change between two separate
+ * connections could route the shutdown RPC to an unidentified server);
+ * connect-refused THROWS (the stale branch) while a connected-but-silent
+ * server returns NULL (the unresponsive branch — the socket is left in
+ * place); close() closes the HELD client.
  */
 
 import { spawnSync } from "node:child_process";
@@ -11,38 +18,46 @@ import { TmaxClient } from "../client/rpc-client.ts";
 import type { StopDeps } from "./stop-sequence.ts";
 
 export function realStopDeps(socket: string): StopDeps {
+  let held: TmaxClient | null = null;
+
+  /** The ONE connection (identity + shutdown share it). Throws when the
+   *  connect is REFUSED — the decision machine's stale-socket branch. */
+  const connect = async (): Promise<TmaxClient> => {
+    if (held) return held;
+    const c = new TmaxClient(socket);
+    await c.connect(); // refused → throws
+    held = c;
+    return c;
+  };
+
   return {
     socketExists: () => existsSync(socket),
     identity: async () => {
-      const c = new TmaxClient(socket);
       try {
-        await c.connect();
-        // 1s timeout — an unresponsive daemon must not hang --stop.
-        const r = await c.sendRequest("server-identity", {}, 1000);
+        const c = await connect();
+        // Connected but silent (the 1s timeout) → NULL — the
+        // unresponsive branch; the socket is LEFT IN PLACE.
+        const r = await c.sendRequest("server-identity", {}, 1000).catch(() => null);
+        if (!r || typeof r !== "object") return null;
         return { mode: r.mode as "daemon" | "embedded", pid: Number(r.pid) };
       } catch {
         throw new Error("refused");
       }
-      // NOTE: close() is the CALLER's job (the sequence closes after the
-      // graceful RPC); on the throw path the client is dead anyway.
     },
     requestShutdown: async () => {
-      const c = new TmaxClient(socket);
-      await c.connect();
+      // The SAME held connection the identity rode (codex r1 c1).
+      const c = await connect();
       await c.sendRequest("shutdown", {}, 1000);
     },
-    close: () => { try { new TmaxClient(socket).close(); } catch { /* dead */ } },
+    close: () => {
+      const c = held;
+      held = null;
+      try { c?.close(); } catch { /* dead */ }
+    },
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     unlinkSocket: () => { try { unlinkSync(socket); } catch { /* best-effort */ } },
     recheckConnect: async () => {
-      const c = new TmaxClient(socket);
-      try {
-        await c.connect();
-        c.close();
-        return true;
-      } catch {
-        return false;
-      }
+      try { await connect(); return true; } catch { return false; }
     },
     socketGone: () => !existsSync(socket),
     pidsOnSocket: () => {

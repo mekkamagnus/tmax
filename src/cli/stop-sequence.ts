@@ -112,6 +112,9 @@ export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
   const reidentified = await safeIdentity(deps);
   deps.close();
   if (!reidentified || reidentified.mode !== "daemon") return out("stderr", STOP_LINES.ownerChanged);
+  // The SAME daemon we identified (a replacement on the socket is
+  // owner-changed — never signaled; codex r1 c2).
+  if (reidentified.pid !== identity.pid) return out("stderr", STOP_LINES.ownerChanged);
   const pids = deps.pidsOnSocket();
   if (pids === null || pids.length !== 1) return out("stderr", STOP_LINES.ownerChanged);
   const pid = pids[0]!;

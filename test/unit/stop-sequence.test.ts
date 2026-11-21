@@ -146,6 +146,17 @@ describe("#276 — the verification triple (replacement at each boundary)", () =
     expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.ownerChanged });
   });
 
+  test("REPLACEMENT daemon (re-identity pid ≠ the original) → not signaling", async () => {
+    let asked = 0;
+    const o = await run({
+      socketGone: () => false,
+      identity: async () => ({ mode: "daemon", pid: asked++ === 0 ? 100 : 777 }),
+      pidsOnSocket: () => ["777"],
+      cmdline: () => "/usr/local/bin/tmax --daemon",
+    });
+    expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.ownerChanged });
+  });
+
   test("cmdline is NOT the tmax daemon (an unrelated process) → not signaling", async () => {
     const o = await run({ socketGone: () => false, cmdline: () => "/usr/sbin/cfprefsd" });
     expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.ownerChanged });
