@@ -43,6 +43,9 @@ the old sticky-flag design did exactly that).")
 
 ;; pid -> "<thread-id>/<turn>" stamped at SPAWN (the async identity fix).
 (defvar fikra-checkpoint-async-ids (hashmap))
+(defvar fikra-checkpoint-async-suffixes (hashmap)
+  "r134: pid → the spawn-stamped ref SUFFIX (an action's -aN is
+allocated at spawn — concurrent captures never collide).")
 (defvar fikra-checkpoint-async-kinds (hashmap)
   "PID → kind of in-flight async captures (the sentinel emits the ref for
 ITS capture's kind — a single global would race between concurrent
@@ -87,6 +90,12 @@ thread's persisted root (root-shell cwd), never the daemon cwd."
 
 (defun fikra-checkpoint-command (tmp-index kind)
   "Build the capture command for KIND ('baseline'|'completion')."
+  (fikra-checkpoint-command-for tmp-index (fikra-checkpoint-ref kind) kind))
+
+;; r134: the REF is computed by the CALLER (the async path allocates the
+;; action seq ONCE — deriving it again here double-allocated and the
+;; event's ref named a ref that never existed).
+(defun fikra-checkpoint-command-for (tmp-index ref kind)
   (concat
     ;; #221: capture runs INSIDE the thread's working dir (worktree-aware —
     ;; fikra-thread-working-dir); the tmp index stays in the LOCAL root.
@@ -96,20 +105,37 @@ thread's persisted root (root-shell cwd), never the daemon cwd."
     "git add -A -- . >/dev/null 2>&1 && "
     "tree=$(git write-tree) && "
     "commit=$(git commit-tree $tree -p HEAD -m \"fikra checkpoint " kind "\") && "
-    "git update-ref " (fikra-checkpoint-ref kind) " $commit && "
+    "git update-ref " ref " $commit && "
     "rm -f " (fikra-checkpoint-shq tmp-index) " && "
     "echo REF:$commit || echo CAPTURE-FAILED"))
+
+(defvar fikra-checkpoint-action-seqs (hashmap)
+  "r134 (codex r130 P1#4): per-action sequence counters, keyed
+thread/turn — each mutating ACTION in a turn gets its OWN ref
+(<turn>-a1, -a2, ...) instead of all overwriting the turn's bare
+completion ref.")
+
+(defun fikra-checkpoint-action-seq ()
+  "The next action number for THIS thread/turn (increments)."
+  (let* ((key (concat (fikra/thread/fikra-thread-field "id") "/"
+                      (number-to-string (fikra/thread/fikra-thread-turn-count))))
+         (n (+ 1 (or (hashmap-get fikra-checkpoint-action-seqs key) 0))))
+    (keymap-mutable-set! fikra-checkpoint-action-seqs key n)
+    n))
 
 (defun fikra-checkpoint-ref (kind)
   "The refs/fikra/<thread>/<turn><suffix> ref name for this capture.
 Completion refs stay bare (turn N's ground truth); baseline and REVIEW
 snapshots get distinct suffixes — a review capture must never overwrite
-a turn's completion checkpoint (codex r33)."
+a turn's completion checkpoint (codex r33). r134: an ACTION capture
+gets <turn>-aN — two edits in one turn no longer overwrite each
+other's ref."
   (concat "refs/fikra/" (fikra/thread/fikra-thread-field "id") "/"
           (fikra/thread/fikra-thread-turn-count)
           (cond
             ((string= kind "baseline") "-baseline")
             ((string= kind "review") "-review")
+            ((string= kind "action") (concat "-a" (number-to-string (fikra-checkpoint-action-seq))))
             (t ""))))
 
 (defun fikra-checkpoint-tail (output)
@@ -180,10 +206,21 @@ keys the sentinel's ref name (concurrent captures cannot race)."
     ;; associated by proximity to the wrong edit).
     (let* ((thread-id (fikra/thread/fikra-thread-current))
            (turn-n (fikra/thread/fikra-thread-turn-count))
+           ;; r134: the suffix (and the REF) is derived ONCE — the
+           ;; action seq allocated here is what BOTH the git command and
+           ;; the stamped event carry (a second derivation inside the
+           ;; command builder double-allocated and the event named a
+           ;; ref that never existed).
+           (suffix (cond
+                     ((string= kind "baseline") "-baseline")
+                     ((string= kind "review") "-review")
+                     ((string= kind "action") (concat "-a" (number-to-string (fikra-checkpoint-action-seq))))
+                     (t "")))
+           (ref (concat "refs/fikra/" thread-id "/" (number-to-string turn-n) suffix))
            (tmp (concat (fikra/thread/fikra-thread-field "root")
                         "/.tmax/fikra/tmp-index-" kind))
            (pid (make-process
-                  :command (list "sh" "-c" (fikra-checkpoint-command tmp kind))
+                  :command (list "sh" "-c" (fikra-checkpoint-command-for tmp ref kind))
                   :cwd (fikra/thread/fikra-thread-field "root")
                   :filter "fikra/checkpoint/fikra-checkpoint-filter"
                   :sentinel "fikra/checkpoint/fikra-checkpoint-sentinel")))
@@ -192,6 +229,8 @@ keys the sentinel's ref name (concurrent captures cannot race)."
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-ids
         (number-to-string pid)
         (concat thread-id "/" (number-to-string turn-n)))
+      (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-suffixes
+        (number-to-string pid) suffix)
       pid)))
 
 (defun fikra-checkpoint-filter (pid output)
@@ -211,18 +250,22 @@ keys the sentinel's ref name (concurrent captures cannot race)."
          ;; r65: the SPAWN-STAMPED identity — never the sentinel-time
          ;; current thread/turn (a delayed finish would carry a later
          ;; turn's ref; replay then misattributes by proximity).
-         (stamped (hashmap-get fikra-checkpoint-async-ids key)))
+         (stamped (hashmap-get fikra-checkpoint-async-ids key))
+         ;; r134: the SPAWN-STAMPED suffix (an action's -aN was
+         ;; allocated at spawn; deriving it here would collide).
+         (suffix (let ((s (hashmap-get fikra-checkpoint-async-suffixes key)))
+                   (if s s ""))))
     (let ((sha (fikra-checkpoint-tail out)))
       (setq fikra-checkpoint-last-ref sha)
       (setq fikra-checkpoint-last-output nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-kinds key nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-ids key nil)
+      (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-suffixes key nil)
       (fikra/event/fikra-event-emit
         (if sha
           (list (list "kind" "checkpoint-ready")
                 (list "ref" (if stamped
-                              (concat "refs/fikra/" stamped
-                                      (if (string= kind "baseline") "-baseline" ""))
+                              (concat "refs/fikra/" stamped suffix)
                               (fikra-checkpoint-ref kind)))
                 (list "sha" sha))
           (list (list "kind" "checkpoint-error")

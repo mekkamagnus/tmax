@@ -698,6 +698,82 @@ describe("ollama gate pattern gaps (r133 — codex r130 P1#5)", () => {
   });
 });
 
+describe("ollama per-action checkpoint refs (r134 — codex r130 P1#4)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireCalls = (ed: Editor, seed: number, calls: { name: string; args: unknown }[]) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls:
+      calls.map((c) => ({ function: { name: c.name, arguments: c.args } })) } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+  // NB: %(refname) inside a T-Lisp string literal yields EMPTY output
+  // (a reader oddity — named); the plain form works — parse the refname
+  // from its third tab-field.
+  const refs = (ed: Editor) =>
+    String(e(ed, '(shell-command "git for-each-ref refs/fikra")').value)
+      .split("\n").map((l: string) => l.split("\t")[1] ?? "")
+      .filter((r: string) => r.startsWith("refs/fikra/main/")).join("\n");
+
+  // Each mutating action gets its OWN ref — two edits in one turn do
+  // not overwrite each other, and the turn's bare completion ref still
+  // lands at turn-end.
+  tt("two edits in one turn land DISTINCT action refs (+ the bare turn ref)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "two edits")');
+    fireCalls(ed, 191, [
+      { name: "buffer_edit", args: { path: "a134.txt", content: "one\n" } },
+      { name: "buffer_edit", args: { path: "b134.txt", content: "two\n" } },
+    ]);
+    // Both action captures complete (async git children).
+    let all = "";
+    for (let i = 0; i < 60; i++) {
+      all = refs(ed);
+      if (all.includes("-a1") && all.includes("-a2")) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(all).toContain("refs/fikra/main/1-a1");
+    expect(all).toContain("refs/fikra/main/1-a2");
+    // The bare turn ref (the turn's ground truth) is NOT one of them.
+    expect(all).not.toMatch(/refs\/fikra\/main\/1\n/);
+    // The two action refs point at DIFFERENT commits (independence).
+    const c1 = String(e(ed, '(shell-command "git rev-parse refs/fikra/main/1-a1")').value).trim();
+    const c2 = String(e(ed, '(shell-command "git rev-parse refs/fikra/main/1-a2")').value).trim();
+    expect(c1).not.toBe(c2);
+    expect(c1).toMatch(/^[0-9a-f]{40}$/);
+    // Settle: the turn-end completion capture lands the BARE ref.
+    await settleRefireFrom(ed, "191", "DONE-134");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    let withBare = "";
+    for (let i = 0; i < 60; i++) {
+      withBare = refs(ed);
+      if (/refs\/fikra\/main\/1\n/.test(withBare)) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(withBare).toMatch(/refs\/fikra\/main\/1\n/);
+  });
+
+  // A MEDIATED bash (the user allowed a mutation) lands its own action
+  // ref at exit — shell mutations get per-action coverage.
+  tt("an ALLOWED destructive bash lands its own action ref", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "allowed mutation")');
+    fireCalls(ed, 192, [{ name: "bash", args: { command: "rm -rf med134/" } }]);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await settleRefireFrom(ed, before, "MED-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    let all = "";
+    for (let i = 0; i < 60; i++) {
+      all = refs(ed);
+      if (all.includes("-a1")) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(all).toContain("refs/fikra/main/1-a1");
+  });
+});
+
 describe("ollama focus-switch lifecycle (r119 — codex r118 P1)", () => {
   tt("park → switch → allow: the ORIGINATING thread settles (not stranded confirming)", async () => {
     const ed = await armed();

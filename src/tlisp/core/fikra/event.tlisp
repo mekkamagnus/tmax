@@ -870,10 +870,12 @@ text-deltas inside the batch join into the same line."
         (cons (car segs) acc)))))
 
 (defun fikra-inline-strip-baseline (seg)
-  (if (and (> (length seg) 9)
-           (string-suffix-p "-baseline" seg))
-    (substring seg 0 (- (length seg) 9))
-    seg))
+  "The bare turn number — ANY suffix drops (r134: an ACTION ref is
+<turn>-aN; -baseline/-review before it; the identity is the turn)."
+  (let ((i (string-match "-" seg)))
+    (if (and i (numberp i) (> i 0))
+      (substring seg 0 i)
+      seg)))
 
 ;; "<thread>/<turn>" for the event at OUT index I: the current thread +
 ;; its turn-start's number (nil when no turn-start precedes).

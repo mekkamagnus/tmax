@@ -426,39 +426,47 @@ availability gate must be synchronous; the turn itself is async)."
 ;; make-process with a filter/sentinel; the daemon NEVER blocks on a
 ;; long command. The r113 exit-status contract is preserved (the
 ;; command's own $? rides the output tail).
+(defvar fikra-ollama-next-mediated nil
+  "r134: set around a DECISION-executed spawn — the child was MEDIATED
+(the user allowed it); its exit lands a per-action checkpoint.")
+
 (defun fikra-ollama-run-bash-now (cmd dir)
   (fikra/event/fikra-event-emit
     (list (list "kind" "tool-call") (list "tool" "bash")
           (list "summary" cmd)))
-  (let ((pid (condition-case nil
-              (make-process
-                :command (list "sh" "-c"
-                               (concat "cd " (fikra/thread/fikra-thread-shq dir)
-                                       " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e"))
-                :cwd dir
-                :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
-                :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
-              (error () nil))))
-    (if pid
-      ;; r131: stamp the OWNERSHIP entry (spawn-time epoch + home) and
-      ;; return the PID — callers detect async by numberp; the round's
-      ;; continuation (if any) is stashed into this entry by run-calls.
-      (progn
-        (keymap-mutable-set! fikra-ollama-async-procs (number-to-string pid)
-          (hashmap "epoch" fikra-ollama-epoch
-                   "home" (if fikra-ollama-turn-home
-                            fikra-ollama-turn-home
-                            (fikra/thread/fikra-thread-current))
-                   "out" ""
-                   "cont" nil))
-        pid)
+  (let ((mediated fikra-ollama-next-mediated))
+    (setq fikra-ollama-next-mediated nil)
+    (let ((pid (condition-case nil
+                (make-process
+                  :command (list "sh" "-c"
+                                 (concat "cd " (fikra/thread/fikra-thread-shq dir)
+                                         " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e"))
+                  :cwd dir
+                  :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
+                  :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
+                (error () nil))))
+      (if pid
+        ;; r131: stamp the OWNERSHIP entry (spawn-time epoch + home) and
+        ;; return the PID — callers detect async by numberp; the round's
+        ;; continuation (if any) is stashed into this entry by run-calls.
+        ;; r134: MEDIATED children land an action checkpoint at exit.
+        (progn
+          (keymap-mutable-set! fikra-ollama-async-procs (number-to-string pid)
+            (hashmap "epoch" fikra-ollama-epoch
+                     "home" (if fikra-ollama-turn-home
+                              fikra-ollama-turn-home
+                              (fikra/thread/fikra-thread-current))
+                     "out" ""
+                     "cont" nil
+                     "mediated" mediated))
+          pid)
       ;; r127 (codex catch 4): a FAILED spawn reports an honest FAIL
       ;; row — never a pid (the turn would strand).
       (progn
         (fikra/event/fikra-event-emit
           (list (list "kind" "tool-result") (list "ok" nil)
                 (list "summary" "spawn failed")))
-        "{\"role\":\"tool\",\"content\":\"spawn failed\"},"))))
+        "{\"role\":\"tool\",\"content\":\"spawn failed\"},")))))
 
 (defun fikra-ollama-bash-filter (pid output)
   ;; r131: the output accumulates on the PID's own entry (concurrent
@@ -527,12 +535,22 @@ availability gate must be synchronous; the turn itself is async)."
                       ;; allow-path race): the evidence renders, nothing
                       ;; resumes — there is no turn to continue.
                       'turn-over
-                      (if (not cont)
-                        (progn
-                          (setq fikra-ollama-messages
-                            (concat fikra-ollama-messages msg))
-                          (fikra-ollama-chat fikra-ollama-pending-message))
-                        (fikra-ollama-resume-from cont msg))))
+                      (progn
+                        ;; r134 (codex r130 P1#4): a MEDIATED bash (the
+                        ;; user allowed a mutation) lands its own action
+                        ;; ref at exit — the snapshot pins exactly what
+                        ;; the approved command changed.
+                        (if (and entry (hashmap-get entry "mediated"))
+                          (condition-case nil
+                            (progn (require-module fikra/checkpoint)
+                                   (fikra/checkpoint/fikra-checkpoint-capture-async "action"))
+                            (error () nil)))
+                        (if (not cont)
+                          (progn
+                            (setq fikra-ollama-messages
+                              (concat fikra-ollama-messages msg))
+                            (fikra-ollama-chat fikra-ollama-pending-message))
+                          (fikra-ollama-resume-from cont msg)))))
                   (error (m)
                     ;; r131d (codex r131c catch): the handler itself
                     ;; must not throw — a failing turn-end (an
@@ -687,14 +705,16 @@ availability gate must be synchronous; the turn itself is async)."
     (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                          (fikra/thread/fikra-thread-dirname abs))))
     (write-file-content abs content)
-    ;; r116: the PER-ACTION checkpoint — the edit lands a ref BEFORE the
-    ;; loop continues (the mockup's 'each mutating action lands a
-    ;; checkpoint ref'; the async capture's checkpoint-ready rides the
-    ;; r107 final-trigger → the INLINE merge puts the marker on THIS
-    ;; edit row).
+    ;; r116+r134: the PER-ACTION checkpoint — the edit lands its OWN ref
+    ;; (<turn>-aN) BEFORE the loop continues (the mockup's 'each mutating
+    ;; action lands a checkpoint ref'; the async capture's
+    ;; checkpoint-ready rides the r107 final-trigger → the INLINE merge
+    ;; puts the marker on THIS edit row). r134 (codex r130 P1#4): kind
+    ;; "action" — two edits in one turn no longer overwrite each other's
+    ;; ref (they used to share the bare completion ref).
     (condition-case nil
       (progn (require-module fikra/checkpoint)
-             (fikra/checkpoint/fikra-checkpoint-capture-async "completion"))
+             (fikra/checkpoint/fikra-checkpoint-capture-async "action"))
       (error () nil))
       (fikra/event/fikra-event-emit
         (list (list "kind" "tool-result") (list "ok" t)
@@ -935,6 +955,7 @@ availability gate must be synchronous; the turn itself is async)."
               ;; result joins the SAVED acc (its position in the reply),
               ;; then the remainder appends; the decision never appends
               ;; out of order again.
+              (setq fikra-ollama-next-mediated t)
               (let ((approved (fikra-ollama-run-bash-now cmd dir)))
                 ;; r131: an async spawn returns the PID — the result
                 ;; arrives via the sentinel (appending the pid would
