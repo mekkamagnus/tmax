@@ -39,6 +39,4 @@ emission would fragment.
 
 - The fold's run state is 3-valued (`""`/`text`/`thought:<block>`) —
   thought runs grow across batches like text runs.
-- The tick gains one non-display duty: polling the thought gap timeout
-  (a semantic close, emitted through the normal FAEP path).
 - `fikra-thread-turn-end` flushes the open block before the end marker.

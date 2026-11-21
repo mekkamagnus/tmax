@@ -35,16 +35,16 @@
 
 (defvar fikra-thought-state (hashmap)
   "id → state hashmap: watermark (sequential block id), last-raw (the
-last raw content index), text (the open block's cumulative), closed
-(the gap-closed sequential id), streamed (raw indices whose deltas
-streamed — completed blocks must not duplicate).")
+last raw content index), text (the open block's cumulative), streamed
+(raw indices whose deltas streamed — completed blocks must not
+duplicate).")
 
 (defun fikra-thought-reset (id)
   "Reset a thread's delivery state (turn start — the CLI's indices
 restart per message — / tests)."
   (editor/keymaps/keymap-mutable-set! fikra-thought-state id
     (hashmap "watermark" -1 "last-raw" -1 "text" ""
-              "closed" -1 "streamed" (list)))
+              "streamed" (list)))
   t)
 
 (defun fikra-thought-state-of (id)
@@ -68,35 +68,47 @@ thinking block would duplicate its deltas."
   "Route a normalized batch: non-thought events pass through AND close
 the open block (the flush marker rides before them); thought-deltas
 are order-checked. Returns the emit list."
-  (fikra-thought-scan id events (list)))
+  (fikra-thought-scan id events (list) nil))
 
-(defun fikra-thought-scan (id events out)
+(defun fikra-thought-scan (id events out pending-reset)
   (if (null events)
-    (reverse out)
+    ;; The batch's end is a message boundary — land a pending reset.
+    (reverse (if pending-reset (fikra-thought-reset-context id out) out))
     (let ((k (fikra/event/fikra-event-get-str (car events) "kind")))
       (cond
         ((string= k "thought-delta")
           (fikra-thought-scan id (cdr events)
-            (fikra-thought-accept id (car events) out)))
+            (fikra-thought-accept id (car events) out)
+            nil))
         ;; A COMPLETED thought: drop in-order when its block streamed
-        ;; (codex r2 c3 — same-chunk delta+complete), else pass; either
-        ;; way the message boundary resets the context (c2).
+        ;; (same-chunk safe), else pass. The context reset DEFERS — one
+        ;; assistant message can carry SEVERAL thinking blocks (streamed
+        ;; 0 and 2): resetting at the first complete unsuppressed 2
+        ;; (codex r3 c1). A pending reset lands on the next non-thought
+        ;; event or at the batch's end (the message boundary).
         ((string= k "thought")
           (let ((raw (fikra/event/fikra-event-get-str (car events) "block")))
             (fikra-thought-scan id (cdr events)
-              (fikra-thought-reset-context id
-                (if (and raw (fikra-thought-complete-suppressed-p id (string-to-number raw)))
-                  out
-                  (cons (car events) (fikra-thought-flush id out)))))))
+              (if (and raw (fikra-thought-complete-suppressed-p id (string-to-number raw)))
+                out
+                (cons (car events) (fikra-thought-flush id out)))
+              t)))
         ;; Other MESSAGE-FINAL kinds (tool rounds end an assistant
-        ;; message) reset the context after passing.
+        ;; message) land the pending reset and reset the context.
         ((or (string= k "tool-call") (string= k "tool-result") (string= k "turn-start"))
           (fikra-thought-scan id (cdr events)
             (fikra-thought-reset-context id
-              (cons (car events) (fikra-thought-flush id out)))))
+              (cons (car events) (fikra-thought-flush id out)))
+            nil))
+        ;; Everything else (text deltas STREAM mid-message — not
+        ;; message-final): pass; the pending reset survives to the
+        ;; batch's end (a text BETWEEN completes must not land it and
+        ;; unsuppress the message's later thinking blocks).
         (t
           (fikra-thought-scan id (cdr events)
-            (cons (car events) (fikra-thought-flush id out))))))))
+            (cons (car events) (fikra-thought-flush id out))
+            pending-reset))))))
+
 
 (defun fikra-thought-accept (id e out)
   (let* ((raw (string-to-number (fikra/event/fikra-event-get-str e "block")))
@@ -108,7 +120,6 @@ are order-checked. Returns the emit list."
          (frag (fikra/event/fikra-event-get-str e "text")))
     (cond
       ((< raw last-raw) out)
-      ((= raw (hashmap-get st "closed")) out)
       (t
         (let* ((base (if fresh "" (hashmap-get st "text")))
                (txt (concat base frag))
@@ -137,7 +148,6 @@ are order-checked. Returns the emit list."
     (editor/keymaps/keymap-mutable-set! st "watermark" -1)
     (editor/keymaps/keymap-mutable-set! st "last-raw" -1)
     (editor/keymaps/keymap-mutable-set! st "text" "")
-    (editor/keymaps/keymap-mutable-set! st "closed" -1)
     (editor/keymaps/keymap-mutable-set! st "streamed" (list)))
   out)
 
@@ -152,12 +162,6 @@ are order-checked. Returns the emit list."
         (cons (list (list "kind" "thought-collapse")) out))
       out)))
 
-;; After a contiguous accept, release the hold when its raw index is
-;; now the next expected — repeat until it no longer matches. The
-;; released entry is REMOVED (a stale duplicate wedged the watermark).
-;; The 2s timeout: polled by the #319 tick per RUNNING thread. A stale
-;; hold closes: the status event rides through the normal emit path,
-;; the hold drops, and the closed sequential id rejects late fills.
 ;; ── TAB toggle state (display-only; the render helpers live in
 ;; fikra/event) ────────────────────────────────────────────────────
 (defun fikra-thought-toggle-list ()
