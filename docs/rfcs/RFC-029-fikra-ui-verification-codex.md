@@ -946,3 +946,11 @@ The standing 6 predated the screen's r24-r37 evolution (verified patch generatio
 - **r107 (`4afd960`, PASS 8/10)**: both emitter paths rebuild on FINALS (turn-end OR the late checkpoint-ready); the tests assert the automatic shape with no explicit rebuilds. Codex's own probe verified both orders.
 
 **8.1 closes this arc at 8.** Named: the raw-API native loop (an ollama chat backend — fikra-owned tool loop via /api/chat — closes it AND the modeline model name), the streaming cursor. Board: **70/80**.
+
+## Rounds 108-110 — the raw-API ollama chat sub-arc (the §8.1 P1, addressed)
+
+- **r108 (`6df97a3`, 7/10)**: the ollama chat backend — a FIKRA-OWNED /api/chat turn (no CLI wrapper), the model in the modeline (the generic `<backend>-model-get` lookup), the http completion global as an OWNERSHIP DISPATCHER (named-keymap registry in event.tlisp), and the r82 `tmax-save` ctxdir residual root-caused (deleted-scratch buffer filenames). LIVE 10/0 (`scripts/fikra-ollama-chat-live.sh`). Codex verified the live run itself.
+- **r109 (`eff1934`, 6/10)**: fire-time ownership (connection failures settle, not hang), late-reply guards (thread + pending), conversation history, the no-model path. Codex's probes found the replacement-turn hole and history order/doubling.
+- **r110 (`5bf3864`, PASS-on-claims 7/10)**: latest-request identity (the ghost lesson applied — only the latest fired request may land) + the turn-end history boundary (completed turns only; the open turn excluded exactly once).
+
+**Named**: the tool-using loop (the model-driven ⚙/evidence/checkpoint sequence through the L2 gate — the ollama tools API is the path), thread-switch routing (the bg-settle pattern), capture-based regressions, the streaming cursor. Board stays **70/80** pending the section re-grade.
