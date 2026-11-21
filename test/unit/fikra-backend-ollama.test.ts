@@ -853,7 +853,10 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       await new Promise((r) => setTimeout(r, 100));
     }
     expect(body2).toContain("tool_calls");
-    expect(body2).toContain("TOOL-CTX");
+    // The RESULT message too (r137 gate catch: substring matches could
+    // hit the call itself — assert the tool-role message with output).
+    expect(body2).toContain('"role":"tool"');
+    expect(body2).toMatch(/"role":"tool"[^}]*TOOL-CTX|"role":"tool","content":"[^"]*TOOL-CTX/);
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the

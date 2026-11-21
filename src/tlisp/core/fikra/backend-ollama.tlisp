@@ -652,7 +652,7 @@ availability gate must be synchronous; the turn itself is async)."
                     "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string fikra-ollama-round-text)
                     ",\"tool_calls\":["
                     (fikra-ollama-calls-json calls 0 "")
-                    "]}," results))
+                    "]}," (if acc acc "") msg results))
           (if (>= fikra-ollama-round fikra-ollama-max-rounds)
             (progn
               (setq fikra-ollama-pending-message nil)
@@ -790,6 +790,12 @@ availability gate must be synchronous; the turn itself is async)."
       (progn
         (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                              (fikra/thread/fikra-thread-dirname abs))))
+        ;; r137 (codex gate catch): the action ref captures the PRE state
+        ;; — BEFORE the write (the ref is what a revert restores TO).
+        (condition-case nil
+          (progn (require-module fikra/checkpoint)
+                 (fikra/checkpoint/fikra-checkpoint-capture "action"))
+          (error () nil))
         (let ((written (condition-case nil
                         (progn (write-file-content abs content) t)
                         (error () nil))))
@@ -813,9 +819,9 @@ availability gate must be synchronous; the turn itself is async)."
                       (list "summary" (concat "WRITE FAILED: " path))))
               (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "write failed: " path)) "},"))
             (progn
-              ;; r116+r134: the PER-ACTION checkpoint — the edit lands its
-              ;; OWN ref (<turn>-aN); SYNC (r134b): the write and its
-              ;; snapshot are one step.
+              ;; r137 gate resolution: the POST-write ref remains (the
+              ;; evidence + inline marker; the PRE ref above is the
+              ;; revert target — both states pinned per action).
               (condition-case nil
                 (progn (require-module fikra/checkpoint)
                        (fikra/checkpoint/fikra-checkpoint-capture "action"))
@@ -973,6 +979,10 @@ availability gate must be synchronous; the turn itself is async)."
             (progn
               (setq fikra-ollama-pending-message nil)
               (editor-set-status "Fikra-ollama: reply thread focus failed")
+              (condition-case nil
+                (if (string= (fikra/thread/fikra-thread-status) "running")
+                  (fikra/thread/fikra-thread-turn-end "error"))
+                (error () nil))
               'focus-failed)
           (let ((r (condition-case nil
                     (fikra-ollama-handle-reply status body)
