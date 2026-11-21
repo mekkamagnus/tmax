@@ -100,11 +100,12 @@ export function withTransientRevision<T extends object>(
   state: T,
   interp?: { execute: (expr: string) => unknown },
 ): T {
-  // #319 SERVE INVARIANT (codex r3): every caller of this helper is a
-  // CLIENT-RESPONSE path (the keypress and render-state handlers — each
-  // response flows to a client that renders it). `capture` deliberately
-  // does NOT use this helper (a read-off snapshot never acknowledges a
-  // frozen frame); keep it that way when adding paths.
+  // #319: a PURE stamp (revision + the viewed thread's segment). The
+  // frozen-frame ACKNOWLEDGMENT lives in the render-state handler
+  // (markTransientServed) — the POLL is the only path every rendering
+  // client exercises; keypress responses are input round-trips that
+  // `tmaxclient --keys` discards (codex r4 catch 1), so they must not
+  // acknowledge.
   if (!interp) return state;
   const readTransient = (expr: string): unknown => {
     try {
@@ -131,16 +132,26 @@ export function withTransientRevision<T extends object>(
   const seg = readTransient(segExpr);
   if (typeof seg === "string" && seg.length > 0) {
     (state as { transientSegment?: string }).transientSegment = seg;
-    // #319 (codex r1 catch 4): the frozen terminal frame is RENDER-GATED —
-    // this serve stamps it, so the next tick's clear lands only after a
-    // real poll carried the frozen frame (both frames ride poll cycles
-    // regardless of the tick/poll race order).
-    const markExpr = typeof viewedBuffer === "string"
-      ? `(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-mark-rendered-for (hex-decode "${Buffer.from(viewedBuffer, "utf8").toString("hex")}"))) (error () nil))`
-      : "(condition-case nil (progn (require-module fikra/transient) (fikra/transient-mark-rendered (fikra/thread/fikra-thread-current))) (error () nil))";
-    readTransient(markExpr);
   }
   return state;
+}
+
+/**
+ * #319: acknowledge the frozen terminal frame for the thread a response's
+ * viewed buffer displays — called ONLY by the render-state handler (the
+ * poll path every rendering client exercises). Keypress responses are
+ * input round-trips (`tmaxclient --keys` discards them) and never
+ * acknowledge; capture never calls this either.
+ */
+export function markTransientServed(
+  interp: { execute: (expr: string) => unknown } | undefined,
+  viewedBuffer: string | undefined,
+): void {
+  if (!interp) return;
+  const expr = typeof viewedBuffer === "string"
+    ? `(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-mark-rendered-for (hex-decode "${Buffer.from(viewedBuffer, "utf8").toString("hex")}"))) (error () nil))`
+    : "(condition-case nil (progn (require-module fikra/transient) (fikra/transient-mark-rendered (fikra/thread/fikra-thread-current))) (error () nil))";
+  try { interp.execute(expr); } catch { /* never fatal */ }
 }
 
 export function editorStateToJson(

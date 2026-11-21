@@ -19,7 +19,7 @@ import type {
   ClientEventParams, ClientEventResult,
   StatusResult, ClientsResult, FramesResult,
 } from "../types.ts";
-import { editorStateToJson, renderHeightForTerminalSize, withTransientRevision } from "../../serialize.ts";
+import { editorStateToJson, renderHeightForTerminalSize, withTransientRevision, markTransientServed } from "../../serialize.ts";
 import { captureFrame } from "../../../render/capture-frame.ts";
 import { ansiLinesToHtmlDocument } from "../../../render/ansi-to-html.ts";
 
@@ -79,9 +79,16 @@ export function createFramesHandlers(ctx: ServerContext): {
       const renderHeight = renderHeightForTerminalSize(
         ctx.frameObservability.get(params.frameId)?.terminalSize,
       );
-      return editorStateToJson(withTransientRevision(ctx.frameToEditorState(frame), ctx.editor.tlispInterpreter), renderHeight);
+      const state = withTransientRevision(ctx.frameToEditorState(frame), ctx.editor.tlispInterpreter);
+      // #319 (codex r4): the POLL is the only acknowledgment path — every
+      // rendering client polls; keypress round-trips (discarded by
+      // `tmaxclient --keys`) never acknowledge.
+      markTransientServed(ctx.editor.tlispInterpreter, frame.currentBufferName ?? undefined);
+      return editorStateToJson(state, renderHeight);
     }
-    return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), ctx.editor.tlispInterpreter));
+    const state = withTransientRevision(ctx.editor.getEditorState(), ctx.editor.tlispInterpreter);
+    markTransientServed(ctx.editor.tlispInterpreter, (state as { currentBufferName?: string }).currentBufferName);
+    return editorStateToJson(state);
   };
 
   // ── capture (READ-ONLY) ─────────────────────────────────────────────────

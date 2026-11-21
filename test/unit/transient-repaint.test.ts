@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
-import { editorStateToJson, jsonToEditorState, withTransientRevision } from "../../src/server/serialize.ts";
+import { editorStateToJson, jsonToEditorState, withTransientRevision, markTransientServed } from "../../src/server/serialize.ts";
 
 /**
  * @file transient-repaint.test.ts
@@ -183,7 +183,12 @@ describe("#318/#319 — the wire: segment + revision through the REAL helper", (
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
     const wireFrozen = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100) as { transientSegment?: string };
     expect(wireFrozen.transientSegment).toMatch(/^✓/);
-    // The helper's serve MARKED the frame — the next tick clears.
+    // The KEYLESS stamp alone does NOT acknowledge (a keypress response is
+    // an input round-trip — tmaxclient --keys discards it; codex r4); the
+    // POLL (markTransientServed, the render-state handler's seam) does.
+    tick(editor);
+    expect((editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100) as { transientSegment?: string }).transientSegment).toMatch(/^✓/);
+    markTransientServed(interpOf(editor), "*Fikra*");
     tick(editor);
     const wireClear = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100) as { transientSegment?: string };
     expect(wireClear.transientSegment).toBeUndefined();
@@ -221,7 +226,7 @@ describe("#318/#319 — the wire: segment + revision through the REAL helper", (
     expect(clientState.transientSegment).toMatch(GERUND);
     expect(clientState.transientRevision!).toBeGreaterThan(0);
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
-    editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100); // the serve
+    markTransientServed(interpOf(editor), "*Fikra*"); // the poll's acknowledgment
     tick(editor);
     const wireIdle = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100);
     expect((jsonToEditorState(wireIdle) as { transientSegment?: string }).transientSegment).toBeUndefined();

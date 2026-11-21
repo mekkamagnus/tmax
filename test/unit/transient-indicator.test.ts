@@ -217,9 +217,10 @@ describe("#319 — the frozen→clear terminal sequence at EVERY terminal kind",
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
     const frozen = segment(editor, "main");
     expect(frozen).toMatch(/^✓/);
-    // CAPTURE-STYLE reads (captureFrame bypasses the serve helper — the
-    // structural invariant documented on withTransientRevision): ticks
-    // alone never clear the frame.
+    // NON-POLL reads never acknowledge (codex r4): captureFrame bypasses
+    // the stamp entirely, and keypress round-trips (tmaxclient --keys
+    // discards them) carry the segment WITHOUT marking — only the
+    // render-state POLL acknowledges. Ticks alone never clear the frame.
     for (let i = 0; i < 4; i++) tick(editor);
     expect(segment(editor, "main")).toBe(frozen);
     // The SERVED poll acknowledges; the next tick clears.
@@ -255,8 +256,6 @@ describe("#319 — the usage final line (provider-reported, persisted)", () => {
     expect(withUsage).toContain("\"tokens\":\"1234\""); // exact — no 1234.0 drift
     // THE WIRE SEAM (gate r2): the CLI's streamed tool-argument partials
     // (input_json_delta) map to tool-input-delta events — the counted kind.
-    const normStream = (json: string) => `(mapcar (lambda (ev) (json-encode ev)) (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${Buffer.from("PLACEHOLDER", "utf8").toString("hex")}")))`;
-    void normStream;
     const partial = String(e(editor, `(json-encode (car (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${Buffer.from('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"abc"}}}', "utf8").toString("hex")}"))))`).value);
     expect(partial).toContain("tool-input-delta");
     // Absent usage → nil (no event, no line).

@@ -36,6 +36,14 @@
 ;; transition; the tick settles the stop). Client connect/disconnect
 ;; never starts/stops it — thread state owns it.
 
+;; thread.tlisp requires THIS module only lazily (at status-set time),
+;; so this eager require is acyclic: the registry queries + the
+;; buffer→thread inverse lookup resolve reliably in the daemon runtime
+;; (#318 gate-final hardening; restored 2026-11-21 after the #319
+;; rewrite dropped it — a first restore attempt silently no-opped and
+;; codex r4 caught the message/ tree mismatch).
+(require-module fikra/thread)
+
 (defvar fikra-transient-rev 0
   "The transient revision — rides the poll response beside bufferRevision.")
 (defvar fikra-transient-ticks 0
