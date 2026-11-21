@@ -941,6 +941,43 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(fin).toBeGreaterThan(t2);
   });
 
+  // r139b (codex round-2 probe): reject a destructive call with a
+  // remainder — the refusal appears EXACTLY ONCE in a later turn's
+  // body, ordered BEFORE the final reply.
+  tt("a rejection rides exactly once, before the final reply", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "reject then rest")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 220 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [
+        { function: { name: "bash", arguments: { command: "rm -rf rej139/" } } },
+        { function: { name: "some_unknown_tool", arguments: {} } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 220 "${r}")`);
+    e(ed, `(fikra-http-complete 220 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-reject)");
+    // The remainder runs (the unknown tool records its honest result);
+    // the re-fire lands and the final reply ends the turn.
+    const before = "220";
+    await settleRefireFrom(ed, before, "REJ-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // The NEXT turn's body.
+    e(ed, '(fikra/chat/fikra-turn-send "follow up")');
+    let body = "";
+    for (let i = 0; i < 60; i++) {
+      try {
+        const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
+        const last = lines[lines.length - 1];
+        if (last && last.includes("follow up")) { body = last; break; }
+      } catch { /* wait */ }
+      await new Promise((r2) => setTimeout(r2, 100));
+    }
+    // The refusal EXACTLY once.
+    expect(body.split("user rejected this command").length - 1).toBe(1);
+    // Ordered before the final reply.
+    expect(body.indexOf("user rejected this command")).toBeLessThan(body.indexOf("REJ-DONE"));
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —

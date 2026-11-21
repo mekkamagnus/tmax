@@ -78,6 +78,9 @@ ride too).")
 start-turn and abort — an async bash sentinel whose spawn-time epoch
 differs is SUPERSEDED: no result row, no resume, no re-fire (the turn
 it belonged to is gone).")
+(defvar fikra-ollama-last-parked-calls nil
+  "r139b: the parked call + its remainder (the exchange's TRUE assistant
+message — the reject/approve-with-empty-rest path records from here).")
 (defvar fikra-ollama-turn-home nil
   "r131b (codex r131 catch): the thread that OWNS the running turn —
 stamped at start-turn. Async spawns stamp their HOME from THIS (the
@@ -834,7 +837,10 @@ availability gate must be synchronous; the turn itself is async)."
                             (fikra/checkpoint/fikra-checkpoint-capture "action"))))
             (if (not sha)
               (editor-set-status "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref")))
-          (error () nil))
+          (error (m)
+            (editor-set-status
+              (concat "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref ("
+                      (if (stringp m) m "capture error") ")"))))
         (let ((written (condition-case nil
                         (progn (write-file-content abs content) t)
                         (error () nil))))
@@ -938,7 +944,11 @@ availability gate must be synchronous; the turn itself is async)."
       (cond
         ((string= k "turn-start")
           (fikra-ollama-history-scan events (+ i 1) cutoff acc nil this-turn 1))
-        ((or (string= k "tool-call") (string= k "tool-result"))
+        ((or (string= k "tool-call") (string= k "tool-result")
+             (string= k "permission-denied") (string= k "permission-allowed"))
+          ;; r139b (codex round-2 catch): decision events mark the turn
+          ;; as having run tools — the flush must precede the reply even
+          ;; without an intervening narration.
           (fikra-ollama-history-scan events (+ i 1) cutoff acc t this-turn next-round))
         ((string= k "text-delta")
           (let* ((sp (fikra/event/fikra-event-get-str e "speaker"))
@@ -1207,6 +1217,12 @@ availability gate must be synchronous; the turn itself is async)."
 (defun fikra-backend-ollama-decide-inner (decision)
   (let* ((call fikra-ollama-parked-call)
          (home-thread fikra-ollama-parked-thread))
+    ;; r139b: the exchange fragment's TRUE call list (the parked call +
+    ;; its remainder — stashed HERE: at park time the remainder is not
+    ;; yet known, and by resume time it is consumed).
+    (if call
+      (setq fikra-ollama-last-parked-calls
+        (append (list call) fikra-ollama-parked-rest)))
     (setq fikra-ollama-parked-call nil)
     (setq fikra-ollama-parked-thread nil)
     (if (not call)
@@ -1221,12 +1237,9 @@ availability gate must be synchronous; the turn itself is async)."
           (setq fikra-ollama-parked-acc
             (concat fikra-ollama-parked-acc
                     "{\"role\":\"tool\",\"content\":\"user rejected this command; do not retry it\"},"))
-          ;; r139 (codex catch): the rejection IS part of the exchange —
-          ;; future turns must see it (the model learns from refusals).
-          (fikra-ollama-remember-exchange
-            (concat "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
-                    (fikra-ollama-calls-json (append (list call) fikra-ollama-parked-rest) 0 "")
-                    "]}," fikra-ollama-parked-acc))
+          ;; r139b (codex round-2 catch): the rejection rides via
+          ;; resume-rest's ONE complete exchange (recording here too
+          ;; duplicated the pre-park acc in the round's slot).
           (fikra-ollama-settle-home home-thread)
           (fikra-ollama-continue-home home-thread))
         (progn
@@ -1347,6 +1360,13 @@ availability gate must be synchronous; the turn itself is async)."
         (if (> (length acc) 0)
           (setq fikra-ollama-messages
             (concat fikra-ollama-messages acc)))
+        ;; r139b: a single-call park (rejection or approval) records its
+        ;; exchange HERE (the refusal/pre-park acc + the decision result).
+        (if fikra-ollama-last-parked-calls
+          (fikra-ollama-remember-exchange
+            (concat "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
+                    (fikra-ollama-calls-json fikra-ollama-last-parked-calls 0 "")
+                    "]}," acc)))
         'done)
       (let ((results (fikra-ollama-run-calls rest 0 acc)))
         ;; r139 (codex catch): the DECISION continuations flow through
