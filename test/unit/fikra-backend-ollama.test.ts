@@ -827,6 +827,35 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
   });
 });
 
+  // r137 (codex re-grade): LATER turns keep the tool context — turn 2's
+  // request body carries turn 1's tool exchange (the recorded body is
+  // the ground truth).
+  tt("a SECOND turn's request carries the first turn's tool exchange", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "first turn")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 199 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "echo TOOL-CTX" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 199 "${r}")`);
+    e(ed, `(fikra-http-complete 199 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "TOOL-CTX", 60);
+    await settleRefireFrom(ed, "199", "first done");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // Turn 2: its fired body must contain turn 1's exchange.
+    e(ed, '(fikra/chat/fikra-turn-send "second turn")');
+    let body2 = "";
+    for (let i = 0; i < 60; i++) {
+      try {
+        const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
+        const last = lines[lines.length - 1];
+        if (last && last.includes("second turn")) { body2 = last; break; }
+      } catch { /* wait */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(body2).toContain("tool_calls");
+    expect(body2).toContain("TOOL-CTX");
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —

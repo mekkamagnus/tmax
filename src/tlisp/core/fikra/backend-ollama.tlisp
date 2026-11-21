@@ -50,6 +50,15 @@ on its own thread, never whatever is focused at land time).")
   "The turn's accumulated messages-array body (history + user, then each
 tool round's assistant tool_call + tool results — the loop's working
 context; rebuilt per turn).")
+(defvar fikra-ollama-round-text ""
+  "r137: the round's accompanying text (scope bridge into the results
+let).")
+(defvar fikra-ollama-tool-exchanges ""
+  "r137 (codex re-grade): the accumulated tool exchanges across turns —
+each completed round's assistant tool_calls fragment + its results.
+Rides history-messages so LATER requests keep the tool context the
+user can see in the transcript (a follow-up asking about a previous
+command's output lacked the evidence).")
 (defvar fikra-ollama-parked-thread nil
   "The thread the parked call BELONGS to (r117: the decision resolves
 against the originating thread's working dir — a focus switch must not
@@ -150,8 +159,11 @@ availability gate must be synchronous; the turn itself is async)."
   (setq fikra-ollama-pending-message message)
   (setq fikra-ollama-round 0)
   ;; r131: a new turn supersedes the previous one's in-flight async
-  ;; children (their sentinels drop on epoch mismatch).
+  ;; children. r137 (codex re-grade): replacement also KILLS them — a
+  ;; superseded command used to keep changing files with its evidence
+  ;; suppressed (epoch-drop hid the result row; the mutations ran on).
   (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
+  (fikra-ollama-kill-children)
   ;; r131b: the turn's OWNING thread (the async spawn home truth).
   (setq fikra-ollama-turn-home (fikra/thread/fikra-thread-current))
   ;; r131c (codex r131b catch): a NEW turn orphans any pending park —
@@ -252,6 +264,7 @@ availability gate must be synchronous; the turn itself is async)."
   ;; assistant message (it used to be discarded: content hardcoded "").
   (let ((text (let ((c (fikra-ollama-alist-get "content" msg)))
                 (if (and c (stringp c) (> (length c) 0)) c ""))))
+    (setq fikra-ollama-round-text text)
     (if (> (length text) 0)
       (fikra/event/fikra-event-emit
         (list (list "kind" "text-delta")
@@ -270,6 +283,13 @@ availability gate must be synchronous; the turn itself is async)."
       (progn
         (setq fikra-ollama-messages
           (concat fikra-ollama-messages results))
+        ;; r137: the completed exchange persists for LATER turns.
+        (setq fikra-ollama-tool-exchanges
+          (concat fikra-ollama-tool-exchanges
+                  "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string fikra-ollama-round-text)
+                  ",\"tool_calls\":["
+                  (fikra-ollama-calls-json tool-calls 0 "")
+                  "]}," results))
         (if (>= fikra-ollama-round fikra-ollama-max-rounds)
           (progn
             (setq fikra-ollama-pending-message nil)
@@ -625,6 +645,14 @@ availability gate must be synchronous; the turn itself is async)."
         (t (progn
           (setq fikra-ollama-messages
             (concat fikra-ollama-messages "" results))
+          ;; r137: the async round's exchange persists too (the sync
+          ;; branch lives in tool-round; the bash round resumes here).
+          (setq fikra-ollama-tool-exchanges
+            (concat fikra-ollama-tool-exchanges
+                    "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string fikra-ollama-round-text)
+                    ",\"tool_calls\":["
+                    (fikra-ollama-calls-json calls 0 "")
+                    "]}," results))
           (if (>= fikra-ollama-round fikra-ollama-max-rounds)
             (progn
               (setq fikra-ollama-pending-message nil)
@@ -811,7 +839,10 @@ availability gate must be synchronous; the turn itself is async)."
 (defun fikra-ollama-history-messages ()
   (let* ((events (fikra/event/fikra-event-events))
          (cutoff (+ (fikra-ollama-last-turn-end events 0 -1) 1)))
-    (fikra-ollama-history-scan events 0 cutoff "")))
+    ;; r137: the text history + the persisted tool exchanges (later
+    ;; turns keep the tool context).
+    (concat (fikra-ollama-history-scan events 0 cutoff "")
+            fikra-ollama-tool-exchanges)))
 
 ;; The index of the LAST turn-end (-1 when none — a first turn has no
 ;; history).
@@ -936,6 +967,13 @@ availability gate must be synchronous; the turn itself is async)."
         (let ((focused (condition-case nil
                         (progn (fikra/thread/fikra-thread-focus thread-id) t)
                         (error () nil))))
+          ;; r137 (codex re-grade): a FAILED focus switch must not handle
+          ;; the reply under an inconsistent context — settle honestly.
+          (if (not focused)
+            (progn
+              (setq fikra-ollama-pending-message nil)
+              (editor-set-status "Fikra-ollama: reply thread focus failed")
+              'focus-failed)
           (let ((r (condition-case nil
                     (fikra-ollama-handle-reply status body)
                     (error (m)
@@ -951,7 +989,7 @@ availability gate must be synchronous; the turn itself is async)."
               (condition-case nil
                 (fikra/thread/fikra-thread-focus prev)
                 (error () nil)))
-            r))))))))
+            r)))))))))
 
 ;; The reply handling, thread-local (runs with the FIRING thread
 ;; focused; the guards already ran).
@@ -1203,6 +1241,16 @@ availability gate must be synchronous; the turn itself is async)."
                 (concat fikra-ollama-messages results))
               'done)))))))
 
+;; r137: SIGKILL every live async child (shared by abort AND turn
+;; replacement — the epoch bump alone suppressed their evidence while
+;; the commands kept running).
+(defun fikra-ollama-kill-children ()
+  (dolist (k (hashmap-keys fikra-ollama-async-procs))
+    (if (hashmap-get fikra-ollama-async-procs k)
+      (condition-case nil
+        (signal (string-to-number k) "SIGKILL")
+        (error () nil)))))
+
 (defun fikra-backend-ollama-abort ()
   ;; The async request cannot be cancelled (the http primitive has no
   ;; abort) — but the turn state settles: a late reply for an aborted
@@ -1211,6 +1259,7 @@ availability gate must be synchronous; the turn itself is async)."
   ;; async children — the epoch bump makes their sentinels drop, and
   ;; the children are KILLED (the model's command stops running).
   (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
+  (fikra-ollama-kill-children)
   ;; r131c: the interrupted turn's pending park dies with it.
   (setq fikra-ollama-parked-call nil)
   (setq fikra-ollama-parked-rest nil)
