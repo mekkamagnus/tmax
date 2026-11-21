@@ -938,3 +938,11 @@ The standing 6 predated the screen's r24-r37 evolution (verified patch generatio
 - **r104 (`f837c33`, PASS 10/10)**: location precedence — a real worktree beats the fixture label (fixture overrides only plain main-tree rows).
 
 **8.5 closes at 10.** Board: **69/80** (8.1 7, 8.2 7, 8.3 8, 8.4 9, 8.5 10, 8.6 10, 8.7 9, 8.8 9).
+
+## Rounds 105-107 — the 8.1 re-grade sub-arc (8.1: 7 → 8)
+
+- **r105 (`600ff59`, 8/10)**: the RE-GRADE — the standing 7 predates the inline-ckpt arc (r63-r69) and the live native loop (r82-r84). This round: the mockup's speaker labels (user › / assistant ›). Codex graded the current state 8 with five gaps.
+- **r106 (`5c7c713`, 8/10)**: multiline tool evidence (3 lines + a counted tail — the mockup's inline bash output) + the finished-transcript merge (turn-end rebuilds through replay so the inline ckpt markers land). Codex's sequential probe found the hook lived in one emitter path and the async completion order broke the merge.
+- **r107 (`4afd960`, PASS 8/10)**: both emitter paths rebuild on FINALS (turn-end OR the late checkpoint-ready); the tests assert the automatic shape with no explicit rebuilds. Codex's own probe verified both orders.
+
+**8.1 closes this arc at 8.** Named: the raw-API native loop (an ollama chat backend — fikra-owned tool loop via /api/chat — closes it AND the modeline model name), the streaming cursor. Board: **70/80**.
