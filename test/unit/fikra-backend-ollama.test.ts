@@ -847,7 +847,7 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     // command text also appears in the call row — bind the result
     // marker to the → ok row itself; until() returns the last text on
     // exhaustion, so a bare marker assert is fakeable by the call row).
-    const row = await until(ed, "(buffer-text)", "→ ok", 60);
+    const row = strip(await until(ed, "(buffer-text)", "→ ok", 60));
     expect(row).toMatch(/→ ok\s*SETTLE-BASH/);
     // The sentinel's resume RE-FIRES (a new latest-id appears) — the
     // seeded reply must end the turn (throws if the re-fire never comes).
