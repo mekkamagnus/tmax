@@ -956,12 +956,21 @@ availability gate must be synchronous; the turn itself is async)."
             (concat fikra-ollama-messages acc)))
         'done)
       (let ((results (fikra-ollama-run-calls rest 0 acc)))
-        (if (and (symbolp results) (string= (symbol-name results) "parked"))
-          'reparked
-          (progn
-            (setq fikra-ollama-messages
-              (concat fikra-ollama-messages results))
-            'done))))))
+        (cond
+          ((and (symbolp results) (string= (symbol-name results) "parked"))
+            'reparked)
+          ;; r132b (codex r132 P1): an async remainder call HOLDS the
+          ;; round — its continuation rides the pid's ownership entry
+          ;; and the SENTINEL resumes + re-fires at exit. Appending the
+          ;; 'async marker re-fired immediately without the result (and
+          ;; the sentinel's own resume re-fired AGAIN).
+          ((and (symbolp results) (string= (symbol-name results) "async"))
+            'held)
+          (t
+            (progn
+              (setq fikra-ollama-messages
+                (concat fikra-ollama-messages results))
+              'done)))))))
 
 (defun fikra-backend-ollama-abort ()
   ;; The async request cannot be cancelled (the http primitive has no

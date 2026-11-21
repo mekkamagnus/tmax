@@ -1035,19 +1035,25 @@ describe("ollama allow-await ordering (r132 — codex r130 P1#2)", () => {
   // The codex r131/r131d probe, now the contract: after an ALLOW, the
   // next model request must NOT exist until the approved command's
   // result does (before r132 the round continued immediately and
-  // re-fired without it).
+  // re-fired without it). The child WAITS ON A RELEASE FILE (codex
+  // r132 P2: a fixed timer cannot guarantee DURING observation on a
+  // shared machine — the handshake is deterministic).
   tt("an allowed ASYNC command holds the next request until its result exists", async () => {
     const ed = await armed();
+    const release = join(process.cwd(), "release-r132");
+    rmSync(release, { force: true });
     e(ed, '(fikra/chat/fikra-turn-send "slow approve")');
-    fireCalls(ed, 181, [{ name: "bash", args: { command: "sleep 1 && rm -rf slowdir && echo SLOW-OK" } }]);
+    fireCalls(ed, 181, [{ name: "bash", args: { command: `until [ -f ${release} ]; do sleep 0.05; done; rm -rf slowdir && echo SLOW-OK` } }]);
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
     const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
     e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
-    // DURING the 1s command: no re-fire (latest frozen), no result row.
-    await new Promise((r) => setTimeout(r, 400));
+    // The child is HELD (no release file yet): no re-fire, no result
+    // row — deterministic, not timing-based.
+    await new Promise((r) => setTimeout(r, 300));
     expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value)).toBe(before);
     expect(strip(String(e(ed, "(buffer-text)").value))).not.toMatch(/→ ok\s*SLOW-OK/);
-    // At exit: the result row, THEN the re-fire — which settles.
+    // Release: the result row, THEN the re-fire — which settles.
+    writeFileSync(release, "go");
     const row = strip(await until(ed, "(buffer-text)", "→ ok", 60));
     expect(row).toMatch(/→ ok\s*SLOW-OK/);
     await settleRefireFrom(ed, before, "ALLOWED-DONE");
@@ -1055,5 +1061,37 @@ describe("ollama allow-await ordering (r132 — codex r130 P1#2)", () => {
     // The model's context carries the approved result.
     expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value))
       .toContain('"role":"tool","content":"SLOW-OK"');
+    rmSync(release, { force: true });
+  });
+
+  // r132b (codex r132 P1): the ASYNC REMAINDER holds too — a rejected
+  // park (or a failed approved spawn) continues through resume-rest,
+  // whose first remainder call going async must NOT append a marker nor
+  // re-fire (the sentinel owns the continuation; the double re-fire
+  // went latest 771→2→3 with "async" junk in the messages).
+  tt("an async REMAINDER call holds the request (no marker, no early re-fire)", async () => {
+    const ed = await armed();
+    const release = join(process.cwd(), "release-r132b");
+    rmSync(release, { force: true });
+    e(ed, '(fikra/chat/fikra-turn-send "reject then slow remainder")');
+    fireCalls(ed, 182, [
+      { name: "bash", args: { command: "rm -rf rejectdir/" } },
+      { name: "bash", args: { command: `until [ -f ${release} ]; do sleep 0.05; done; echo REST-OK` } },
+    ]);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    // REJECT: the remainder resumes immediately; its first call goes
+    // async and HOLDS — no re-fire while held.
+    e(ed, "(fikra/approvals/fikra-approval-answer-reject)");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value)).toBe(before);
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).not.toContain("async");
+    writeFileSync(release, "go");
+    const row = strip(await until(ed, "(buffer-text)", "→ ok", 60));
+    expect(row).toMatch(/→ ok\s*REST-OK/);
+    await settleRefireFrom(ed, before, "REJECT-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).not.toContain("async");
+    rmSync(release, { force: true });
   });
 });
