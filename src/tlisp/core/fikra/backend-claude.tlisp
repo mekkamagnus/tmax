@@ -1,7 +1,7 @@
 (defmodule fikra/backend-claude
   (export fikra-backend-claude-available-p fikra-backend-claude-capabilities
           fikra-backend-claude-start-turn fikra-backend-claude-abort
-          fikra-backend-claude-normalize fikra-backend-claude-args
+          fikra-backend-claude-normalize fikra-thought-drop-streamed-completes fikra-backend-claude-args
           fikra-backend-claude-line-events fikra-backend-claude-filter
           fikra-backend-claude-sentinel
           fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process fikra-backend-claude-adopt-pid
@@ -380,9 +380,16 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
       (let ((content (fikra-afield msg "content")))
         (if (not (listp content))
           nil
-          (fikra-norm-blocks content (list)))))))
+          ;; #320: the block-position counter is PER-MESSAGE (content
+          ;; indices restart with every assistant message).
+          (progn
+            (setq fikra-norm-block-idx -1)
+            (fikra-norm-blocks content (list))))))))
 
 ;; Fold content blocks → events, accumulated in OUT (oldest-first).
+(defvar fikra-norm-block-idx -1
+  "The content-block position being normalized (a per-message counter).")
+
 (defun fikra-norm-blocks (blocks out)
   (if (null blocks)
     (reverse out)
@@ -408,11 +415,19 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
                ((string= btype "thinking")
                  (let ((txt (fikra-afield block "thinking")))
                    (if (and (stringp txt) (> (length txt) 0))
-                     (list (list "kind" "thought") (list "text" txt))
+                     (list (list "kind" "thought")
+                           (list "text" txt)
+                           ;; #320 (codex r1 c4): the CONTENT position —
+                           ;; the accumulator drops completes whose block
+                           ;; already streamed.
+                           (list "block" (number-to-string (+ 1 fikra-norm-block-idx))))
                      nil)))
                (t nil))))
+      (setq fikra-norm-block-idx (+ 1 fikra-norm-block-idx))
       (fikra-norm-blocks (cdr blocks)
         (if event (cons event out) out)))))
+
+(defun fikra-norm-block-index () fikra-norm-block-idx)
 
 ;; user → tool-result events.
 (defun fikra-norm-user (obj)
@@ -640,7 +655,27 @@ chunks into another thread's log."
         ;; dropped, gaps buffered; markers ride with the batch).
         (require-module fikra/thought)
         (fikra/event/fikra-event-emit-batch-for thread-id
-          (fikra/thought/fikra-thought-feed thread-id events))))))
+          (fikra/thought/fikra-thought-feed thread-id
+            (fikra-thought-drop-streamed-completes thread-id events)))))))
+
+;; #320 (codex r1 c4): the completed assistant message re-carries every
+;; thinking block — one whose deltas streamed would duplicate. Drop it
+;; (the accumulator's streamed-raw list answers).
+(defun fikra-thought-drop-streamed-completes (id events)
+  (fikra-thought-drop-scan id events (list)))
+
+(defun fikra-thought-drop-scan (id events out)
+  (if (null events)
+    (reverse out)
+    (let* ((e (car events))
+           (k (fikra-afield e "kind"))
+           (raw (fikra-afield e "block")))
+      (fikra-thought-drop-scan id (cdr events)
+        (if (and (string= k "thought")
+                 raw
+                 (fikra/thought/fikra-thought-complete-suppressed-p id (string-to-number raw)))
+          out
+          (cons e out))))))
 
 (defun fikra-backend-claude-sentinel (pid exit-code)
   "AUTHORITATIVE turn end: process exit settles the thread state machine
