@@ -5,7 +5,8 @@
           stagehand-status-next stagehand-status-prev
           stagehand-status-open-file stagehand-status-quit
           stagehand-status-folded-p stagehand-status-root
-          stagehand-status-rows-of stagehand-visible-rows)
+          stagehand-status-rows-of stagehand-visible-rows
+          stagehand-render-row)
 
 ;; #286 — Stagehand T0: the *Stagehand* STATUS BUFFER. Foldable sections
 ;; (Untracked / Unstaged / Staged / Conflicted), row navigation, refresh.
@@ -94,16 +95,15 @@ order: Untracked, Unstaged, Staged, Conflicted."
   (stagehand-rows-scan entries code kind (list)))
 
 (defun stagehand-rows-scan (entries code kind out)
+  ;; Sections carry the PARSED entry triples (code path rename-from) —
+  ;; display strings are a RENDER concern (row identity stays the
+  ;; parsed path, never presentation text).
   (if (null entries)
     (reverse out)
-    (let* ((e (car entries))
-           (c (car e))
-           (path (car (cdr e)))
-           (ren (car (cdr (cdr e)))))
-      (stagehand-rows-scan (cdr entries) code kind
-        (if (stagehand-code-matches-p c code kind)
-          (cons (stagehand-render-row c path ren) out)
-          out)))))
+    (stagehand-rows-scan (cdr entries) code kind
+      (if (stagehand-code-matches-p (car (car entries)) code kind)
+        (cons (car entries) out)
+        out))))
 
 (defun stagehand-code-matches-p (c code kind)
   (cond
@@ -134,16 +134,13 @@ order: Untracked, Unstaged, Staged, Conflicted."
   (stagehand-conflict-scan entries (list)))
 
 (defun stagehand-conflict-scan (entries out)
+  ;; Entry triples, not display strings (see stagehand-rows-scan).
   (if (null entries)
     (reverse out)
-    (let* ((e (car entries))
-           (c (car e))
-           (path (car (cdr e)))
-           (ren (car (cdr (cdr e)))))
-      (stagehand-conflict-scan (cdr entries)
-        (if (stagehand-conflict-code-p c)
-          (cons (stagehand-render-row c path ren) out)
-          out)))))
+    (stagehand-conflict-scan (cdr entries)
+      (if (stagehand-conflict-code-p (car (car entries)))
+        (cons (car entries) out)
+        out))))
 
 (defun stagehand-worktree-rows (entries)
   (stagehand-rows-for entries "" "worktree"))
@@ -152,30 +149,53 @@ order: Untracked, Unstaged, Staged, Conflicted."
   (stagehand-rows-for entries "" "index"))
 
 (defun stagehand-render-row (code path rename-from)
-  ;; Renames render "new (from orig)".
+  ;; Renames render "new (from orig)". Display text ESCAPES newlines
+  ;; (a filename containing one must occupy ONE screen row — identity
+  ;; is the parsed path, never this string).
   (concat code " "
-          path
-          (if rename-from (concat " (from " rename-from ")") "")))
+          (stagehand-display-escape path)
+          (if rename-from
+            (concat " (from " (stagehand-display-escape rename-from) ")")
+            "")))
+
+(defun stagehand-display-escape (s)
+  ;; "\n" → the two visible chars backslash-n (hex literals: the READER
+  ;; strips backslash escapes, so the replacement cannot be a "\\n"
+  ;; literal).
+  (string-replace s (hex-decode "0a") (hex-decode "5c6e")))
 
 (defun stagehand-status-rows-of (sections)
-  "The flat display rows: header + rows per section (ALL rows —
-folding is not applied here; the rendered buffer uses the fold-aware
-variant, navigation math uses the complete set)."
-  (stagehand-blocks-of sections nil))
+  "The flat DISPLAY rows: header + rendered rows per section (ALL
+rows — folding is not applied here; the rendered buffer uses the
+fold-aware variant, navigation math uses the complete set)."
+  (mapcar (lambda (pair) (car pair)) (stagehand-blocks-of sections nil)))
 
 (defun stagehand-blocks-of (sections respect-fold)
-  ;; header + rows per section, in order; RESPECT-FOLD drops a folded
-  ;; section's file rows (the header stays — the unfold affordance).
+  ;; ((display path) ...) per visible row, in order — display is the
+  ;; rendered text, path the PARSED entry path (nil on headers).
+  ;; RESPECT-FOLD drops a folded section's file rows (the header stays
+  ;; — the unfold affordance). Position in this list IS row identity.
   (if (null sections)
     (list)
     (let* ((name (car (car sections)))
-           (rows (car (cdr (car sections))))
-           (hdr (concat name " (" (number-to-string (length rows)) ")")))
+           (entries (car (cdr (car sections))))
+           (hdr (concat name " (" (number-to-string (length entries)) ")")))
       (append
         (if (and respect-fold (stagehand-status-folded-p name))
-          (list hdr)
-          (cons hdr rows))
+          (list (list hdr nil))
+          (cons (list hdr nil) (stagehand-entry-pairs entries)))
         (stagehand-blocks-of (cdr sections) respect-fold)))))
+
+(defun stagehand-entry-pairs (entries)
+  ;; ((display path) ...) for a section's entries.
+  (if (null entries)
+    (list)
+    (let* ((e (car entries))
+           (c (car e))
+           (p (car (cdr e)))
+           (r (car (cdr (cdr e)))))
+      (cons (list (stagehand-render-row c p r) p)
+        (stagehand-entry-pairs (cdr entries))))))
 
 ;; ── fold state ──────────────────────────────────────────────────────
 (defun stagehand-status-folded-p (section-name)
@@ -227,8 +247,14 @@ variant, navigation math uses the complete set)."
     (t i)))
 
 (defun stagehand-visible-rows ()
-  "The display rows with folded sections' FILE rows excluded (headers
+  "The DISPLAY rows with folded sections' FILE rows excluded (headers
 stay — they are the unfold affordance)."
+  (mapcar (lambda (pair) (car pair))
+    (stagehand-blocks-of (stagehand-current-sections) t)))
+
+(defun stagehand-visible-pairs ()
+  "The ((display path) ...) pairs behind `stagehand-visible-rows' —
+position here is RET's row identity."
   (stagehand-blocks-of (stagehand-current-sections) t))
 
 (defun stagehand-place-cursor ()
@@ -244,8 +270,8 @@ stay — they are the unfold affordance)."
 (defun stagehand-header-line-count () 2)
 
 (defun stagehand-row-at-cursor ()
-  (nth (- (cursor-line) (stagehand-header-line-count))
-    (stagehand-visible-rows)))
+  ;; The DISPLAY string of the row under the cursor (header checks).
+  (nth (stagehand-current-index) (stagehand-visible-rows)))
 
 (defun stagehand-header-row-p (row)
   (and row
@@ -274,44 +300,17 @@ stay — they are the unfold affordance)."
     (string= (substring s i (+ i (length pat))) pat)))
 
 ;; ── actions ─────────────────────────────────────────────────────────
-;; Row identity: the buffer shows RENDERED rows, but RET must open the
-;; PARSED path — a file literally named "notes (from Alice).txt" must
-;; not be mangled by presentation text. stagehand-row-paths maps each
-;; rendered file row to its parsed path (rebuilt at every render).
-(defvar stagehand-row-paths (list)
-  "Rendered file row → parsed path (the RET lookup table).")
-
-(defun stagehand-row-path-alist (entries)
-  (if (null entries)
-    (list)
-    (let* ((e (car entries))
-           (c (car e))
-           (p (car (cdr e)))
-           (r (car (cdr (cdr e)))))
-      (cons (list (stagehand-render-row c p r) p)
-        (stagehand-row-path-alist (cdr entries))))))
-
-(defun stagehand-path-of-row (row)
-  ;; The PARSED path for a rendered row (nil for headers/unknowns) —
-  ;; never re-derived from the display string.
-  (stagehand-path-scan stagehand-row-paths row))
-
-(defun stagehand-path-scan (alist row)
-  (if (null alist)
-    nil
-    (if (string= (car (car alist)) row)
-      (car (cdr (car alist)))
-      (stagehand-path-scan (cdr alist) row))))
-
 (defun stagehand-status-open-file ()
   "RET on a file row: open the file at the repo root (the grep-hit
-landing pattern)."
-  (let ((row (stagehand-row-at-cursor)))
-    (if (and row (not (stagehand-header-row-p row)))
-      (let ((path (stagehand-path-of-row row)))
-        (if path
-          (find-file (concat stagehand-root "/" path))
-          (editor-set-status "Stagehand: no file on this row")))
+landing pattern). Row identity is POSITIONAL — the visible-pairs slot
+under the cursor carries the PARSED path, so display text (renames,
+escaped newlines, ' (from ' literals) can never redirect RET."
+  (let* ((idx (stagehand-current-index))
+         (pairs (stagehand-visible-pairs))
+         (pair (if (and (>= idx 0) (< idx (length pairs))) (nth idx pairs) nil))
+         (path (if pair (car (cdr pair)) nil)))
+    (if path
+      (find-file (concat stagehand-root "/" path))
       (editor-set-status "Stagehand: no file on this row"))))
 
 (defun stagehand-status-quit ()
@@ -320,9 +319,12 @@ recency-correct survivor (the #307 pattern) — no manual restore."
   (buffer-kill (stagehand-status-buffer-name)))
 
 (defun stagehand-status-refresh ()
-  "g — re-parse in place (fold state preserved by section name)."
+  "g — re-parse in place (fold state preserved by section name; the
+cursor's row is synced BEFORE the re-render so j/k position survives)."
   (if stagehand-root
-    (stagehand-status-render stagehand-root)
+    (progn
+      (setq stagehand-cursor-row (stagehand-current-index))
+      (stagehand-status-render stagehand-root))
     (editor-set-status "Stagehand: no status to refresh")))
 
 ;; ── the entry point ────────────────────────────────────────────────
@@ -381,7 +383,6 @@ arg; the quoting is the apostrophe-escape pattern)."
       (let ((entries (stagehand-status-parse out)))
         (setq stagehand-root root)
         (setq stagehand-last-parse entries)
-        (setq stagehand-row-paths (stagehand-row-path-alist entries))
         (stagehand-render-buffer root entries)))))
 
 (defun stagehand-first-line (s)
@@ -403,9 +404,10 @@ arg; the quoting is the apostrophe-escape pattern)."
     (buffer-append (concat (stagehand-head-line root branch upstream) "\n"))
     ;; The sections, FOLD-AWARE: a folded section renders its header
     ;; only (the buffer IS the fold display; TAB re-renders through
-    ;; here, refresh preserves the fold map by section name).
+    ;; here, refresh preserves the fold map by section name). Each row
+    ;; is a (display path) pair — the buffer shows the display half.
     (dolist (r (stagehand-blocks-of sections t))
-      (buffer-append (concat r "\n")))
+      (buffer-append (concat (car r) "\n")))
     ;; The empty-repo tail.
     (if (stagehand-all-empty-p sections)
       (buffer-append "nothing to commit, working tree clean\n"))

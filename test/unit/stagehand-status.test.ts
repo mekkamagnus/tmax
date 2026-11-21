@@ -42,9 +42,13 @@ const Z = (s: string) => `(hex-decode "${hex(s)}")`;
 const statusText = (ed: Editor) => strip(bufferText(ed));
 const rowsOf = (ed: Editor, zhex: string) =>
   String(e(ed, `(string-join "|" (stagehand/status/stagehand-status-rows-of (stagehand/status/stagehand-status-sections (stagehand/status/stagehand-status-parse (hex-decode "${zhex}")))))`).value);
-// The joined rows of section IDX (0=Untracked .. 3=Conflicted).
-const secRows = (ed: Editor, zhex: string, idx: number) =>
-  String(e(ed, `(string-join "|" (car (cdr (nth ${idx} (stagehand/status/stagehand-status-sections (stagehand/status/stagehand-status-parse (hex-decode "${zhex}")))))))`).value);
+// The joined DISPLAY rows of section IDX (0=Untracked .. 3=Conflicted);
+// sections carry parsed (code path ren) triples, rendered here.
+const secRows = (ed: Editor, zhex: string, idx: number) => {
+  const secs = `(stagehand/status/stagehand-status-sections (stagehand/status/stagehand-status-parse (hex-decode "${zhex}")))`;
+  const render = `(lambda (en) (stagehand/status/stagehand-render-row (car en) (car (cdr en)) (car (cdr (cdr en)))))`;
+  return String(e(ed, `(string-join "|" (mapcar ${render} (car (cdr (nth ${idx} ${secs})))))`).value);
+};
 
 function statusOf(ed: Editor): string {
   e(ed, "(stagehand/status/stagehand-status)");
@@ -316,6 +320,54 @@ describe("#286 — folding + navigation", () => {
     e(editor, "(stagehand/status/stagehand-status-fold-toggle)");
     expect(line()).toBe(6);
     expect(statusText(editor)).toContain("A  c.txt");
+  });
+
+  test("REFRESH preserves the row after j/k movement (codex r2 #1)", () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "a\n");
+    writeFileSync(join(process.cwd(), "b.txt"), "b\n");
+    statusOf(editor);
+    const line = () => Number(String(e(editor, "(cursor-line)").value));
+    // j-style move to ?? b.txt (line 4), then g — the position must
+    // survive the re-parse (not snap back to the last n/p index).
+    e(editor, "(cursor-move 4 0)");
+    e(editor, "(stagehand/status/stagehand-status-refresh)");
+    expect(line()).toBe(4);
+  });
+
+  test("identically-RENDERING renames stay distinct rows; newline filenames stay one row (codex r2 #2/#3)", () => {
+    // Two renames whose display strings collide:
+    //   a ⟵ "b (from c"   and   "a (from b" ⟵ c   both render as
+    //   'R  a (from b (from c' — positional identity must keep them
+    //   distinct and RET must open each PARSED destination.
+    const c = process.cwd();
+    writeFileSync(join(c, "b (from c"), "content-a\n"); // a's future content
+    writeFileSync(join(c, "c"), "content-c\n");
+    execFileSync("git", ["add", "."], { cwd: c });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"], { cwd: c });
+    execFileSync("git", ["mv", "b (from c", "a"], { cwd: c }); // R1: a ⟵ b (from c
+    execFileSync("git", ["mv", "c", "a (from b"], { cwd: c }); // R2: a (from b ⟵ c
+    statusOf(editor);
+    const t = statusText(editor);
+    expect((t.match(/R  a \(from b \(from c/g) || []).length).toBe(2); // rendered identically
+    // Layout: 2 U-hdr | 3 Unstaged-hdr | 4 S-hdr | 5 R1 | 6 R2.
+    // RET on each identical row opens its OWN parsed destination.
+    e(editor, "(cursor-move 5 0)");
+    e(editor, "(stagehand/status/stagehand-status-open-file)");
+    expect(strip(bufferText(editor))).toContain("content-a");
+    statusOf(editor);
+    e(editor, "(cursor-move 6 0)");
+    e(editor, "(stagehand/status/stagehand-status-open-file)");
+    expect(strip(bufferText(editor))).toContain("content-c");
+    // A filename containing a NEWLINE renders escaped on one row, and
+    // RET still opens THE file (parsed identity, escaped display).
+    writeFileSync(join(c, "weird\nname.txt"), "newline content\n");
+    statusOf(editor);
+    const t2 = statusText(editor);
+    expect(t2).toContain("weird\\nname.txt");
+    const rowIdx = t2.split("\n").findIndex((l) => l.includes("weird\\nname.txt"));
+    e(editor, `(cursor-move ${rowIdx} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-open-file)");
+    expect(strip(bufferText(editor))).toContain("newline content");
   });
 
   test("the KEYS: SPC g opens; n/p/TAB/g/q/RET dispatch in the buffer", async () => {

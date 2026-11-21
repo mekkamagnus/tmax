@@ -40,14 +40,20 @@ buffer's keymap.
   current row is derived FROM THE CURSOR (j/k moves stay in sync), and
   fold-toggle/refresh PRESERVE the cursor's row (place-cursor clamps
   when a re-render shrank the rows).
-- **Row identity** (codex r1): RET opens the PARSED path via a
-  rendered-row → path table rebuilt at every render — never re-derived
-  from presentation text (a file literally named `notes (from
-  Alice).txt` opens correctly). Repo state commits only on a SUCCESSFUL
-  read (a failed re-open leaves the displayed status's root, rows, and
-  RET addressing intact). Rename/copy origin consumption checks EITHER
-  porcelain column (git emits index-side R/C only today, but a
-  worktree-side record must not corrupt the following rows).
+- **Row identity** (codex r1+r2): sections carry PARSED entry triples
+  (code, path, rename-from); rendering is a display concern. RET's
+  identity is POSITIONAL — the visible (display, path) pair under the
+  cursor supplies the parsed path, so display text can never redirect
+  RET: a file literally named `notes (from Alice).txt`, two renames
+  rendering IDENTICALLY (`a ⟵ "b (from c"` and `"a (from b" ⟵ c` both
+  display `R  a (from b (from c`), and filenames containing NEWLINES
+  (display-escaped `\n`, one screen row) all open the right file.
+  Repo state commits only on a SUCCESSFUL read (a failed re-open
+  leaves the displayed status's root, rows, and RET addressing
+  intact). Rename/copy origin consumption checks EITHER porcelain
+  column (git emits index-side R/C only today, but a worktree-side
+  record must not corrupt the following rows). Refresh (g) syncs the
+  cursor's row BEFORE the re-parse — j/k position survives.
 - **Keys**: buffer-local keymap (the fikra-diff pattern: `keymap-init`
   + `buffer-set-keymap`, the #206 chain's innermost tier) with Tab,
   n, p, g, q, Enter — spellings are the HANDLER's normalized names
@@ -76,10 +82,11 @@ buffer's keymap.
       persistence across refresh
 - [x] n/p/TAB/g/q/RET behaviors tested — via exported functions AND
       real `handleKey` dispatch (SPC g opens; the buffer-local map
-      fires; q restores recency); j/k-then-n continuity and
-      fold-preserves-position tested (codex r1); the `X (from Y).txt`
-      RET case and the failed-re-open root integrity tested (codex r1);
-      worktree-side R/C origin consumption tested (codex r1)
+      fires; q restores recency); j/k-then-n continuity,
+      fold-preserves-position, and j/k-then-g refresh continuity tested;
+      the `X (from Y).txt` RET case, the identically-rendering rename
+      pair, the newline filename, and the failed-re-open root integrity
+      tested; worktree-side R/C origin consumption tested
 - [x] The keymap-prefix-p refinement regression-tested in
       `test/unit/keymap-local.test.ts` (all 8 prior #206 rows still
       green)
