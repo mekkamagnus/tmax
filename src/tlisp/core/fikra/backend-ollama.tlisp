@@ -891,7 +891,7 @@ availability gate must be synchronous; the turn itself is async)."
     ;; r138: the walker interleaves each turn's exchange AT its turn-end
     ;; (after its text, before the next user message — codex r137's
     ;; ordering finding).
-    (fikra-ollama-history-scan events 0 cutoff "")))
+    (fikra-ollama-history-scan events 0 cutoff "" nil nil)))
 
 ;; The index of the LAST turn-end (-1 when none — a first turn has no
 ;; history).
@@ -902,31 +902,53 @@ availability gate must be synchronous; the turn itself is async)."
       (fikra-ollama-last-turn-end events (+ i 1) i)
       (fikra-ollama-last-turn-end events (+ i 1) best))))
 
-(defun fikra-ollama-history-scan (events i cutoff acc)
+;; r138: TOOLS-SEEN tracks whether the current turn already ran tools;
+;; the turn's exchange flushes BEFORE the first assistant text that
+;; follows them (the true intra-turn order — the tools ran BEFORE the
+;; final reply), and any remainder flushes at the turn's end.
+(defun fikra-ollama-history-scan (events i cutoff acc tools-seen turn-n)
+  ;; r138: TOOLS-SEEN tracks whether the current turn already ran tools;
+  ;; the turn's exchange flushes BEFORE the first ASSISTANT text that
+  ;; follows them (the true intra-turn order — the tools ran before the
+  ;; final reply); any remainder flushes at the turn's end.
   (if (or (>= i (length events)) (>= i cutoff))
     acc
     (let* ((e (nth i events))
-           (k (fikra/event/fikra-event-get-str e "kind")))
-      (fikra-ollama-history-scan events (+ i 1) cutoff
-        (cond
-          ((string= k "text-delta")
-            (let ((sp (fikra/event/fikra-event-get-str e "speaker"))
-                  (tx (fikra/event/fikra-event-get-str e "text")))
-              (if (> (length tx) 0)
-                (concat acc "{\"role\":\""
+           (k (fikra/event/fikra-event-get-str e "kind"))
+           (raw-turn (fikra/event/fikra-event-get e "turn"))
+           (this-turn (if (numberp raw-turn)
+                        (number-to-string raw-turn)
+                        (if raw-turn raw-turn turn-n))))
+      (cond
+        ((string= k "turn-start")
+          (fikra-ollama-history-scan events (+ i 1) cutoff acc nil this-turn))
+        ((or (string= k "tool-call") (string= k "tool-result"))
+          (fikra-ollama-history-scan events (+ i 1) cutoff acc t this-turn))
+        ((string= k "text-delta")
+          (let* ((sp (fikra/event/fikra-event-get-str e "speaker"))
+                 (tx (fikra/event/fikra-event-get-str e "text"))
+                 (frag (if (and tools-seen turn-n (string= sp "assistant"))
+                         (hashmap-get fikra-ollama-tool-exchanges turn-n)
+                         nil))
+                 (pre (if frag
+                        (progn (keymap-mutable-set! fikra-ollama-tool-exchanges turn-n nil) frag)
+                        "")))
+            (if (> (length tx) 0)
+              (fikra-ollama-history-scan events (+ i 1) cutoff
+                (concat acc pre "{\"role\":\""
                         (if (string= sp "user") "user" "assistant")
                         "\",\"content\":" (fikra-ollama-json-string tx) "},")
-                acc)))
-          ;; r138: at turn N's END, its exchange rides next (the true
-          ;; conversation order: text, tools, next turn).
-          ((string= k "turn-end")
-            (let* ((raw (fikra/event/fikra-event-get e "turn"))
-                   (n (if (numberp raw)
-                        (number-to-string raw)
-                        (if raw raw "")))
-                   (frag (hashmap-get fikra-ollama-tool-exchanges n)))
-              (if frag (concat acc frag) acc)))
-          (t acc))))))
+                tools-seen this-turn)
+              (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn))))
+        ((string= k "turn-end")
+          (let ((frag (if turn-n (hashmap-get fikra-ollama-tool-exchanges turn-n) nil)))
+            (if frag
+              (progn
+                (keymap-mutable-set! fikra-ollama-tool-exchanges turn-n nil)
+                (fikra-ollama-history-scan events (+ i 1) cutoff (concat acc frag) tools-seen this-turn))
+              (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn))))
+        (t
+          (fikra-ollama-history-scan events (+ i 1) cutoff acc tools-seen this-turn))))))
 
 ;; JSON-string escaping (quotes + backslashes; runtime concat is
 ;; reader-safe, the embedded chars must be JSON-escaped — hex-built

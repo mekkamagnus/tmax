@@ -860,14 +860,17 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     // hit the call itself — assert the tool-role message with output).
     expect(body2).toContain('"role":"tool"');
     expect(body2).toMatch(/"role":"tool"[^}]*TOOL-CTX|"role":"tool","content":"[^"]*TOOL-CTX/);
-    // r138 (codex ordering finding): the exchange rides INSIDE turn 1 —
-    // after turn 1's assistant reply, BEFORE turn 2's user message.
-    const replyAt = body2.indexOf("first done");
+    // r138 (codex ordering finding): the TRUE intra-turn order — the
+    // exchange rode BEFORE turn 1's final reply (the tools ran first):
+    // user1 < tool < reply < user2.
+    const user1At = body2.indexOf("first turn");
     const toolAt = body2.indexOf('"role":"tool"');
+    const replyAt = body2.indexOf("first done");
     const user2At = body2.indexOf("second turn");
-    expect(replyAt).toBeGreaterThan(-1);
-    expect(toolAt).toBeGreaterThan(replyAt);
-    expect(user2At).toBeGreaterThan(toolAt);
+    expect(user1At).toBeGreaterThan(-1);
+    expect(toolAt).toBeGreaterThan(user1At);
+    expect(replyAt).toBeGreaterThan(toolAt);
+    expect(user2At).toBeGreaterThan(replyAt);
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
