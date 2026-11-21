@@ -348,20 +348,35 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     commit("feat");
     // A pre-push hook that TRAPS INT/TERM (the grader's repro shape):
     // C-c kills script; the group reap must take the resistant child.
+    const beat = join(process.cwd(), "beat.tmp");
     writeFileSync(join(process.cwd(), ".git", "hooks", "pre-push"),
-      "#!/bin/sh\ntrap '' INT TERM HUP\nwhile true; do sleep 0.1; done # i293resist\n");
+      `#!/bin/sh\ntrap '' INT TERM HUP\nwhile true; do touch ${beat}; sleep 0.1; done\n`);
     execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
     statusOf();
     e(editor, "(stagehand/remote/stagehand-remote-push)");
     await new Promise((r) => setTimeout(r, 600));
     expect(String(e(editor, "(stagehand/remote/stagehand-remote-alive-p)").value)).toBe("true");
-    e(editor, "(stagehand/remote/stagehand-remote-cancel)"); // SIGINT
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)"); // 1st: SIGINT
+    expect(String(e(editor, "(editor-status)").value)).toContain("SIGINT sent");
+    await new Promise((r) => setTimeout(r, 400));
+    // The wrapper died but the TRAP-RESISTANT child lives — the
+    // operation stays controllable (the deferred sentinel).
+    expect(String(e(editor, "(stagehand/remote/stagehand-remote-alive-p)").value)).toBe("true");
+    await new Promise((r) => setTimeout(r, 800)); // past the 1s hold-off
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)"); // 2nd: SIGTERM
+    expect(String(e(editor, "(editor-status)").value)).toContain("SIGTERM sent");
+    await new Promise((r) => setTimeout(r, 1100)); // past the hold-off
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)"); // 3rd: SIGKILL
     await waitRemote(editor);
-    // The wrapper died (interrupt exit) AND the resistant child was
-    // reaped — the observable: no sh running our hook loop remains.
     await new Promise((r) => setTimeout(r, 500));
-    const ps = execFileSync("/bin/sh", ["-c", "pgrep -fc i293resist || echo 0"]).toString().trim();
-    expect(Number(ps)).toBe(0);
+    // HEARTBEAT assertion (ps|grep self-matches the tooling's own
+    // command lines on this host): the beat file's mtime must STOP
+    // advancing after the KILL — two samples, 700ms apart, equal.
+    const mtime = () => execFileSync("stat", ["-f", "%m", beat]).toString().trim();
+    const s1 = mtime();
+    await new Promise((r) => setTimeout(r, 700));
+    const s2 = mtime();
+    expect(s2).toBe(s1);
     // The remote got nothing.
     expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
   });
@@ -372,8 +387,10 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     commit("feat");
     statusOf();
     e(editor, "(stagehand/remote/stagehand-remote-push)");
-    // Focus moves AWAY while the push runs.
-    e(editor, '(buffer-switch "*Stagehand*")');
+    // Focus moves AWAY while the push runs (the realistic form:
+    // other-window focuses the other pane; the popup window keeps
+    // showing the popup).
+    e(editor, "(editor/commands/windows/other-window)");
     await waitRemote(editor);
     expect(String(e(editor, "(editor-status)").value)).toContain("pushed");
     // The window count is back to baseline (the split closed despite

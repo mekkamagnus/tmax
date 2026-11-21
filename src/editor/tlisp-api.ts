@@ -1727,8 +1727,15 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               ...(envArg ? { env: { ...process.env, ...envExtra } } : {}),
             });
 
+            let ptyChildPgid: number | null = null;
+            let ptyCaptureTried = false;
             const pid = nextProcessId++;
-            processTable.set(pid, { process: proc, stdin: proc.stdin });
+            const entry: { process: unknown; stdin: unknown; ptyChildPgid?: () => number | null } = {
+              process: proc,
+              stdin: proc.stdin,
+              ptyChildPgid: () => ptyChildPgid,
+            };
+            processTable.set(pid, entry as { process: any; stdin: any });
 
             const filterName = filterFn ? String(filterFn.value) : null;
             const sentinelName = sentinelFn ? String(sentinelFn.value) : null;
@@ -1773,26 +1780,40 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // chunk received so far, fire the sentinel, and let straggler
               // chunks (rare; lingering children hold the pipe silently)
               // keep flowing through the serialized filter chain after.
-              // #293 codex r2: under :pty t the child lives in its OWN
+              // #293 codex r2/r3: under :pty t the child lives in its OWN
               // session (script setsid) — the wrapper's group kill
-              // never reaches it. Capture the CHILD's pgid shortly
-              // after spawn so interrupt-class deaths can reap it.
-              let ptyChildPgid: number | null = null;
-              if (ptyOn) {
-                setTimeout(() => {
-                  try {
-                    const wpid = (proc as { pid?: number }).pid;
-                    if (!wpid) return;
-                    const out = Bun.spawnSync(['pgrep', '-P', String(wpid)], { stdout: 'pipe' });
-                    const first = new TextDecoder().decode(out.stdout).trim().split('\n')[0];
-                    const cpid = Number(first);
-                    if (cpid > 0) {
-                      const ps = Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(cpid)], { stdout: 'pipe' });
-                      const pgid = Number(new TextDecoder().decode(ps.stdout).trim());
-                      if (pgid > 0) ptyChildPgid = pgid;
+              // never reaches it. Capture the CHILD's pgid (portable
+              // ps-based discovery; re-checked twice for slow starts).
+              const capturePtyChild = () => {
+                try {
+                  const wpid = (proc as { pid?: number }).pid;
+                  if (!wpid) return;
+                  // PORTABLE child discovery: macOS/BSD ps has NO
+                  // -ppid filter and pgrep -P demands a pattern (two
+                  // r3 catches) — parse the full pid/ppid listing
+                  // and match in JS.
+                  const out = Bun.spawnSync(['ps', '-axo', 'pid=,ppid='], { stdout: 'pipe' });
+                  const text = new TextDecoder().decode(out.stdout);
+                  for (const line of text.split('\n')) {
+                    const nums = line.trim().split(/\s+/);
+                    if (nums.length === 2 && Number(nums[1]) === wpid) {
+                      const cpid = Number(nums[0]);
+                      if (cpid > 0) {
+                        const ps = Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(cpid)], { stdout: 'pipe' });
+                        const pgid = Number(new TextDecoder().decode(ps.stdout).trim());
+                        if (pgid > 0) ptyChildPgid = pgid;
+                        return;
+                      }
                     }
-                  } catch { /* best effort */ }
-                }, 300);
+                  }
+                } catch { /* best effort */ }
+              };
+              if (ptyOn) {
+
+                capturePtyChild();
+                ptyCaptureTried = true;
+                setTimeout(capturePtyChild, 300);
+                setTimeout(capturePtyChild, 1200);
               }
               const drainPromise = (async () => {
                 try {
@@ -1853,26 +1874,42 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                 pid, exitCode, durationMs: Date.now() - spawnTime,
                 outputTail: capTail(tailBuf),
               });
-              // #293 codex r1/r2: under :pty t the wrapper (script)
-              // dies on the first group signal while a
-              // signal-resistant CHILD may survive it. Reap the whole
-              // group BEFORE the sentinel so 'finished' means every
-              // relevant process is gone (the interrupt-class exit is
-              // the trigger; normal exits leave the group already
-              // empty).
-              if (signum > 0) {
+              // #293 codex r3: under :pty t the wrapper (script) dies on
+              // the first signal while the CHILD lives in its OWN
+              // session. Do NOT auto-reap (that bypassed the ladder);
+              // instead, while the child session lives, the operation
+              // stays CONTROLLABLE (the table entry persists; `signal`
+              // routes to the child session) and the sentinel defers
+              // until it actually dies — the user's presses drive
+              // INT → TERM → KILL against the real session.
+              const childLives = () => {
+                if (!ptyChildPgid && ptyCaptureTried) capturePtyChild();
+                if (!ptyChildPgid) return false;
+                try { process.kill(-ptyChildPgid, 0); return true; } catch { return false; }
+              };
+              const finish = () => {
+                if (sentinelName && ctx.evalTlisp) {
+                  ctx.evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
+                }
+                processTable.delete(pid);
+              };
+              if (signum > 0 && childLives()) {
                 const wrapperPid = (proc as { pid?: number }).pid;
                 if (wrapperPid) {
                   try { process.kill(-wrapperPid, 'SIGKILL'); } catch { /* group gone */ }
                 }
-                if (ptyChildPgid) {
-                  try { process.kill(-ptyChildPgid, 'SIGKILL'); } catch { /* group gone */ }
-                }
+                const poll = setInterval(() => {
+                  if (!childLives()) {
+                    clearInterval(poll);
+                    finish();
+                  }
+                }, 100);
+                // Bounded: a session that somehow never dies settles in
+                // 60s (the entry stays; the status stays 'running').
+                setTimeout(() => clearInterval(poll), 60_000);
+              } else {
+                finish();
               }
-              if (sentinelName && ctx.evalTlisp) {
-                ctx.evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
-              }
-              processTable.delete(pid);
               await drainPromise;
               await errLoop;
             })();
@@ -1920,7 +1957,16 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             if (osPid) {
               try { process.kill(-osPid, sigName as NodeJS.Signals); killed = true; } catch { /* group gone */ }
             }
-            if (!killed) entry.process.kill(sigName as NodeJS.Signals);
+            if (!killed) {
+              try { (entry.process as { kill?: (s: string) => void }).kill?.(sigName as string); } catch { /* already dead */ }
+            }
+            // #293 codex r3: PTY runs — the operation's REAL target is
+            // the child's own session; deliver the signal there too so
+            // the ladder reaches it even after the wrapper is gone.
+            const childPgid = (entry as { ptyChildPgid?: () => number | null }).ptyChildPgid?.();
+            if (childPgid) {
+              try { process.kill(-childPgid, sigName as NodeJS.Signals); } catch { /* session gone */ }
+            }
             return Either.right(createNil());
           } catch (e) {
             return Either.left(createValidationError('FormatError', `signal failed: ${e instanceof Error ? e.message : String(e)}`));

@@ -182,8 +182,11 @@ close the popup)."
   ;; buffer. No status here — callers own it.
   (condition-case nil
     (progn
-      (stagehand-focus-popup-window)
-      (editor/commands/windows/delete-window))
+      (if (stagehand-focus-popup-window)
+        (editor/commands/windows/delete-window)
+        nil)) ;; no window shows the popup — delete NOTHING (the
+             ;; r3 catch: an unmatched delete would close the user's
+             ;; focused unrelated window)
     (error () nil))
   (condition-case nil (buffer-kill (stagehand-remote-buffer-name)) (error () nil)))
 
@@ -196,10 +199,12 @@ close the popup)."
         (setq pos i)
         (setq i (+ i 1))))
     (if pos
-      (let ((guard 0))
-        (while (and (< guard 10) (not (= (window-current) pos)))
-          (editor/commands/windows/other-window)
-          (setq guard (+ guard 1))))
+      (progn
+        (let ((guard 0))
+          (while (and (< guard 10) (not (= (window-current) pos)))
+            (editor/commands/windows/other-window)
+            (setq guard (+ guard 1))))
+        t)
       nil)))
 
 (defun stagehand-remote-ensure-popup ()
