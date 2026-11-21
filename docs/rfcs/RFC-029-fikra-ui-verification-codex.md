@@ -1029,3 +1029,7 @@ Text beside tool_calls renders and rides the reconstructed message (it was disca
 ## Round 136 — the 8.1 re-grade (5→3: a wire regression) and the fix
 
 The re-grade caught a **critical regression from r135e**: the model-name escape left a stray quote — `{"model":"test:fake"",...}` — every live request 400'd. The unit stub swallowed POST bodies, so the suite was blind to the boundary. FIXED in r136: the quote dropped; the stub now records every /api/chat body and a permanent test parses the last one (model/messages/tools) — the wire is guarded forever. Also: the classifier strips quote/backslash characters before scanning (`r''m -r d` parks); the http-complete bg-settle dance is throw-safe. LIVE 17/0 restored against real ollama. **Named**: per-action checkpoints for ordinary mutating bash (the `printf >>` case needs a dirty-tree check); the declared limitations (streaming, shared-root captures, the replay marker) keep 10 out of reach.
+
+## Rounds 138-138c — the named r137 findings — gate PASS
+
+Tool exchanges ride in the TRUE conversation order: per-turn keyed, flushed before the first assistant text following the tools (user → tools → final reply → next user), and rebuild-stable (the walk reads without consuming; a per-walk flag guards double-flush). The edit preview is change-focused: common prefix/suffix lines trim away and only the changed middles render (a middle change shows exactly its lines; unchanged context is absent from the row). Unit 52/52 throughout; codex's triple-rebuild probe carried the exchange in all three histories.
