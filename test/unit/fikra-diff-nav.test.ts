@@ -240,3 +240,40 @@ describe("#8.4 binary numstat (r76 — codex r75 P1)", () => {
     expect(text.split("n/N: next/prev file").length - 1).toBe(1);
   });
 });
+
+describe("#8.4 summary block (r96 — status letters + tool tally)", () => {
+  test("M/A letters ride the rows; the header carries the per-turn tool tally", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(require-module "fikra/event")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    // Seed the turn's events (tool tally): turn-start, 2× buffer-edit,
+    // 1× bash, turn-end.
+    e(ed, '(fikra/event/fikra-event-log-set "/tmp/fikra-nav-r96-events.jsonl")');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "turn-start")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "buffer-edit")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "buffer-edit")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "turn-end") (list "status" "completed")))');
+    // Baseline: app.txt only. Completion: app.txt MODIFIED + new.txt ADDED.
+    ref("nav", 1, "baseline", "line1\n");
+    writeFileSync(join(repoDir, "app.txt"), "line1\nfeature-a\n"); // MODIFIED
+    writeFileSync(join(repoDir, "new.txt"), "added\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir }); // write-tree reads the INDEX
+    const tree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "t1c"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1", commit], { cwd: repoDir });
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-turn-diff-for 1)");
+    const text = String(e(ed, "(buffer-text)").value);
+    // The mockup's status letters on the ± rows.
+    expect(text).toMatch(/M app\.txt /);
+    expect(text).toMatch(/A new\.txt /);
+    // The per-turn tool tally (first-use order, counts).
+    expect(text).toContain("tools: buffer-edit ×2, bash ×1");
+    rmSync("/tmp/fikra-nav-r96-events.jsonl", { force: true });
+  });
+});

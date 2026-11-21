@@ -40,8 +40,21 @@
             (editor-set-status "Fikra: no changes in this turn")
             (progn
               (setq fikra-diff-view-turn nil)
+              ;; Mockup 8.4 letters: name-status vs the baseline tree; a
+              ;; path it does not know is UNTRACKED → A.
+              (setq fikra-diff-letters
+                (fikra-diff-letters-scan
+                  (shell-command
+                    (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                            " diff --name-status " (fikra-baseline-tree)
+                            " 2>/dev/null"))))
+              (dolist (p paths)
+                (if (not (hashmap-get fikra-diff-letters p))
+                  (editor/keymaps/keymap-mutable-set! fikra-diff-letters p "A")))
               (fikra-diff-render
-                (concat (fikra-diff-summary state rows) "\n" patch)))))))))
+                (concat (fikra-diff-summary state rows
+                          (fikra-diff-turn-tools-line state))
+                        "\n" patch)))))))))
 
 ;; Summary table (mockup 8.4: file summary + totals) — colored header,
 ;; magenta ± rows with per-file counts, totals line.
@@ -89,7 +102,17 @@ per-file ± rows)."
          (rows (fikra-diff-numstat-rows (string-split raw "\n") (list))))
     (if (= (length rows) 0)
       ""
-      (fikra-diff-summary n rows))))
+      (progn
+        ;; Mockup 8.4: M/A/D/R status letters (this turn's own name-status)
+        ;; + the per-turn tool tally in the header.
+        (setq fikra-diff-letters
+          (fikra-diff-letters-scan
+            (shell-command
+              (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                      " diff --name-status refs/fikra/" id "/" (number-to-string n) "-baseline"
+                      " refs/fikra/" id "/" (number-to-string n)
+                      " 2>/dev/null"))))
+        (fikra-diff-summary n rows (fikra-diff-turn-tools-line n))))))
 
 ;; numstat lines ("adds\tdels\tpath") → the ((path adds dels) ...) rows the
 ;; summary renderer expects (r75: paths-filter's bare strings are NOT rows —
@@ -167,13 +190,74 @@ per-file ± rows)."
 (defun fikra-diff-turn-next () (fikra-diff-turn-step 1))
 (defun fikra-diff-turn-prev () (fikra-diff-turn-step -1))
 
-(defun fikra-diff-summary (turn rows)
+;; TOOLS is the pre-rendered "· tools: ..." segment (empty string when
+;; the turn had no tool-calls) — the mockup packs it into header line 1.
+(defun fikra-diff-summary (turn rows tools)
   (concat "\e[1;36m── turn " (if (numberp turn) (number-to-string turn) "?")
           " changes · " (number-to-string (length rows)) " file(s) · +"
           (number-to-string (fikra-diff-total rows 1)) " -"
-          (number-to-string (fikra-diff-total rows 2)) " ──\e[0m\n\n"
+          (number-to-string (fikra-diff-total rows 2)) " "
+          (if (or (not tools) (string= tools "")) "" (concat "· " tools))
+          "──\e[0m\n\n"
           (fikra-diff-rows rows)
           "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn · SPC a d live view \n\n"))
+
+;; ── the per-turn tool tally (mockup line 1: "· tools: buffer-edit ×2,
+;; bash ×1") — walk the event memory counting turn-starts; tool-calls
+;; belong to the turn they follow. First-use order.
+(defun fikra-diff-turn-tools-line (n)
+  (let* ((counts (hashmap))
+         (names (fikra-diff-tools-scan (fikra/event/fikra-event-events) 0 n counts (list))))
+    (if (null names) ""
+      (concat "tools: " (fikra-diff-tools-join (reverse names) counts "")))))
+
+;; (events turn target counts order) → the ordered (name count) parts for
+;; the TARGET turn. turn-start bumps the walk counter.
+(defun fikra-diff-tools-scan (events turn target counts order)
+  (if (null events)
+    order
+    (let* ((e (car events))
+           (k (fikra/event/fikra-event-get-str e "kind")))
+      (cond
+        ((string= k "turn-start")
+          (fikra-diff-tools-scan (cdr events) (+ turn 1) target counts order))
+        ((and (= turn target) (string= k "tool-call"))
+          (let* ((name (fikra/event/fikra-event-get-str e "tool"))
+                 (cur (hashmap-get counts name)))
+            (if (and cur (> cur 0))
+              (progn
+                (editor/keymaps/keymap-mutable-set! counts name (+ cur 1))
+                (fikra-diff-tools-scan (cdr events) turn target counts order))
+              (progn
+                (editor/keymaps/keymap-mutable-set! counts name 1)
+                (fikra-diff-tools-scan (cdr events) turn target counts
+                  (cons name order))))))
+        (t (fikra-diff-tools-scan (cdr events) turn target counts order))))))
+
+;; "name ×N" segments in first-use order (the mockup: "buffer-edit ×2,
+;; bash ×1").
+(defun fikra-diff-tools-join (names counts acc)
+  (if (null names)
+    acc
+    (fikra-diff-tools-join (cdr names) counts
+      (concat acc (if (> (length acc) 0) ", ")
+              (car names) " ×" (number-to-string (hashmap-get counts (car names)))))))
+
+;; ── status letters (mockup 8.4 rows: "M path +5 −1", "A path +1 −0") ──
+(defvar fikra-diff-letters (hashmap)
+  "path → M/A/D/R for the current render (set by the view builders from
+git's --name-status; a path absent here renders the legacy ± prefix).")
+
+;; "M\tpath" lines → the path→letter hashmap (binary-safe: letter then
+;; tab then the path; renames carry "R100\told\tnew" — the NEW path maps).
+(defun fikra-diff-letters-scan (raw)
+  (let ((m (hashmap)))
+    (dolist (line (string-split raw "\n"))
+      (let ((cols (string-split line "\t")))
+        (if (>= (length cols) 2)
+          (editor/keymaps/keymap-mutable-set! m
+            (nth (- (length cols) 1) cols) (substring (car cols) 0 1)))))
+    m))
 
 ;; ROWS are ((path adds dels) ...); IDX 1 = adds column, 2 = dels.
 (defun fikra-diff-total (rows idx)
@@ -187,10 +271,15 @@ per-file ± rows)."
 (defun fikra-diff-rows (rows)
   (let ((out ""))
     (dolist (r rows)
-      (setq out (concat out "\e[35m± " (car r)
+      ;; The mockup's status letter (M/A/D/R) when the render knows it;
+      ;; ± for callers that did not build the letters map (legacy).
+      (let ((letter (hashmap-get fikra-diff-letters (car r))))
+        (setq out (concat out "\e[35m"
+                          (if (and letter (> (length letter) 0)) letter "±")
+                          " " (car r)
                         " +" (if (numberp (car (cdr r))) (number-to-string (car (cdr r))) (car (cdr r)))
-                        " -" (if (numberp (car (cdr (cdr r)))) (number-to-string (car (cdr (cdr r)))) (car (cdr (cdr r))))
-                        "\e[0m\n")))
+                          " -" (if (numberp (car (cdr (cdr r)))) (number-to-string (car (cdr (cdr r)))) (car (cdr (cdr r))))
+                          "\e[0m\n"))))
     out))
 
 ;; The header + patch land in the (re)created read-only buffer.
