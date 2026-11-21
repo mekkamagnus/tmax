@@ -270,23 +270,41 @@ segment reads)."
       (if (or (and (> i 0) (string= (substring d (- i 1) i) ">"))
               (string= (substring d (+ i 1) (+ i 2)) ">")
               (and (string= (substring d (+ i 1) (+ i 2)) "&")
-                   (fikra-risk-digit-p d (+ i 2)))
+                   (fikra-risk-fdnum-p d (+ i 2)))
               (fikra-risk-devnull-p (fikra-risk-ltrim (substring d (+ i 1) (length d)))))
         (fikra-risk-redir-scan d (+ i 1))
         t))))
 
-;; Is the char at K a digit? (No char-code builtin — literal compare.)
-(defun fikra-risk-digit-p (d k)
+;; Is the WORD at K entirely digits (an fd number — ">&2", "2>&1")?
+;; ">&1state.txt" is a FILE named 1state.txt: not fd-dup (r133c — a
+;; digit-STARTING word still clobbers).
+(defun fikra-risk-fdnum-p (d k)
   (if (>= k (length d))
     nil
-    (fikra-risk-digit-scan (substring d k (+ k 1)) 0)))
+    (let ((c (substring d k (+ k 1))))
+      (cond
+        ((string= c " ") nil)
+        ((fikra-risk-one-digit-p c) (fikra-risk-fdnum-rest-p d (+ k 1)))
+        (t nil)))))
 
-(defun fikra-risk-digit-scan (c i)
+(defun fikra-risk-fdnum-rest-p (d k)
+  (if (>= k (length d))
+    t
+    (let ((c (substring d k (+ k 1))))
+      (cond
+        ((string= c " ") t)
+        ((fikra-risk-one-digit-p c) (fikra-risk-fdnum-rest-p d (+ k 1)))
+        (t nil)))))
+
+(defun fikra-risk-one-digit-p (c)
+  (fikra-risk-one-digit-scan c 0))
+
+(defun fikra-risk-one-digit-scan (c i)
   (if (>= i 10)
     nil
     (if (string= c (substring "0123456789" i (+ i 1)))
       t
-      (fikra-risk-digit-scan c (+ i 1)))))
+      (fikra-risk-one-digit-scan c (+ i 1)))))
 
 ;; The /dev/null SINK exactly (or a path under it — traversal past the
 ;; sink hits ENOTDIR), never a longer lookalike name.

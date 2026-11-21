@@ -649,6 +649,23 @@ describe("ollama gate pattern gaps (r133 — codex r130 P1#5)", () => {
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "cmd 2>&1")').value)).toBe("shell");
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "make > /dev/null 2>&1")').value)).toBe("shell");
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x > /dev/nullish")').value)).toBe("destructive");
+    // r133c (codex r133b mid-verify catch): ">&1state.txt" is a FILE
+    // named 1state.txt — only an ALL-DIGIT word after >& is fd-dup.
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x >&1state.txt")').value)).toBe("destructive");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x >&2")').value)).toBe("shell");
+    // The dotdot family refuses through buffer_edit (no .. anywhere —
+    // including embedded and trailing shapes). Each fire gets its OWN
+    // turn (the tool-round cap ends a turn after 4 rounds — later
+    // seeded completions would go inert on an ended turn).
+    let seed = 150;
+    for (const p of ["../via-dotdot.txt", "sub/../../via-dotdot.txt", "sub/..", "..hidden/../../via-dotdot.txt"]) {
+      e(ed, `(fikra/chat/fikra-turn-send "dotdot ${seed}")`);
+      fireCalls(ed, seed, [{ name: "buffer_edit", args: { path: p, content: "DOTDOT-ESCAPE\n" } }]);
+      seed += 1;
+    }
+    expect(existsSync(join(outside, "via-dotdot.txt"))).toBe(false);
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value))
+      .toContain("refused: path escapes the working directory");
     // A LEGIT nested path still writes (no false refusals).
     fireCalls(ed, 145, [
       { name: "buffer_edit", args: { path: "nested/deep/ok.txt", content: "inside\n" } },
