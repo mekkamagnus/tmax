@@ -460,3 +460,24 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
   });
 });
+
+describe("ollama focus-switch lifecycle (r119 — codex r118 P1)", () => {
+  test("park → switch → allow: the ORIGINATING thread settles (not stranded confirming)", async () => {
+    const ed = await armed();
+    e(ed, "(require-module fikra/threads)");
+    e(ed, '(fikra/chat/fikra-turn-send "dangerous")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 121 "live")');
+    const r = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command: "rm -rf z/" } } }] } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 121 "${r}")`);
+    e(ed, `(fikra-http-complete 121 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    // Switch away, then allow.
+    e(ed, '(fikra/thread/fikra-thread-focus "away")');
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    // The home (main) thread must NOT be stranded confirming.
+    e(ed, '(fikra/thread/fikra-thread-focus "main")');
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("main");
+  });
+});

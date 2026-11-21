@@ -561,6 +561,20 @@ availability gate must be synchronous; the turn itself is async)."
     nil
     (fikra-backend-ollama-decide-inner decision)))
 
+;; r119 (codex r118 P1): the decision settles the ORIGINATING thread —
+;; reading the FOCUSED status left the home thread 'confirming' forever
+;; after a focus switch.
+(defun fikra-ollama-settle-home (home-thread)
+  (if (and home-thread (string= home-thread (fikra/thread/fikra-thread-current)))
+    (if (string= (fikra/thread/fikra-thread-status) "confirming")
+      (fikra/thread/fikra-thread-status-set "running"))
+    (let ((prev (fikra/thread/fikra-thread-current)))
+      (fikra/thread/fikra-thread-focus home-thread)
+      (if (string= (fikra/thread/fikra-thread-status) "confirming")
+        (fikra/thread/fikra-thread-status-set "running"))
+      (fikra/thread/fikra-thread-focus prev)
+      t)))
+
 (defun fikra-backend-ollama-decide-inner (decision)
   (let* ((call fikra-ollama-parked-call)
          (home-thread fikra-ollama-parked-thread))
@@ -575,14 +589,12 @@ availability gate must be synchronous; the turn itself is async)."
           (setq fikra-ollama-messages
             (concat fikra-ollama-messages
                     "{\"role\":\"tool\",\"content\":\"user rejected this command; do not retry it\"},"))
-          (if (string= (fikra/thread/fikra-thread-status) "confirming")
-            (fikra/thread/fikra-thread-status-set "running"))
+          (fikra-ollama-settle-home home-thread)
           (fikra-ollama-chat fikra-ollama-pending-message))
         (progn
           (fikra/event/fikra-event-emit
             (list (list "kind" "permission-allowed")))
-          (if (string= (fikra/thread/fikra-thread-status) "confirming")
-            (fikra/thread/fikra-thread-status-set "running"))
+          (fikra-ollama-settle-home home-thread)
           (let* ((fn (fikra-ollama-alist-get "function" call))
                  (args-raw (fikra-ollama-alist-get "arguments" fn))
                  (args (if (listp args-raw) args-raw
