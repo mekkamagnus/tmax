@@ -5,6 +5,7 @@
           stagehand-remote-sentinel stagehand-remote-buffer-name
           stagehand-remote-alive-p stagehand-remote-last-exit
           stagehand-remote-input-enter stagehand-remote-input-key
+          stagehand-remote-input-space stagehand-remote-input-backspace
           stagehand-printable-keys-get stagehand-press-held-off-p
           stagehand-ladder-signal)
 
@@ -108,11 +109,11 @@ post-mortem (the output stays; the exit rides the status) until q."
       (stagehand-remote-append (concat "\n[" stagehand-remote-mode " ok]\n"))
       (editor-set-status (concat "Stagehand: "
         (if (string= stagehand-remote-mode "push") "pushed" "pulled")))
-      ;; Success: refresh the status CONTENT, then close the popup in
-      ;; place (focus returns to the status buffer — no lingering
-      ;; popup for a finished run; the gate's focus-steal catch).
-      (condition-case nil (stagehand/status/stagehand-status-refresh) (error () nil))
-      (condition-case nil (buffer-kill (stagehand-remote-buffer-name)) (error () nil)))
+      ;; Success: close the popup FIRST (its window is still current
+      ;; — a refresh would switch away and strand the pane; the codex
+      ;; r1 accumulation catch), THEN refresh the status content.
+      (stagehand-remote-close-popup)
+      (condition-case nil (stagehand/status/stagehand-status-refresh) (error () nil)))
     (progn
       (stagehand-remote-append
         (concat "\n[" stagehand-remote-mode
@@ -172,8 +173,19 @@ close the popup)."
   (if (stagehand-remote-alive-p)
     (stagehand-remote-input "q")
     (progn
-      (buffer-kill (stagehand-remote-buffer-name))
+      (stagehand-remote-close-popup)
       (editor-set-status "Stagehand: remote popup closed"))))
+
+(defun stagehand-remote-close-popup ()
+  ;; Close the WINDOW the split created (killBuffer only rebinds the
+  ;; pane to a survivor — repeated runs accumulated panes; the codex
+  ;; r1 catch), then kill the buffer. No status here — callers own it.
+  (condition-case nil
+    (if (string= (buffer-current) (stagehand-remote-buffer-name))
+      (editor/commands/windows/delete-window)
+      nil)
+    (error () nil))
+  (condition-case nil (buffer-kill (stagehand-remote-buffer-name)) (error () nil)))
 
 (defun stagehand-remote-ensure-popup ()
   ;; The capture geometry: a bottom split, the popup in the lower pane.
@@ -217,6 +229,10 @@ close the popup)."
         (editor/keymaps/keymap-set-key kmap "C-c" "(stagehand/remote/stagehand-remote-cancel)")
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/remote/stagehand-remote-quit)")
         (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/remote/stagehand-remote-input-enter)")
+        ;; SPACE (excluded from the printable table) + Backspace route
+        ;; verbatim too (passphrases contain spaces; typos need ^H).
+        (editor/keymaps/keymap-set-key kmap "Space" "(stagehand/remote/stagehand-remote-input-space)")
+        (editor/keymaps/keymap-set-key kmap "Backspace" "(stagehand/remote/stagehand-remote-input-backspace)")
         (stagehand-bind-printables kmap 0)
         (editor/keymaps/buffer-set-keymap (stagehand-remote-buffer-name) kmap))))
   t)
@@ -254,6 +270,14 @@ caught the 1-vs-1000 unit bug)."
 (defun stagehand-remote-input-enter ()
   "Enter → a newline to the PTY."
   (stagehand-remote-input "\n"))
+
+(defun stagehand-remote-input-space ()
+  "Space → a literal space to the PTY."
+  (stagehand-remote-input " "))
+
+(defun stagehand-remote-input-backspace ()
+  "Backspace → DEL (0x7f) to the PTY — the terminal's erase."
+  (stagehand-remote-input (hex-decode "7f")))
 
 (defun stagehand-remote-input-key (key)
   "A PRINTABLE key, written verbatim (the keymap binds every printable

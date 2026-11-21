@@ -1678,7 +1678,12 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             (ptyArg.type === 'boolean' && ptyArg.value === true) ||
             (ptyArg.type === 'symbol' && String(ptyArg.value) === 't'));
           if (ptyOn) {
-            const inner = command.join(' ');
+            // Linux `script -c` runs its argument through a SHELL —
+            // join with each argv element SINGLE-QUOTED (the apostrophe
+            // \'' escape) so spaces/metacharacters preserve meaning
+            // (codex r1's injection-class catch).
+            const shq = (s2: string) => `'${s2.replace(/'/g, `'\\''`)}'`;
+            const inner = command.map(shq).join(' ');
             command = process.platform === 'darwin'
               ? ['/usr/bin/script', '-q', '/dev/null', ...command]
               : ['/usr/bin/script', '-qec', inner, '/dev/null'];

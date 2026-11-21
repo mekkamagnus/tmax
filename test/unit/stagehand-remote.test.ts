@@ -276,6 +276,10 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     // domain from the same table — a truncation passes silently).
     expect(ref("Enter")).toContain("stagehand-remote-input-enter");
     expect(ref("C-c")).toContain("stagehand-remote-cancel");
+    // codex r1: SPACE + Backspace route verbatim (passphrases have
+    // spaces; typos need DEL).
+    expect(ref("Space")).toContain("stagehand-remote-input-space");
+    expect(ref("Backspace")).toContain("stagehand-remote-input-backspace");
     expect(tableStr.length).toBe(94);
     for (const ch of tableStr) {
       if (ch === "q") continue;
@@ -300,6 +304,42 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     expect(sig(2)).toBe("SIGTERM");
     expect(sig(3)).toBe("SIGKILL");
     expect(sig(9)).toBe("SIGKILL");
+  });
+
+  test("codex r1: SPACE reaches the PTY child verbatim (a two-word value)", async () => {
+    const script = join(tmpdir(), "i293-space.sh");
+    writeFileSync(script, "#!/bin/sh\nread v\necho GOT:$v\n");
+    execFileSync("chmod", ["+x", script]);
+    const spid = Number(String(e(editor, `(make-process :command '("/bin/sh" "${script}") :pty t :cwd "${process.cwd()}" :filter "i293-spc-filter" :sentinel "i293-spc-sentinel")`).value));
+    e(editor, "(defvar *spc* nil)");
+    e(editor, '(defun i293-spc-filter (pid text) (setq *spc* (concat (if *spc* *spc* "") text)))');
+    e(editor, '(defun i293-spc-sentinel (pid code) nil)');
+    await new Promise((r) => setTimeout(r, 400));
+    e(editor, `(process-write ${spid} " ")`);
+    e(editor, `(process-write ${spid} "w")`);
+    e(editor, `(process-write ${spid} "\n")`);
+    for (let i = 0; i < 40; i++) {
+      if (String(e(editor, "*spc*").value).includes("GOT:")) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    // The PTY ECHO carries the typed space; the shell's `read`
+    // trims it (IFS) — the SPACE ARRIVED is proven by the echo.
+    expect(String(e(editor, "*spc*").value)).toContain(" w");
+    expect(String(e(editor, "*spc*").value)).toContain("GOT:w");
+  });
+
+  test("codex r1: repeated runs do NOT accumulate windows (the split closes)", async () => {
+    bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    const before = Number(String(e(editor, "(length (window-list))").value));
+    for (let i = 0; i < 3; i++) {
+      statusOf();
+      e(editor, "(stagehand/remote/stagehand-remote-push)");
+      await waitRemote(editor);
+    }
+    const after = Number(String(e(editor, "(length (window-list))").value));
+    expect(after).toBe(before); // each run's split closed on success
   });
 
   test("no repository → the refusal status", () => {
