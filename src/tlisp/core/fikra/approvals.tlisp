@@ -263,15 +263,37 @@ segment reads)."
     nil
     (if (not (string= (substring d i (+ i 1)) ">"))
       (fikra-risk-redir-scan d (+ i 1))
-      ;; ">" at i: skip ">>" (append), ">&" (fd duplication — no
-      ;; truncation), and the /dev/null sink.
+      ;; ">" at i: skip ">>" (append), ">&<digit>" (fd duplication —
+      ;; no truncation), and the EXACT /dev/null sink (">&<non-digit>"
+      ;; redirects to a FILE: destructive; "/dev/nullish" is a real
+      ;; path, not the sink — r133b codex catches).
       (if (or (and (> i 0) (string= (substring d (- i 1) i) ">"))
               (string= (substring d (+ i 1) (+ i 2)) ">")
-              (string= (substring d (+ i 1) (+ i 2)) "&")
-              (string-prefix-p "/dev/null"
-                (fikra-risk-ltrim (substring d (+ i 1) (length d)))))
+              (and (string= (substring d (+ i 1) (+ i 2)) "&")
+                   (fikra-risk-digit-p d (+ i 2)))
+              (fikra-risk-devnull-p (fikra-risk-ltrim (substring d (+ i 1) (length d)))))
         (fikra-risk-redir-scan d (+ i 1))
         t))))
+
+;; Is the char at K a digit? (No char-code builtin — literal compare.)
+(defun fikra-risk-digit-p (d k)
+  (if (>= k (length d))
+    nil
+    (fikra-risk-digit-scan (substring d k (+ k 1)) 0)))
+
+(defun fikra-risk-digit-scan (c i)
+  (if (>= i 10)
+    nil
+    (if (string= c (substring "0123456789" i (+ i 1)))
+      t
+      (fikra-risk-digit-scan c (+ i 1)))))
+
+;; The /dev/null SINK exactly (or a path under it — traversal past the
+;; sink hits ENOTDIR), never a longer lookalike name.
+(defun fikra-risk-devnull-p (rest)
+  (or (string= rest "/dev/null")
+      (string-prefix-p "/dev/null " rest)
+      (string-prefix-p "/dev/null/" rest)))
 
 (defun fikra-risk-ltrim (s)
   (if (> (length s) 0)

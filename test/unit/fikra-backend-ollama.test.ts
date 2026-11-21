@@ -629,6 +629,26 @@ describe("ollama gate pattern gaps (r133 — codex r130 P1#5)", () => {
     const acc2 = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
     expect(acc2).not.toContain("TOP-SECRET-CONTENT");
     expect(acc2).toContain("escape-link/secret.txt");
+    // r133b (codex r133 catch): a DANGLING symlink escapes -e (the
+    // test follows links) — the write followed the link OUT and created
+    // the outside file. The walk now stops at the link itself and
+    // readlink reveals the outside target.
+    const dangling = mkdtempSync(join(tmpdir(), "r133-dangling-"));
+    e(ed, `(shell-command "ln -s ${dangling}/gone.txt dangle-link")`);
+    fireCalls(ed, 146, [
+      { name: "buffer_edit", args: { path: "dangle-link", content: "DANGLING-ESCAPE\n" } },
+    ]);
+    expect(existsSync(join(dangling, "gone.txt"))).toBe(false);
+    const accD = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(accD).toContain("refused: path escapes the working directory");
+    rmSync(dangling, { recursive: true, force: true });
+    // The classifier's redirection corners (r133b): >&FILE truncates;
+    // only >&DIGIT is fd-duplication; /dev/nullish is not the sink.
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x >& state.txt")').value)).toBe("destructive");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x >&state.txt")').value)).toBe("destructive");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "cmd 2>&1")').value)).toBe("shell");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "make > /dev/null 2>&1")').value)).toBe("shell");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x > /dev/nullish")').value)).toBe("destructive");
     // A LEGIT nested path still writes (no false refusals).
     fireCalls(ed, 145, [
       { name: "buffer_edit", args: { path: "nested/deep/ok.txt", content: "inside\n" } },

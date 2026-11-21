@@ -642,13 +642,15 @@ availability gate must be synchronous; the turn itself is async)."
                       (string-trim (shell-command
                         (concat "realpath " (fikra/thread/fikra-thread-shq dir))))
                       (error () dir)))
-          ;; The skeleton is HEX-BUILT: the reader does not process
-          ;; backslash escapes inside .tlisp string literals, so an
-          ;; embedded \" reached the shell literally (r133 catch).
+          ;; The skeleton is HEX-BUILT (the reader leaves backslash
+          ;; escapes intact in .tlisp literals). r133b (codex catch): a
+          ;; DANGLING symlink escapes -e (the test follows links) — the
+          ;; walk now stops at the link itself (-L) and readlink reveals
+          ;; its outside target when realpath fails.
           (resolved (condition-case nil
                       (string-trim (shell-command
                         (concat "p=" (fikra/thread/fikra-thread-shq (concat dir "/" path))
-                                (hex-decode "3b207768696c65205b2021202d652022247022205d3b20646f20703d24286469726e616d652022247022293b20646f6e653b207265616c706174682022247022"))))
+                                (hex-decode "3b207768696c65205b2021202d652022247022205d202626205b2021202d4c2022247022205d3b20646f20703d24286469726e616d652022247022293b20646f6e653b207265616c70617468202224702220323e2f6465762f6e756c6c207c7c20726561646c696e6b2022247022"))))
                       (error () (concat dir "/" path)))))
       ;; resolved walks up to dir ITSELF for a not-yet-existing path
       ;; (no trailing slash) — the exact dir is contained too.
