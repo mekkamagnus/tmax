@@ -305,6 +305,25 @@ describe("8.5 merged + fixture markers (r102)", () => {
     expect(String(bufferText(ed))).toMatch(/done\s+worktree ✓\s+merged via patch ✓/);
   });
 
+  test("a MERGED replay-backed WORKTREE thread keeps worktree ✓ (r104 precedence)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/adapter)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "mr")');
+    e(ed, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(ed, "(require-module fikra/worktree)");
+    e(ed, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = String(e(ed, '(fikra/thread/fikra-thread-field "worktree")').value);
+    writeFileSync(join(wt, "m.txt"), "merged\n");
+    e(ed, "(fikra/worktree/fikra-worktree-review)");
+    e(ed, "(fikra/worktree/fikra-worktree-review-apply)");
+    e(ed, '(require-module "fikra/threads")');
+    e(ed, "(fikra/threads/fikra-threads-list-open)");
+    // The location stays the REAL worktree; the merged marker rides last.
+    expect(String(bufferText(ed))).toMatch(/done\s+worktree ✓\s+merged via patch ✓/);
+    expect(String(bufferText(ed))).not.toMatch(/done\s+fixture/);
+  });
+
   test("a REPLAY backend row shows — · fixture · (deterministic test thread)", async () => {
     const ed = await createStartedEditor("");
     e(ed, "(require-module fikra/adapter)");

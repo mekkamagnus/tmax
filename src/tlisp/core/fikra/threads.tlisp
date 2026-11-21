@@ -69,9 +69,13 @@ L<level>, worktree/main-tree, last activity), and the key-hint row."
                   ;; r103 (codex r102 P2): the merged row KEEPS its
                   ;; location (worktree ✓/main-tree); the merged marker
                   ;; rides the LAST column (mockup row 4).
+                  ;; r104 (codex r103 P2): precedence — a REAL worktree
+                  ;; location beats the fixture label (a merged replay
+                  ;; thread keeps worktree ✓); fixture overrides only the
+                  ;; plain main-tree rows (mockup row 5's shape).
                   (cond
-                    ((fikra-threads-fixture-p row) "fixture     ")
                     ((string= (if (hashmap-get row "location") (hashmap-get row "location") "") "worktree") "worktree ✓")
+                    ((fikra-threads-fixture-p row) "fixture     ")
                     ((if (hashmap-get row "legacy") t nil) "legacy      ")
                     (t "main-tree   "))
                   (cond
