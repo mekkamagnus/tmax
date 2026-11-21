@@ -15,12 +15,15 @@ emission would fragment.
 
 ## Decision
 
-- **Block-granularity ordered delivery** (`fikra/thought.tlisp`): the
-  watermark is the CONTENT BLOCK INDEX. Open-block fragments append
-  (the stream is ordered per block — fragment-level dedupe is
-  impossible and unnecessary); closed blocks drop; gaps buffer + drain;
-  a 2s timeout (the #319 tick polls it) closes with a persisted status
-  event — never re-assembled out of order.
+- **Ordered delivery on raw indices** (`fikra/thought.tlisp`): the
+  stream is ORDERED per block (its contract) — same-raw fragments
+  append, any NEW raw index opens the next block (raw jumps are
+  interleaved text/tool blocks, not reordering), older raws drop. The
+  r1 gap-buffer + 2s-timeout machinery was DELETED: over an ordered
+  stream it was unreachable dead weight, and it ATE interleaved
+  thinking (raw 0 → text 1 → raw 2 held then dropped). MESSAGE-FINAL
+  events (tool rounds, completed thoughts, turn boundaries) reset the
+  context — indices restart per assistant message.
 - **Fragments, not cumulative**: emitted `thought-delta` events carry
   FRAGMENTS (append-only rendering grows the line); the accumulator
   privately tracks the cumulative for the collapse threshold.

@@ -1,5 +1,5 @@
 (defmodule fikra/thought
-  (export fikra-thought-feed fikra-thought-flush fikra-thought-timeout-check
+  (export fikra-thought-feed fikra-thought-flush
           fikra-thought-complete-suppressed-p
           fikra-thought-watermark fikra-thought-reset
           fikra-thought-toggle-list fikra-thought-toggle-at)
@@ -10,17 +10,21 @@
 ;; BLOCK INDEX (which spans ALL block types — text blocks consume
 ;; indices we never observe); the normalizer maps each to a
 ;; thought-delta event carrying (block RAW-INDEX) + (text FRAGMENT).
-;; THIS module owns ORDERED DELIVERY at RENUMBERED block granularity:
-;;   raw == last-raw  → the OPEN block continues (fragments append —
-;;                      the stream is ordered per block);
+;; THIS module owns delivery at RENUMBERED block granularity:
+;;   raw == last-raw  → the OPEN block continues (fragments append);
 ;;   raw >  last-raw  → the NEXT sequential block (flush the old, open
-;;                      fresh — renumbering makes raw contiguity
-;;                      unenforceable and unnecessary);
+;;                      fresh — the stream is ORDERED per block, its
+;;                      contract; raw jumps are NORMAL interleaving
+;;                      (text/tool blocks consume indices we never
+;;                      observe), never reordering — holds and gap
+;;                      timeouts were speculative dead weight over an
+;;                      ordered stream, and they ATE interleaved
+;;                      thinking (codex r2 c1));
 ;;   raw <  last-raw  → a redelivery of a SEEN block — dropped.
-;; A hold (an arrival beyond the open block while the accumulator
-;; waits) buffers until the block fills; a 2s timeout (polled by the
-;; #319 tick) closes it with a persisted status event — never
-;; re-assembled out of order.
+;; MESSAGE-FINAL events (tool-call, tool-result, a complete thought,
+;; turn boundaries) reset the thinking context — content indices
+;; restart per assistant message (codex r2 c2: a tool round starts a
+;; fresh message mid-turn).
 ;;
 ;; The cumulative text is tracked PRIVATELY for the collapse threshold
 ;; (the pure helpers live in fikra/event); crossed fragments each ride
@@ -35,16 +39,12 @@ last raw content index), text (the open block's cumulative), closed
 (the gap-closed sequential id), streamed (raw indices whose deltas
 streamed — completed blocks must not duplicate).")
 
-(defvar fikra-thought-holds (hashmap)
-  "id → the single pending hold: (raw events first-ts) or nil.")
-
 (defun fikra-thought-reset (id)
   "Reset a thread's delivery state (turn start — the CLI's indices
 restart per message — / tests)."
   (editor/keymaps/keymap-mutable-set! fikra-thought-state id
     (hashmap "watermark" -1 "last-raw" -1 "text" ""
               "closed" -1 "streamed" (list)))
-  (editor/keymaps/keymap-mutable-set! fikra-thought-holds id nil)
   t)
 
 (defun fikra-thought-state-of (id)
@@ -74,11 +74,29 @@ are order-checked. Returns the emit list."
   (if (null events)
     (reverse out)
     (let ((k (fikra/event/fikra-event-get-str (car events) "kind")))
-      (if (string= k "thought-delta")
-        (fikra-thought-scan id (cdr events)
-          (fikra-thought-accept id (car events) out))
-        (fikra-thought-scan id (cdr events)
-          (cons (car events) (fikra-thought-flush id out)))))))
+      (cond
+        ((string= k "thought-delta")
+          (fikra-thought-scan id (cdr events)
+            (fikra-thought-accept id (car events) out)))
+        ;; A COMPLETED thought: drop in-order when its block streamed
+        ;; (codex r2 c3 — same-chunk delta+complete), else pass; either
+        ;; way the message boundary resets the context (c2).
+        ((string= k "thought")
+          (let ((raw (fikra/event/fikra-event-get-str (car events) "block")))
+            (fikra-thought-scan id (cdr events)
+              (fikra-thought-reset-context id
+                (if (and raw (fikra-thought-complete-suppressed-p id (string-to-number raw)))
+                  out
+                  (cons (car events) (fikra-thought-flush id out)))))))
+        ;; Other MESSAGE-FINAL kinds (tool rounds end an assistant
+        ;; message) reset the context after passing.
+        ((or (string= k "tool-call") (string= k "tool-result") (string= k "turn-start"))
+          (fikra-thought-scan id (cdr events)
+            (fikra-thought-reset-context id
+              (cons (car events) (fikra-thought-flush id out)))))
+        (t
+          (fikra-thought-scan id (cdr events)
+            (cons (car events) (fikra-thought-flush id out))))))))
 
 (defun fikra-thought-accept (id e out)
   (let* ((raw (string-to-number (fikra/event/fikra-event-get-str e "block")))
@@ -91,13 +109,6 @@ are order-checked. Returns the emit list."
     (cond
       ((< raw last-raw) out)
       ((= raw (hashmap-get st "closed")) out)
-      ((and fresh (> raw (+ last-raw 1)) (not (= last-raw -1)))
-        ;; Beyond the next expected raw: HOLD it (merged into the single
-        ;; pending hold) — the drain releases the run when it fills; the
-        ;; 2s timeout closes it.
-        (progn
-          (fikra-thought-hold-put id raw e)
-          out))
       (t
         (let* ((base (if fresh "" (hashmap-get st "text")))
                (txt (concat base frag))
@@ -115,10 +126,20 @@ are order-checked. Returns the emit list."
           (let ((ev (list (list "kind" "thought-delta")
                           (list "block" (fikra/event/fikra-event-get-str e "block"))
                           (list "text" frag))))
-            (fikra-thought-drain id
-              (if (or crossed was-crossed)
-                (cons (list (list "kind" "thought-collapse")) (cons ev pre))
-                (cons ev pre)))))))))
+            (if (or crossed was-crossed)
+              (cons (list (list "kind" "thought-collapse")) (cons ev pre))
+              (cons ev pre))))))))
+
+;; A MESSAGE boundary resets the thinking context (indices restart
+;; per assistant message; streamed-suppression is per-message too).
+(defun fikra-thought-reset-context (id out)
+  (let ((st (fikra-thought-state-of id)))
+    (editor/keymaps/keymap-mutable-set! st "watermark" -1)
+    (editor/keymaps/keymap-mutable-set! st "last-raw" -1)
+    (editor/keymaps/keymap-mutable-set! st "text" "")
+    (editor/keymaps/keymap-mutable-set! st "closed" -1)
+    (editor/keymaps/keymap-mutable-set! st "streamed" (list)))
+  out)
 
 ;; Block close: if this block EVER crossed, the marker rides once more
 ;; (the final rebuild replaces the live raw growth with the collapsed
@@ -134,55 +155,9 @@ are order-checked. Returns the emit list."
 ;; After a contiguous accept, release the hold when its raw index is
 ;; now the next expected — repeat until it no longer matches. The
 ;; released entry is REMOVED (a stale duplicate wedged the watermark).
-(defun fikra-thought-drain (id out)
-  (let* ((st (fikra-thought-state-of id))
-         (h (hashmap-get fikra-thought-holds id))
-         (next-raw (+ (hashmap-get st "last-raw") 1)))
-    (if (and h (= (car h) next-raw))
-      (fikra-thought-drain id
-        (fikra-thought-replay-hold id
-          (fikra-thought-hold-take id) out))
-      out)))
-
-(defun fikra-thought-hold-take (id)
-  (let ((h (hashmap-get fikra-thought-holds id)))
-    (editor/keymaps/keymap-mutable-set! fikra-thought-holds id nil)
-    (car (cdr h))))
-
-(defun fikra-thought-hold-put (id raw e)
-  (let ((h (hashmap-get fikra-thought-holds id)))
-    (editor/keymaps/keymap-mutable-set! fikra-thought-holds id
-      (if h
-        ;; MERGE (same raw — fragments accumulate in the hold).
-        (if (= (car h) raw)
-          (list (car h) (append (car (cdr h)) (list e)) (car (cdr (cdr h))))
-          ;; A different raw REPLACES (the earlier hold is stale — the
-          ;; stream moved on; its 2s timeout would have closed it).
-          (list raw (list e) (editor-time-now)))
-        (list raw (list e) (editor-time-now))))))
-
-(defun fikra-thought-replay-hold (id events out)
-  (if (null events)
-    out
-    (fikra-thought-replay-hold id (cdr events)
-      (fikra-thought-accept id (car events) out))))
-
 ;; The 2s timeout: polled by the #319 tick per RUNNING thread. A stale
 ;; hold closes: the status event rides through the normal emit path,
 ;; the hold drops, and the closed sequential id rejects late fills.
-(defun fikra-thought-timeout-check (id now-ms)
-  (let* ((st (fikra-thought-state-of id))
-         (h (hashmap-get fikra-thought-holds id)))
-    (if (and h (> (- now-ms (car (cdr (cdr h)))) 2000))
-      (progn
-        (editor/keymaps/keymap-mutable-set! fikra-thought-holds id nil)
-        (editor/keymaps/keymap-mutable-set! st "closed" (car h))
-        (editor/keymaps/keymap-mutable-set! st "text" "")
-        (editor/keymaps/keymap-mutable-set! st "crossed" nil)
-        (list (list (list "kind" "thought-status")
-                    (list "status" "thought stream gap — block closed"))))
-      (list))))
-
 ;; ── TAB toggle state (display-only; the render helpers live in
 ;; fikra/event) ────────────────────────────────────────────────────
 (defun fikra-thought-toggle-list ()

@@ -360,7 +360,10 @@ round-12 approvals catch)."
       ((string= kind "text-delta")
         (fikra-event-get-str event "text"))
       ((string= kind "thought")
-        (concat (fikra-face "\e[2m" (concat "· " (fikra-thought-render (fikra-event-get-str event "text")))) "\n"))
+        ;; The face wraps ONLY the prefix (matching the incremental fold's
+        ;; fragment-appending shape — byte parity between live growth and
+        ;; the merged replay; codex r2 c4).
+        (concat (fikra-face "\e[2m" "· ") (fikra-thought-render (fikra-event-get-str event "text")) "\n"))
       ((string= kind "thought-status")
         (concat (fikra-face "\e[2m" (concat "· " (fikra-event-get-str event "status"))) "\n"))
       ((string= kind "thought-collapse")
@@ -836,6 +839,10 @@ default, inverted by a live TAB toggle on its first line."
         ((string= kind "text-delta")
           (fikra-event-render-fold (cdr events)
             (concat out
+                    ;; An open THOUGHT run closes first (codex r2 c4: a
+                    ;; short streamed thought followed by text joined
+                    ;; lines live while replay split them).
+                    (if (and (not (string= open "")) (not (string= open "text"))) "\n" "")
                     (if (not (string= open "text"))
                       (if (string= (fikra-event-get-str (car events) "speaker") "user")
                         ;; Mockup 8.1's speaker labels (r105): user › /

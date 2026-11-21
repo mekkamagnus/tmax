@@ -54,6 +54,7 @@ const feed = (exprs: string) =>
 const feedCount = (exprs: string) =>
   `(length (fikra/thought/fikra-thought-feed "main" (list ${exprs})))`;
 const textEv = (t: string) => `(list (list "kind" "text-delta") (list "text" "${t}"))`;
+const toolCall = (name: string) => `(list (list "kind" "tool-call") (list "tool" "${name}"))`;
 // Emit THROUGH the accumulator (production wiring: the backend filter
 // feeds, then emits).
 const emit = (eventsExpr: string) =>
@@ -66,24 +67,28 @@ describe("#320 — ordered delivery (the accumulator)", () => {
     expect(String(e(editor, feedCount([delta(0, "a"), delta(0, "b"), delta(1, "c"), delta(0, "late")].join(" "))).value)).toBe("3");
   });
 
-  test("a GAP buffers: the out-of-order delta is held until the missing index fills", () => {
-    // A MID-STREAM gap (block 0 open, block 2 arrives early → held; block
-    // 1 fills → the drain releases the run in order): 3 out.
-    expect(String(e(editor, feedCount([delta(0, "a"), delta(2, "gapped"), delta(1, "fills")].join(" "))).value)).toBe("3");
-    // A FIRST thinking block at ANY raw accepts directly (thinking starts
-    // after text blocks consume indices — no false hold from -1).
-    e(editor, '(fikra/thought/fikra-thought-reset "main")');
-    expect(String(e(editor, feedCount(delta(2, "late-start"))).value)).toBe("1");
+  test("INTERLEAVED indices accept directly (the ordered contract: raw jumps are text blocks in between, never reordering)", () => {
+    // thinking 0 → text (unseen index 1) → thinking 2: BOTH thoughts ride.
+    expect(String(e(editor, feedCount([delta(0, "first"), delta(2, "after-text")].join(" "))).value)).toBe("2");
   });
 
-  test("the 2s timeout closes a stale gap with a status event; late fills become redeliveries", () => {
-    e(editor, feed(delta(0, "open")));
-    e(editor, feed(delta(2, "gapped")));
-    const closed = String(e(editor, `(json-encode (car (fikra/thought/fikra-thought-timeout-check "main" (+ (editor-time-now) 2500))))`).value);
-    expect(closed).toContain("thought-status");
-    expect(closed).toContain("gap");
-    // A late fill for the CLOSED raw index drops (any freshness).
-    expect(String(e(editor, feedCount(delta(2, "late"))).value)).toBe("0");
+  test("MESSAGE-FINAL events reset the context: a tool round mid-turn starts a fresh message (indices restart at 0)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(`${delta(0, "before tool")} ${toolCall("bash")}`));
+    // The next assistant message's block 0 is FRESH after the tool round.
+    e(editor, emit(delta(0, "after tool")));
+    const t = strip(bufferText(editor));
+    expect(t).toContain("before tool");
+    expect(t).toContain("after tool");
+  });
+
+  test("same-chunk delta + complete: the complete drops IN ORDER (deltas earlier in the batch stream first)", () => {
+    e(editor, "(require-module fikra/backend-claude)");
+    const dline = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"one shot"}}}';
+    const cline = '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"one shot"}]}}';
+    const norm = (j: string) => `(fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(j)}"))`;
+    const out = String(e(editor, `(length (fikra/thought/fikra-thought-feed "main" (append ${norm(dline)} ${norm(cline)})))`).value);
+    expect(out).toBe("1"); // the delta rides; the complete drops
   });
 
   test("the watermark + threshold state reset per thread", () => {
@@ -210,18 +215,15 @@ describe("#320 — replay parity + the stream shapes", () => {
     expect(t).toContain("turn two");
   });
 
-  test("STREAMED + COMPLETE suppression: a thinking block whose deltas streamed does not re-render", () => {
+  test("STREAMED + COMPLETE suppression through the feed (cross-chunk)", () => {
     e(editor, "(require-module fikra/backend-claude)");
-    // Deltas for raw block 0 stream...
     e(editor, emit(delta(0, "streamed thought")));
-    // ...then the completed message re-carries it — dropped (the filter's
-    // suppression consults the accumulator's streamed list).
     const complete = '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"streamed thought"}]}}';
-    const dropped = String(e(editor, `(length (fikra/backend-claude/fikra-thought-drop-streamed-completes "main" (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(complete)}"))))`).value);
-    expect(dropped).toBe("0");
-    // An UNSHIPPED block still rides (completed-only path intact).
+    const dropped = String(e(editor, `(length (fikra/thought/fikra-thought-feed "main" (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(complete)}"))))`).value);
+    expect(dropped).toBe("0"); // suppressed
+    // A FRESH context keeps it (completed-only path intact).
     e(editor, '(fikra/thought/fikra-thought-reset "main")');
-    const kept = String(e(editor, `(length (fikra/backend-claude/fikra-thought-drop-streamed-completes "main" (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(complete)}"))))`).value);
+    const kept = String(e(editor, `(length (fikra/thought/fikra-thought-feed "main" (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(complete)}"))))`).value);
     expect(kept).toBe("1");
   });
 
@@ -231,8 +233,18 @@ describe("#320 — replay parity + the stream shapes", () => {
     // production composition.
     const line1 = '{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"thinking_delta","thinking":"ponder"}}}';
     const line2 = '{"type":"stream_event","event":{"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"hi"}}}';
-    const routed = String(e(editor, `(length (fikra/thought/fikra-thought-feed "main" (fikra/backend-claude/fikra-thought-drop-streamed-completes "main" (append (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(line1)}")) (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(line2)}"))))))`).value);
+    const routed = String(e(editor, `(length (fikra/thought/fikra-thought-feed "main" (append (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(line1)}")) (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(line2)}")))))`).value);
     expect(routed).toBe("2"); // the thought-delta AND the text delta ride
+  });
+
+  test("THOUGHT→TEXT transition parity: exact live-final vs replayed bytes (ANSI included)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(delta(0, "brief")));
+    e(editor, emit(textEv("answer")));
+    const live = bufferText(editor);
+    e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(bufferText(editor)).toBe(live); // BYTE parity, faces included
+    expect(strip(live)).toContain("· brief\nassistant › answer");
   });
 
   test("the log carries fragments + markers; dedupe holds on RE-REPLAY", () => {

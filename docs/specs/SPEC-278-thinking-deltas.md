@@ -10,15 +10,17 @@ replay.
 
 ## Design
 
-- **The accumulator** (`fikra/thought.tlisp`): BLOCK-GRANULARITY
-  ordered delivery — a fragment of the OPEN block (== watermark)
-  appends (the stream's ordered contract); a CLOSED block's late delta
-  (< watermark) drops; the next block (watermark+1) flushes the old and
-  opens fresh; anything further is an ordering violation: BUFFERED
-  until the missing block fills (the drain releases the run), with a
-  2s timeout (driven by the #319 transient tick — a real FAEP status
-  event `thought stream gap — block closed` through the normal emit
-  path) that closes the block; late fills at the closed index drop.
+- **The accumulator** (`fikra/thought.tlisp`): delivery keyed on the
+  raw content-block index at RENUMBERED block granularity — the stream
+  is ORDERED per block (its contract): same-raw fragments append to
+  the open block; ANY new raw index opens the next block (raw jumps
+  are text/tool blocks in between — never reordering; holds and gap
+  timeouts were speculative dead weight over an ordered stream and ATE
+  interleaved thinking); an older raw drops (redelivery).
+  MESSAGE-FINAL events (tool rounds, a completed thought, turn
+  boundaries) reset the thinking context — content indices restart
+  per assistant message, and tool rounds start fresh messages
+  mid-turn.
 - **The wire** (`fikra-norm-stream-event`): `thinking_delta` →
   `thought-delta` carrying the CONTENT BLOCK INDEX. Complete thinking
   blocks (`fikra-norm-blocks`) → the existing `thought` kind
@@ -49,7 +51,8 @@ replay.
 
 - [x] Accumulation: multi-delta block renders as one growing line;
       block boundaries; multiline content; closed-block redeliveries
-      drop; gaps buffer + drain; the 2s timeout closes (tested)
+      drop; interleaved indices (thinking-text-thinking) accept;
+      message boundaries reset (tool-round mid-turn tested)
 - [x] Completed-only renders once whole; EMPTY emits nothing; text
       blocks unaffected (the skip logic untouched); interleaved order
       preserved (tested)
