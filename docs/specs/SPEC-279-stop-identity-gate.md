@@ -29,9 +29,18 @@ fallback fires only on a triple-verified pid.
      "Daemon stopped (SIGTERM)", 0; alive → the warning row, 1; any
      triple failure → the owner-changed row, 1.
 - **The wiring** (`cli/stop-sequence-deps.ts`): TmaxClient over the
-  fixed socket (TMAX_SOCKET-aware), lsof/ps/kill; the launcher's
-  `--stop` block prints the rows (stdout informational, stderr
-  failures) and exits with the code.
+  fixed socket (TMAX_SOCKET-aware), lsof/ps/kill — ONE HELD connection
+  carries identity → graceful shutdown; a connected-but-silent server
+  returns null while only ECONNREFUSED throws (the stale branch); an
+  unlink failure reports owner-changed. BOTH `tmax --stop` (launcher)
+  and `tmaxclient --stop` (client/cli.ts) route through the sequence.
+- **The server-side gate**: the shutdown RPC answers
+  `{ok: false, reason: "embedded"}` for an embedded server — the
+  issue's design decision enforced at the RPC itself (any direct
+  client; e2e-asserted). FAIL-CLOSED identity validation: malformed
+  responses → the unresponsive row; only an explicit `daemon` mode ever
+  receives the shutdown RPC. `isDaemonCmdline` matches both spawn
+  forms (`--daemon` or `src/server/server.ts`).
 
 ## Completion criteria
 

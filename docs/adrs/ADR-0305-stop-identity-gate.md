@@ -16,9 +16,14 @@ SIGTERM fallback signaled `lsof`'s first pid with no verification.
 - **The identity gate**: a new `server-identity` RPC answers
   `{mode: "daemon" | "embedded", pid}`. `--stop` asks it BEFORE any
   signal and REFUSES embedded sessions (the informational row, exit 1 —
-  the matrix's one stdout-with-exit-1 exception). The shutdown RPC
-  itself is unchanged (any client may send it); the CLI's `--stop`
-  simply never sends it to an embedded server.
+  the matrix's one stdout-with-exit-1 exception). BOTH CLI surfaces
+  route through the one sequence — `tmax --stop` AND `tmaxclient
+  --stop` (the gate's catch: the latter EXISTED ungated, disproving the
+  issue's "tmaxclient has no --stop" premise; it killed embedded
+  sessions through a second surface). The shutdown RPC ITSELF also
+  refuses embedded servers (`{ok: false, reason: "embedded"}` — the
+  issue's design decision enforced at the RPC, so even a raw direct
+  client cannot stop an embedded session).
 - **Connection outcomes resolve FIRST**: ENOENT → "not running";
   refused → one 250ms recheck (a mid-start daemon) → stale unlink;
   connected-but-silent → unresponsive (NO unlink — the socket is left
@@ -45,5 +50,6 @@ SIGTERM fallback signaled `lsof`'s first pid with no verification.
 
 - Embedded keeping the standard socket still blocks daemon startup —
   remains #235's loud error (unchanged boundary).
-- `tmaxclient` has no `--stop`; any future one routes through this path.
+- `tmaxclient --stop` exists and now routes through this path (the
+  same sequence, its own socket).
 - The RPC method baseline refreezes 24→25 (`server-identity`).
