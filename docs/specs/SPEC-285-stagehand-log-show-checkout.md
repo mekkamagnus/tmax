@@ -37,10 +37,10 @@ behind a confirm.
   `git checkout <sha>` + `detached at <sha>`. The dirty tree is
   GIT's call — no preflight, no force (both outcomes tested). The
   log buffer stays; the status refreshes on next open.
-- **Global bridges**: make-process `:filter`/`:sentinel` names eval
-  in the GLOBAL environment where module fns are invisible —
-  top-level bridge defuns (outside the defmodule) forward to the
-  qualified module fns.
+- **Callbacks are EXPORTED module fns**: the `:filter`/`:sentinel`
+  names eval outside the module's lexical context — an unexported
+  callback is an invisible "Undefined symbol" (the
+  process-callback-exports inventory pins this).
 
 ## Completion criteria
 

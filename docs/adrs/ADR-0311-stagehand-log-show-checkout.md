@@ -49,5 +49,5 @@ findings shaped the implementation and are recorded for the cluster:
 
 - Cherry-pick/revert are FILED OUT (a follow-up issue referencing
   #295's continuation/abort framework) per the issue's OUT OF SCOPE.
-- The bridge pattern is the template for any future module that
-  wants process callbacks.
+- Any future module wanting process callbacks EXPORTS its
+  filter/sentinel fns (the inventory test enforces it).

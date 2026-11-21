@@ -165,14 +165,22 @@ describe("#290 — gate r1 coverage", () => {
       const sha = String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${line})`).value);
       expect(sha).not.toBe("nil"); // never an art row
     }
-    // After the LAST commit, n WRAPS to the first (line 0).
-    const line = Number(String(e(editor, "(cursor-line)").value));
-    expect(line).toBeGreaterThanOrEqual(0);
-    // p from the first wraps to the LAST commit (reachable).
+    // Movement is REAL: the first n leaves line 0.
     e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/log/stagehand-log-next)");
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBeGreaterThan(0);
+    // After the LAST commit, n WRAPS to line 0 (the first commit).
+    for (let i = 0; i < 3; i++) e(editor, "(stagehand/log/stagehand-log-next)");
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(0);
+    // p from line 0 wraps to the LAST commit's line (pin the wrap
+    // landing, not just non-nil).
     e(editor, "(stagehand/log/stagehand-log-prev)");
     const lastLine = Number(String(e(editor, "(cursor-line)").value));
+    expect(lastLine).toBeGreaterThan(0);
     expect(String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${lastLine})`).value)).not.toBe("nil");
+    // One more p from the last moves UP (not stuck).
+    e(editor, "(stagehand/log/stagehand-log-prev)");
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBeLessThan(lastLine);
   });
 
   test("a FAILING log run: the sentinel names the failure and leaves NO buffer", async () => {
@@ -214,6 +222,37 @@ describe("#290 — gate r1 coverage", () => {
     const line = Number(String(e(editor, "(cursor-line)").value));
     expect(String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${line})`).value)).not.toBe("nil");
     expect(String(e(editor, "(buffer-read-only-p)").value)).toBe("true");
+  });
+
+  test("heads > tags on the SAME sha: the branch wins", async () => {
+    commit("c1");
+    execFileSync("git", ["tag", "v9"], { cwd: process.cwd() });
+    execFileSync("git", ["branch", "topic9"], { cwd: process.cwd() }); // same sha as the tag
+    await openLog(editor);
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("c1"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-checkout)");
+    e(editor, '(stagehand/log/stagehand-log-checkout-accept "y")');
+    // The BRANCH class wins over the tag; among branches, the FIRST
+    // in for-each-ref (alphabetical) order = main.
+    expect(String(e(editor, "(editor-status)").value)).toContain("checked out main");
+    expect(git("rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  });
+
+  test("refs/remotes: a remote-only ref detaches but is NAMED", async () => {
+    commit("c1");
+    commit("c2");
+    // A remote ref without a real remote: create the ref directly.
+    execFileSync("git", ["update-ref", "refs/remotes/origin/feature", "HEAD~1"], { cwd: process.cwd() });
+    await openLog(editor);
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("c1"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-checkout)");
+    e(editor, '(stagehand/log/stagehand-log-checkout-accept "y")');
+    expect(String(e(editor, "(editor-status)").value)).toContain("checked out origin/feature");
+    expect(git("rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD"); // remote refs detach
   });
 
   test("refs/tags precedence: a TAGGED mid-branch commit checks out the TAG name", async () => {

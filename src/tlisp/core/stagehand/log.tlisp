@@ -142,8 +142,7 @@ GENERATION GUARD drops chunks from any run that is no longer current."
                 (concat (stagehand-log-render-line stagehand-log-partial) "\n"))
               (setq stagehand-log-line-counter (+ stagehand-log-line-counter 1))))
           (setq stagehand-log-partial "")
-          (if (string= (buffer-current) (stagehand-log-buffer-name))
-            (buffer-set-read-only t))
+          (buffer-set-read-only t (stagehand-log-buffer-name))
           (editor-set-status
             (concat "Stagehand: log — "
               (number-to-string (length stagehand-log-shas)) " commits")))))))
