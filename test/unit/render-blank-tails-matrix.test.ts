@@ -94,7 +94,7 @@ function runCase(lines: string[], wrap: boolean, rows: number, cols: number,
   // The wire per daemon path (renderHeightForTerminalSize: rows - 2).
   const wire =
     path === "keypress" ? editorStateToJson(state, renderHeight, cols)
-    : path === "render-state" ? editorStateToJson(state, renderHeight)
+    : path === "render-state" ? editorStateToJson(state, renderHeight, cols) // the handler passes the frame width
     : editorStateToJson(state);
   const clientState = jsonToEditorState(wire as any);
   const frame = captureFrame(clientState, cols, rows).map(stripAnsi);
@@ -248,14 +248,16 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     for (let i = 0; i < 99; i++) lines.push(i < 21 ? `${"w".repeat(200)} ${i}` : `L${i} ${"z".repeat(84)}`);
     lines.push("L99 TAIL end");
     const state = makeState(lines, true, 21, 22);
-    const frame = captureFrame(state, 100, 24);
-    const flat = frame.join("\n");
-    // The frame holds REAL content near its end (no 12-blank-row tail):
-    // count trailing blank rows.
+    // THROUGH THE WIRE (codex r3 c3): serialize → deserialize → capture —
+    // an undersized window blanks the tail exactly as live.
+    const view = jsonToEditorState(editorStateToJson(state, 22, 100));
+    const frame = captureFrame(view, 100, 24);
+    // The BUFFER AREA (all rows but the status row): no long blank tail.
+    const bufRows = frame.slice(0, frame.length - 1);
     let blanks = 0;
-    for (let i = frame.length - 1; i >= 0 && frame[i]!.trim() === ""; i--) blanks++;
-    expect(blanks).toBeLessThan(4); // gutter rows may pad ≤ the status area
-    expect(flat).toContain("L2");
+    for (let i = bufRows.length - 1; i >= 0 && bufRows[i]!.trim() === ""; i--) blanks++;
+    expect(blanks).toBeLessThan(4);
+    expect(frame.join("\n")).toContain("L2");
   });
 
   test("#321 codex r2: the cursor on the SECOND wrapped row of its line lands there", () => {
@@ -268,6 +270,26 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     expect(row).toBeGreaterThanOrEqual(2); // deep in the wrapped tail
     const col = getWrappedCursorColumn(withCol as any, 100);
     expect(col).toBeLessThan(100); // within the segment
+  });
+
+  test("#321 codex r3: a boundary-exact column maps to the NEXT segment; the column is gutter-absolute", () => {
+    // One line wrapping to 2 segments at cw≈95: 150 chars total.
+    const state = makeState([`${"b".repeat(150)}`, "s"], true, 0, 22);
+    const at = (col: number) => {
+      const st = { ...state, cursorPosition: { line: 0, column: col } };
+      return [getWrappedCursorRow(st as any, 22, 100), getWrappedCursorColumn(st as any, 100)] as const;
+    };
+    // Deep in segment 0 → row 0.
+    expect(at(10)[0]).toBe(0);
+    // EXACTLY the boundary (cw=100, gutter off — the renderer starts
+    // the next row there).
+    const [r1, c1] = at(100);
+    expect(r1).toBe(1);
+    expect(c1).toBe(0);
+    // Well past → row 1, column within the segment.
+    const [r2, c2] = at(120);
+    expect(r2).toBe(1);
+    expect(c2).toBe(20);
   });
 
 /** Exposed for the fix-phase test + recording: the matrix table. */

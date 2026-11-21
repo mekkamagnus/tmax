@@ -147,6 +147,21 @@ export function getVisibleViewportLeft(state: EditorState, contentWidth: number)
 }
 
 /**
+ * #321 (codex r3): map a logical column into the wrapped segments —
+ * cumulative visual widths, boundary-exact prefers the NEXT segment
+ * (the renderer starts the next row there); returns [row, column].
+ */
+function wrappedSegOf(segs: string[], column: number): [number, number] {
+  let acc = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const w = stringWidth(segs[i]!);
+    if (column < acc + w) return [i, column - acc]; // strict: boundary-exact → the NEXT segment
+    acc += w;
+  }
+  return [segs.length - 1, Math.max(0, column - (acc - stringWidth(segs[segs.length - 1]!)))];
+}
+
+/**
  * #321 (codex): the hardware cursor's row in the WRAPPED layout — the
  * same wrapped-top math the renderer advances by, then the cursor's
  * wrapped-row offset within [top, cursor]. Wrap off → the logical clamp.
@@ -168,19 +183,8 @@ export function getWrappedCursorRow(
   const top = getWrappedViewportTop(state, bufferHeight, width);
   let row = 0;
   for (let ln = top; ln < state.cursorPosition.line && ln < totalLines; ln++) row += rowsOf(ln);
-  // The cursor line's OWN wrapped-row offset: the column maps into the
-  // wrapped segments (the renderer's word-boundary wrap — walk the same
-  // segments until the column fits; codex r2 c2: a cursor on the second
-  // wrapped row landed on the first).
-  const cursorText = getLine(state, state.cursorPosition.line) ?? "";
-  const segs = wrapLine(cursorText, cw);
-  let col = state.cursorPosition.column;
-  let segIdx = 0;
-  while (segIdx < segs.length - 1 && col > stringWidth(segs[segIdx]!)) {
-    col -= stringWidth(segs[segIdx]!) + 1; // the break consumes a boundary
-    segIdx++;
-    row++;
-  }
+  const segs = wrapLine(getLine(state, state.cursorPosition.line) ?? "", cw);
+  row += wrappedSegOf(segs, state.cursorPosition.column)[0];
   return Math.max(0, Math.min(bufferHeight - 1, row));
 }
 
@@ -191,15 +195,10 @@ export function getWrappedCursorColumn(state: EditorState, width: number): numbe
   const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
   const cw = Math.max(1, width - gw);
-  const cursorText = getLine(state, state.cursorPosition.line) ?? "";
-  const segs = wrapLine(cursorText, cw);
-  let col = state.cursorPosition.column;
-  let segIdx = 0;
-  while (segIdx < segs.length - 1 && col > stringWidth(segs[segIdx]!)) {
-    col -= stringWidth(segs[segIdx]!) + 1;
-    segIdx++;
-  }
-  return col;
+  const segs = wrapLine(getLine(state, state.cursorPosition.line) ?? "", cw);
+  // The ABSOLUTE screen column: gutter + the within-segment offset (the
+  // rendered frame prefixes every row with the gutter; codex r3 c1).
+  return gw + wrappedSegOf(segs, state.cursorPosition.column)[1];
 }
 
 export function getCursorScreenOffset(state: EditorState, bufferHeight: number, contentWidth: number): { row: number; col: number } {
