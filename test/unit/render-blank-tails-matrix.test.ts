@@ -332,6 +332,19 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     expect(frame.join("\n")).toContain("cursor-line-here"); // already stripped
   });
 
+  test("#321 codex r7: wide characters — the cursor's VISUAL column maps across the wrap boundary", () => {
+    // CJK chars are 2 cells: a cursor after 界 is logical 1, visual 2.
+    // A line of wide chars wrapping at cw≈100: the cursor deep in the
+    // SECOND segment must land on row 1 at the VISUAL offset.
+    const wide = "界".repeat(80); // 160 visual cells → 2 segments
+    const state = makeState([wide, "s"], true, 0, 22);
+    const cursorAfterSome = { ...state, cursorPosition: { line: 0, column: 60 } }; // visual 120 → row 1
+    const row = getWrappedCursorRow(cursorAfterSome as any, 22, 100);
+    expect(row).toBe(1);
+    const col = getWrappedCursorColumn(cursorAfterSome as any, 100);
+    expect(col).toBe(120 - 100); // the visual offset within segment 1
+  });
+
 /** Exposed for the fix-phase test + recording: the matrix table. */
 export function matrixTable(): string {
   return ["| N | rows x cols | wrap | path | tail | blank-tail-rows |",
