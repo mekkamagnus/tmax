@@ -274,6 +274,22 @@ describe("#290 — gate r1 coverage", () => {
     expect(git("describe", "--tags", "--exact-match")).toContain("amb");
   });
 
+  test("core.abbrev=4 repos still record commits (codex r3 — the %h length trap)", async () => {
+    execFileSync("git", ["config", "core.abbrev", "4"], { cwd: process.cwd() });
+    commit("short-hash commit");
+    e(editor, "(stagehand/status/stagehand-status)");
+    e(editor, "(stagehand/log/stagehand-log-open)");
+    for (let i = 0; i < 60; i++) {
+      if (String(e(editor, "(editor-status)").value).includes("commits")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(Number(String(e(editor, "(stagehand/log/stagehand-log-commit-count)").value))).toBe(1);
+    expect(strip(bufferText(editor))).toContain("short-hash commit");
+    // The recorded sha is the --abbrev=10 form (>= 10 chars).
+    const sha = String(e(editor, "(stagehand/log/stagehand-log-sha-at-line 0)").value);
+    expect(sha.length).toBeGreaterThanOrEqual(10);
+  });
+
   test("a branch LITERALLY NAMED tags/<tag> cannot shadow the tag (codex r2 #1)", async () => {
     commit("target");
     commit("moved");

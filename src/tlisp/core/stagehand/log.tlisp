@@ -94,7 +94,13 @@ g does the same). Unborn → 'no commits yet'; no repo → a status."
         (stagehand-log-ensure-keymap)
         (editor-set-mode "normal")
         (let ((pid (make-process
+                     ;; --abbrev=10 pins %h to >=10 hex chars —
+                     ;; core.abbrev can legally produce 4-6, which
+                     ;; the >6 sha classifier would silently drop
+                     ;; (codex r3's core.abbrev=4 repro: zero commits
+                     ;; recorded, the whole log dead).
                      :command (list "git" "log" "--graph"
+                                    "--abbrev=10"
                                     (concat "--format=%h" (stagehand-us) "%d" (stagehand-us) "%s")
                                     "--color=never")
                      :cwd root
