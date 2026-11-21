@@ -1803,6 +1803,21 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           }
         });
 
+        // #291: EOF for stdin consumers (`git apply -` reads until
+        // EOF — process-write alone leaves it waiting forever).
+        ops.set('process-close-stdin', (args: TLispValue[]): Either<AppError, TLispValue> => {
+          if (args.length !== 1) return Either.left(createValidationError('FormatError', 'process-close-stdin requires 1 argument: pid'));
+          if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'pid must be a number'));
+          const entry = processTable.get(Number(args[0]!.value));
+          if (!entry) return Either.left(createValidationError('FormatError', `No process with pid ${args[0]!.value}`));
+          try {
+            (entry.stdin as { end: () => void }).end();
+            return Either.right(createNil());
+          } catch (e) {
+            return Either.left(createValidationError('FormatError', `process-close-stdin failed: ${e instanceof Error ? e.message : String(e)}`));
+          }
+        });
+
         ops.set('process-write', (args: TLispValue[]): Either<AppError, TLispValue> => {
           if (args.length < 2) return Either.left(createValidationError('FormatError', 'process-write requires 2 arguments: pid, data'));
           if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'pid must be a number'));

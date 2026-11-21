@@ -407,7 +407,7 @@ the buffer is untouched."
       (concat " " (stagehand-shq (stagehand-literal-pathspec (nth 4 pair))))
       "")))
 
-(defun stagehand-diff-run (side paths-arg title)
+(defun stagehand-diff-run (side paths-arg title &optional (paths nil))
   (let* ((flag (if (string= side "cached") " --cached" ""))
          (res (stagehand-git (concat "diff --no-color" flag paths-arg) stagehand-root))
          (out (car res))
@@ -417,8 +417,11 @@ the buffer is untouched."
       (editor-set-status
         (concat "Stagehand: git diff failed (" (number-to-string exit)
                 ") " (stagehand-first-line err)))
+      ;; The view carries side/root/paths so the hunk ops know which
+      ;; side they act on and where to apply (#291).
       (stagehand/diff/stagehand-diff-open out
-        (concat "Stagehand-Diff: " title)))))
+        (concat "Stagehand-Diff: " title)
+        side stagehand-root paths))))
 
 (defun stagehand-status-quit ()
   "q — close the buffer. buffer-kill's Editor path picks the

@@ -3,7 +3,12 @@
           stagehand-diff-face stagehand-diff-face-line
           stagehand-diff-buffer-name stagehand-diff-open
           stagehand-diff-next stagehand-diff-prev
-          stagehand-diff-quit stagehand-diff-hunk-lines)
+          stagehand-diff-quit stagehand-diff-hunk-lines
+          stagehand-diff-hunk-patch stagehand-diff-stage-hunk
+          stagehand-diff-unstage-hunk stagehand-diff-discard-hunk
+          stagehand-diff-table stagehand-diff-accept
+          stagehand-diff-apply-filter stagehand-diff-apply-sentinel
+          stagehand-diff-apply-exit-get stagehand-diff-side-get)
 
 ;; #289 — Stagehand T0: the diff GRAMMAR + faces. `git diff
 ;; --no-color` output is PARSED into line classes (never ANSI
@@ -17,6 +22,20 @@
 
 (defvar stagehand-diff-hunks (list)
   "The buffer line indices of hunk-header lines (n/p targets).")
+(defun stagehand-diff-side-get ()
+  "The view's current side (a VALUE getter)."
+  stagehand-diff-side)
+
+(defvar stagehand-diff-raw nil
+  "The raw `git diff` TEXT the view rendered (hunk extraction +
+  patch reconstruction read this — never the faced buffer).")
+(defvar stagehand-diff-side "worktree"
+  "The view's side: worktree (git diff) | cached (git diff --cached)
+  — which hunk ops apply.")
+(defvar stagehand-diff-root nil
+  "The repo root the diff came from (the apply cwd).")
+(defvar stagehand-diff-paths nil
+  "The diff's paths (the apply -- arguments).")
 
 (major-mode-register "stagehand-diff" '() nil)
 (major-mode-doc "stagehand-diff" "Stagehand diff view — n/p navigate hunk headers (wrap), q closes")
@@ -121,14 +140,20 @@ context passes through bare)."
 ;; ── the view ────────────────────────────────────────────────────────
 (defun stagehand-diff-buffer-name () "*Stagehand-Diff*")
 
-(defun stagehand-diff-open (text title)
+(defun stagehand-diff-open (text title &optional (side "worktree" side-supplied-p) (root nil root-supplied-p) (paths nil paths-supplied-p))
   "Render the parsed, FACED diff into *Stagehand-Diff* and switch to
 it. TEXT is raw `git diff --no-color` output; TITLE rides the first
-line (the path or section the diff is for)."
+line. SIDE ('worktree'|'cached') selects which hunk ops apply; ROOT
+is the apply cwd; PATHS the diff's -- arguments (nil = the whole
+diff)."
   (let ((pairs (stagehand-diff-parse text)))
     (if (and (null (cdr pairs)) (string= (car (car pairs)) "context") (string= (car (cdr (car pairs))) ""))
       (editor-set-status "Stagehand: empty diff")
       (progn
+        (setq stagehand-diff-raw text)
+        (setq stagehand-diff-side side)
+        (setq stagehand-diff-root root)
+        (setq stagehand-diff-paths paths)
         (stagehand-diff-ensure-buffer)
         (major-mode-set "stagehand-diff")
         (editor-set-mode "normal")
@@ -202,6 +227,230 @@ line (the path or section the diff is for)."
   "q — close (buffer-kill's Editor path picks the recency survivor)."
   (buffer-kill (stagehand-diff-buffer-name)))
 
+;; ── hunk extraction + patch reconstruction (#291) ───────────────────
+(defun stagehand-diff-hunk-patch (idx)
+  "The APPLYABLE patch for hunk IDX (0-based, in stream order): the
+source diff's FILE HEADER (diff --git/index/---/+++ — the block
+since the last 'diff --git') verbatim + the hunk verbatim (@@ header
++ body + the no-newline marker carried WITH it)."
+  (stagehand-diff-collect (stagehand-diff-parse (or stagehand-diff-raw ""))
+    (list) 0 idx nil (list)))
+
+(defun stagehand-diff-collect (pairs header count target cur out)
+  ;; Walk the CLASSIFIED pairs. COUNT is the number of hunk headers
+  ;; seen so far; CUR is the current hunk's accumulating lines (nil
+  ;; between hunks).
+  (if (null pairs)
+    (string-join "\n"
+      (append header (if cur (reverse cur) out)))
+    (let* ((pair (car pairs))
+           (cls (car pair))
+           (line (car (cdr pair))))
+      (cond
+        ((string= cls "file-header")
+          ;; A header line: part of the current file's header block
+          ;; (before any hunk) — or the NEXT file's start (a hunk
+          ;; ended). 'diff --git' resets; index/---/+++ extend.
+          (if cur
+            ;; Inside a hunk: a new file header ends it.
+            (if (= count (- target 1))
+              (string-join "\n" (append header (reverse cur)))
+            (stagehand-diff-collect (cdr pairs) header count target nil (list)))
+            (if (string-prefix-p "diff --git " line)
+              (stagehand-diff-collect (cdr pairs) (list line) count target nil (list))
+              (stagehand-diff-collect (cdr pairs) (append header (list line)) count target nil (list)))))
+        ((string= cls "hunk-header")
+          (if (= count target)
+            ;; The TARGET hunk starts.
+            (stagehand-diff-collect (cdr pairs) header (+ count 1) target (list line) (list))
+            (if (and cur (= (- count 1) target))
+              (string-join "\n" (append header (reverse cur)))
+              (stagehand-diff-collect (cdr pairs) header (+ count 1) target nil (list)))))
+        ((string= cls "meta")
+          (if (string-prefix-p (hex-decode "5c204e6f") line)
+            ;; The no-newline marker rides WITH its hunk.
+            (if (and cur (= (- count 1) target))
+              (stagehand-diff-collect (cdr pairs) header count target (cons line cur) (list))
+              (stagehand-diff-collect (cdr pairs) header count target cur out))
+            ;; Other meta (rename/mode/binary): ends any hunk.
+            (if (and cur (= (- count 1) target))
+              (string-join "\n" (append header (reverse cur)))
+              (stagehand-diff-collect (cdr pairs) header count target nil (list)))))
+        (t
+          ;; add/remove/context: hunk BODY.
+          (if (and cur (= (- count 1) target))
+            (stagehand-diff-collect (cdr pairs) header count target (cons line cur) (list))
+            (stagehand-diff-collect (cdr pairs) header count target cur out)))))))
+
+;; ── the hunk ops ────────────────────────────────────────────────────
+(defun stagehand-diff-stage-hunk ()
+  "s (worktree view) — stage the hunk at point: git apply --cached -
+with the reconstructed patch on stdin."
+  (stagehand-diff-apply-hunk "stage"))
+
+(defun stagehand-diff-unstage-hunk ()
+  "u (cached view) — unstage the hunk at point: git apply --cached
+-R -."
+  (stagehand-diff-apply-hunk "unstage"))
+
+(defun stagehand-diff-discard-hunk ()
+  "D (worktree view) — discard the hunk at point in the WORKTREE:
+git apply -R - (a worktree mutation, NOT an index op). Confirms via
+the n-first y/n."
+  (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
+    (if (null idx)
+      (editor-set-status "Stagehand: no hunk at point")
+      (if (not (string= stagehand-diff-side "worktree"))
+        (editor-set-status "Stagehand: D discards worktree hunks")
+        (progn
+          (setq stagehand-diff-pending idx)
+          (completing-read
+            (concat "Discard this hunk in the worktree? (y/n)")
+            "stagehand/diff/stagehand-diff-table"
+            nil t "" "stagehand-diff-hist"
+            "stagehand/diff/stagehand-diff-accept"))))))
+
+(defvar stagehand-diff-pending nil
+  "The hunk idx awaiting the discard y/n.")
+
+(defun stagehand-diff-table (input action)
+  "n FIRST (the #287 lesson: a bare Enter must CANCEL)."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "n" "display" "n" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "y" "display" "y" "annotation" "" "metadata" (hashmap)))))
+
+(defun stagehand-diff-accept (answer)
+  (if (string= answer "y")
+    (let ((idx stagehand-diff-pending))
+      (setq stagehand-diff-pending nil)
+      (if idx (stagehand-diff-apply-hunk-at idx "discard")
+        (editor-set-status "Stagehand: no discard pending")))
+    (progn
+      (setq stagehand-diff-pending nil)
+      (editor-set-status "Stagehand: discard cancelled"))))
+
+(defun stagehand-diff-hunk-idx-at-cursor ()
+  ;; The 0-based hunk index whose HEADER is at/above the cursor (the
+  ;; hunk the cursor is inside).
+  (let ((hunks stagehand-diff-hunks) (best nil) (i 0))
+    (while (< i (length hunks))
+      (if (<= (nth i hunks) (cursor-line))
+        (setq best i)
+        (setq i (length hunks)))
+      (setq i (+ i 1)))
+    best))
+
+(defun stagehand-diff-apply-hunk (op)
+  ;; Key availability FIRST (the issue: a key that does not apply in
+  ;; the current view no-ops with a status).
+  (cond
+    ((and (string= op "stage") (not (string= stagehand-diff-side "worktree")))
+      (editor-set-status "Stagehand: s stages worktree hunks (open with d)"))
+    ((and (string= op "unstage") (not (string= stagehand-diff-side "cached")))
+      (editor-set-status "Stagehand: u unstages cached hunks"))
+    (t
+      (let ((refusal (stagehand-diff-refusal-reason)))
+        (if refusal
+          (editor-set-status (concat "Stagehand: " refusal))
+          (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
+            (if (null idx)
+              (editor-set-status "Stagehand: no hunk at point")
+              (stagehand-diff-apply-hunk-at idx op))))))))
+
+(defun stagehand-diff-apply-hunk-at (idx op)
+  (let* ((flags (cond
+                      ((string= op "discard") (list "-R"))
+                      ((string= op "unstage") (list "--cached" "-R"))
+                      (t (list "--cached"))))
+             ;; git apply takes the PATCH (here '-') — no pathspec
+             ;; args (the patch itself carries the paths; `--` after
+             ;; the patch would parse as a second patch). Each flag
+             ;; is its own argv element ("--cached -R" as ONE string
+             ;; was a usage error; exit 129).
+             (argv (append (list "git" "apply") (append flags (list "-"))))
+             (patch (stagehand-diff-hunk-patch idx))
+             (pid (make-process
+                    :command argv
+                    :cwd (or stagehand-diff-root ".")
+                    :filter "stagehand/diff/stagehand-diff-apply-filter"
+                    :sentinel "stagehand/diff/stagehand-diff-apply-sentinel")))
+        (setq stagehand-diff-apply-err nil)
+        (setq stagehand-diff-apply-exit nil)
+        (setq stagehand-diff-apply-op op)
+        (process-write pid (concat patch "\n"))
+        (process-close-stdin pid)
+        (editor-set-status "Stagehand: applying hunk…")))
+
+(defun stagehand-diff-refusal-reason ()
+  ;; Binary / rename-copy / mode-only hunks REFUSE (named, no-op).
+  (cond
+    ((stagehand-diff-patch-has "Binary files ") "binary files not supported (hunk ops)")
+    ((stagehand-diff-patch-has "rename from ") "rename hunks: use file-level ops (#287)")
+    ((stagehand-diff-patch-has "rename to ") "rename hunks: use file-level ops (#287)")
+    ((stagehand-diff-patch-has "copy from ") "copy hunks: use file-level ops (#287)")
+    ((stagehand-diff-patch-has "copy to ") "copy hunks: use file-level ops (#287)")
+    ((and (stagehand-diff-patch-has "old mode ") (stagehand-diff-patch-has "new mode "))
+      "mode-only changes not supported")
+    (t nil)))
+
+(defun stagehand-diff-patch-has (needle)
+  (stagehand-diff-scan-for (string-split (or stagehand-diff-raw "") "\n") needle))
+
+(defun stagehand-diff-scan-for (lines needle)
+  (if (null lines)
+    nil
+    (if (string-prefix-p needle (car lines))
+      t
+      (stagehand-diff-scan-for (cdr lines) needle))))
+
+(defvar stagehand-diff-apply-err nil "The last apply's stderr.")
+(defvar stagehand-diff-apply-op nil "The in-flight apply's op.")
+
+(defun stagehand-diff-apply-exit-get ()
+  "The last apply's exit code (a VALUE getter — tests poll this)."
+  stagehand-diff-apply-exit)
+(defvar stagehand-diff-apply-exit nil
+  "The last apply's exit code (tests poll this).")
+
+(defun stagehand-diff-apply-sentinel (pid code)
+  "The apply's exit: 0 → refresh the view in place + 'hunk applied';
+≠ 0 → the failure names exit + stderr + the refresh-and-retry hint
+(a stale diff lands here — the view does NOT auto-retry)."
+  (setq stagehand-diff-apply-exit code)
+  (if (and (numberp code) (= code 0))
+    (progn
+      (stagehand-diff-refresh-view)
+      (editor-set-status "Stagehand: hunk applied"))
+    (editor-set-status
+      (concat "Stagehand: apply failed ("
+        (number-to-string code) ") "
+        (stagehand-diff-first-line stagehand-diff-apply-err)
+        " — refresh and retry"))))
+
+(defun stagehand-diff-first-line (s)
+  (let ((l (car (string-split (concat (or s "") "\n") "\n"))))
+    (if (and l (> (length l) 0)) l "")))
+
+(defun stagehand-diff-refresh-view ()
+  ;; Re-render in place (fold/nav state resets with the new hunks —
+  ;; the #289 contract: hunks re-derived from the fresh diff).
+  (let* ((flag (if (string= stagehand-diff-side "cached") " --cached" ""))
+         (res (shell-exec-argv
+                (append (list "git" "diff" "--no-color" flag)
+                  (if stagehand-diff-paths
+                    (append (list "--") stagehand-diff-paths)
+                    (list)))
+                (or stagehand-diff-root "."))))
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      (stagehand-diff-open (car res)
+        (concat "Stagehand-Diff: " (or (car stagehand-diff-paths) "diff"))
+        stagehand-diff-side stagehand-diff-root stagehand-diff-paths)
+      (editor-set-status "Stagehand: refresh failed"))))
+
+
+
 (defun stagehand-diff-ensure-buffer ()
   (if (not (string= (buffer-current) (stagehand-diff-buffer-name)))
     (progn
@@ -225,6 +474,9 @@ line (the path or section the diff is for)."
         (editor/keymaps/keymap-set-key kmap "n" "(stagehand/diff/stagehand-diff-next)")
         (editor/keymaps/keymap-set-key kmap "p" "(stagehand/diff/stagehand-diff-prev)")
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/diff/stagehand-diff-quit)")
+        (editor/keymaps/keymap-set-key kmap "s" "(stagehand/diff/stagehand-diff-stage-hunk)")
+        (editor/keymaps/keymap-set-key kmap "u" "(stagehand/diff/stagehand-diff-unstage-hunk)")
+        (editor/keymaps/keymap-set-key kmap "D" "(stagehand/diff/stagehand-diff-discard-hunk)")
         (editor/keymaps/buffer-set-keymap (stagehand-diff-buffer-name) kmap))))
   t)
 
