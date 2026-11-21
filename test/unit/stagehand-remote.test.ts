@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
@@ -354,8 +354,12 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
     statusOf();
     e(editor, "(stagehand/remote/stagehand-remote-push)");
-    await new Promise((r) => setTimeout(r, 600));
-    expect(String(e(editor, "(stagehand/remote/stagehand-remote-alive-p)").value)).toBe("true");
+    // Wait for the HOOK's beat (the trap is installed — a fixed-time
+    // wait raced slow hook starts).
+    for (let i = 0; i < 80 && !existsSync(beat); i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(existsSync(beat)).toBe(true);
     e(editor, "(stagehand/remote/stagehand-remote-cancel)"); // 1st: SIGINT
     expect(String(e(editor, "(editor-status)").value)).toContain("SIGINT sent");
     await new Promise((r) => setTimeout(r, 400));

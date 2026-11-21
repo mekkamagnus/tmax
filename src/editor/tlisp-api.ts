@@ -1912,6 +1912,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                   ctx.evalTlisp(`(${sentinelName} ${pid} ${code})`);
                 }
                 processTable.delete(pid);
+                if (ptyPgidFile) {
+                  try { require('node:fs').unlinkSync(ptyPgidFile); } catch { /* gone */ }
+                }
               };
               if (signum > 0 && childLives()) {
                 const wrapperPid = (proc as { pid?: number }).pid;
