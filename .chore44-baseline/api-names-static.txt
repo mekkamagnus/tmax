@@ -3,6 +3,7 @@
 # rebase re-verify; also carries #318's editor-transient-timer-start/-stop).
 # #319: 433 -> 434 — editor-time-now (the transient clock primitive).
 # #287: 434 -> 435 — shell-exec-argv (the argv-list exec: no shell in the path).
+# #291: 435 -> 436 — process-close-stdin (the EOF primitive; git apply - reads until EOF).
 add-hook
 append-file
 aref
@@ -303,6 +304,7 @@ plugin-review-list
 plugin-search
 plugin-show
 plugin-submit
+process-close-stdin
 process-write
 project-detect-root
 project-files-walk
