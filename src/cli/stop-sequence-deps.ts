@@ -40,8 +40,12 @@ export function realStopDeps(socket: string): StopDeps {
         const r = await c.sendRequest("server-identity", {}, 1000).catch(() => null);
         if (!r || typeof r !== "object") return null;
         return { mode: r.mode as "daemon" | "embedded", pid: Number(r.pid) };
-      } catch {
-        throw new Error("refused");
+      } catch (err) {
+        // PRESERVE the error kind (codex r2 c2): the Node error's code
+        // rides through untouched — the sequence's isRefusal admits
+        // ONLY ECONNREFUSED to the stale-socket branch; timeouts and
+        // permission errors report without unlinking.
+        throw err;
       }
     },
     requestShutdown: async () => {
@@ -55,7 +59,7 @@ export function realStopDeps(socket: string): StopDeps {
       try { c?.close(); } catch { /* dead */ }
     },
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    unlinkSocket: () => { try { unlinkSync(socket); } catch { /* best-effort */ } },
+    unlinkSocket: () => { try { unlinkSync(socket); return !existsSync(socket); } catch { return false; } },
     recheckConnect: async () => {
       try { await connect(); return true; } catch { return false; }
     },
@@ -75,6 +79,10 @@ export function realStopDeps(socket: string): StopDeps {
     pidAlive: (pid) => {
       try { process.kill(Number(pid), 0); return true; } catch { return false; }
     },
-    isDaemonCmdline: (cmd) => cmd.includes("--daemon"),
+    // The daemon invocation in BOTH spawn forms: the flag (--daemon) or
+    // the daemon ENTRY (source-mode spawns `bun .../src/server/server.ts`
+    // with no flag — verify-gate r1: the flag-only match made the dev
+    // path's step-5 escalation unreachable).
+    isDaemonCmdline: (cmd) => /(--daemon|src[\\/]server[\\/]server\.ts)/.test(cmd),
   };
 }

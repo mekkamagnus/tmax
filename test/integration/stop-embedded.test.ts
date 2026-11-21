@@ -75,6 +75,12 @@ describe("#276 e2e — embedded session survives --stop (the original repro)", (
     expect(stop.stdout ?? "").toContain("embedded tmax session running (not stopped)");
     expect(stop.status).toBe(1);
 
+    // 3b) The SERVER-side gate: a RAW shutdown RPC (any direct client)
+    //     is REFUSED for embedded — ok:false, and the session survives.
+    const rawStop = await rpc(SOCKET, "shutdown", {}) as { result?: { ok?: boolean; reason?: string } };
+    expect(rawStop?.result?.ok).toBe(false);
+    expect(rawStop?.result?.reason).toBe("embedded");
+
     // 4) The session is STILL USABLE: the identity RPC still answers.
     const ident2 = await rpc(SOCKET, "server-identity", {}) as { result?: { mode?: string } };
     expect(ident2?.result?.mode).toBe("embedded");
@@ -82,13 +88,14 @@ describe("#276 e2e — embedded session survives --stop (the original repro)", (
     const kp = await rpc(SOCKET, "keypress", { key: "l" }) as { result?: { mode?: string } };
     expect(kp?.result).toBeDefined();
 
-    // 5) The quit half: 'q' THROUGH THE SOCKET (the channel a real client
-    //    types through) triggers the editor's quit path → process exit 0.
-    child.stdin!.end();
-    // :q<CR> (the documented quit; plain q is the macro-record prefix).
+    // 5) The quit half: ':q<CR> THROUGH THE SOCKET — the channel a real
+    //    client types through (the documented quit; plain q is the
+    //    macro-record prefix) — triggers the editor's quit path → exit 0.
+    //    stdin is ended AFTER, so the exit attributes to the keys.
     await rpc(SOCKET, "keypress", { key: ":" });
     await rpc(SOCKET, "keypress", { key: "q" });
     await rpc(SOCKET, "keypress", { key: "Enter" });
+    child.stdin!.end();
     const exitDeadline = Date.now() + 8000;
     while (child.exitCode === null && Date.now() < exitDeadline) await new Promise((r) => setTimeout(r, 100));
     expect(child.exitCode).toBe(0);

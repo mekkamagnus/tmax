@@ -18,7 +18,7 @@ const base: StopDeps = {
   requestShutdown: async () => {},
   close: () => {},
   sleep: async () => {},
-  unlinkSocket: () => {},
+  unlinkSocket: () => true,
   recheckConnect: async () => false,
   socketGone: () => true,
   pidsOnSocket: () => ["100"],
@@ -43,7 +43,7 @@ describe("#276 — the 8-row output matrix", () => {
     const o = await run({
       identity: async () => { throw new Error("refused"); },
       recheckConnect: async () => false,
-      unlinkSocket: () => { unlinked = true; },
+      unlinkSocket: () => { unlinked = true; return true; },
     });
     expect(row(o)).toEqual({ stream: "stdout", line: STOP_LINES.staleRemoved });
     expect(o.exitCode).toBe(0);
@@ -71,7 +71,7 @@ describe("#276 — the 8-row output matrix", () => {
     let unlinked = false;
     const o = await run({
       identity: async () => null,
-      unlinkSocket: () => { unlinked = true; },
+      unlinkSocket: () => { unlinked = true; return true; },
     });
     expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.unresponsive });
     expect(o.exitCode).toBe(1);
@@ -143,6 +143,36 @@ describe("#276 — the verification triple (replacement at each boundary)", () =
 
   test("cmdline missing (pid gone) → not signaling", async () => {
     const o = await run({ socketGone: () => false, cmdline: () => null });
+    expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.ownerChanged });
+  });
+
+  test("MALFORMED identity (fail closed) → unresponsive; a non-daemon mode never reaches shutdown", async () => {
+    // A garbage mode casts to 'daemon' downstream — the sequence must
+    // reject it BEFORE any RPC (codex r2 c1).
+    let shutdown = false;
+    const o = await run({
+      identity: async () => ({ mode: "bogus" as "daemon", pid: 1 }),
+      requestShutdown: async () => { shutdown = true; },
+    });
+    expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.unresponsive });
+    expect(shutdown).toBe(false);
+  });
+
+  test("a NON-refusal connect error (timeout/permission) → unresponsive, NO unlink", async () => {
+    let unlinked = false;
+    const o = await run({
+      identity: async () => { const e = new Error("connect ETIMEDOUT") as Error & { code?: string }; e.code = "ETIMEDOUT"; throw e; },
+      unlinkSocket: () => { unlinked = true; return true; },
+    });
+    expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.unresponsive });
+    expect(unlinked).toBe(false);
+  });
+
+  test("unlink FAILURE on a confirmed stale socket → owner-changed row (never claim removal)", async () => {
+    const o = await run({
+      identity: async () => { const e = new Error("connect ECONNREFUSED") as Error & { code?: string }; e.code = "ECONNREFUSED"; throw e; },
+      unlinkSocket: () => false,
+    });
     expect(row(o)).toEqual({ stream: "stderr", line: STOP_LINES.ownerChanged });
   });
 

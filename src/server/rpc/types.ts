@@ -168,7 +168,7 @@ export interface ServerIdentityResult {
   pid: number;
 }
 
-export interface ShutdownResult { ok: true }
+export interface ShutdownResult { ok: boolean; reason?: "embedded" }
 
 /** Client-event acknowledgement. */
 export interface ClientEventResult { ok: true }

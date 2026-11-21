@@ -30,6 +30,14 @@ export function createLifecycleHandlers(ctx: ServerContext): {
       pid: process.pid,
     }),
     shutdown: (): ShutdownResult => {
+      // #276 (verify-gate r1): the shutdown RPC is REFUSED for an
+      // EMBEDDED server — the issue's design decision, enforced at the
+      // RPC itself (any direct client, not just the CLIs' gated
+      // sequences). The refusal is a normal response (not an RPC error):
+      // callers check `ok`.
+      if (ctx.getServerMode() === "embedded") {
+        return { ok: false, reason: "embedded" };
+      }
       // AC5.6: schedule shutdown AFTER the response is written. The connection
       // handler in server.ts writes the response synchronously before the
       // timer fires (50ms delay), preserving response-before-close ordering.

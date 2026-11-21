@@ -26,7 +26,8 @@ export interface StopDeps {
   requestShutdown(): Promise<void>;
   close(): void;
   sleep(ms: number): Promise<void>;
-  unlinkSocket(): void;
+  /** Returns true when the socket was removed; false on failure. */
+  unlinkSocket(): boolean;
   /** The 250ms recheck for a mid-start daemon. */
   recheckConnect(): Promise<boolean>;
   socketGone(): boolean;
@@ -76,20 +77,29 @@ export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
   // connect was REFUSED (recheck once — a daemon may be mid-start; still
   // refused → stale socket → unlink); NULL means connected-but-silent
   // (unresponsive — the socket is LEFT in place); an object proceeds.
-  let identity: { mode: "daemon" | "embedded"; pid: number } | null;
+  let identity: Awaited<ReturnType<typeof deps.identity>>;
   try {
     identity = await deps.identity();
-  } catch {
+  } catch (err) {
+    // Only a CONFIRMED refusal unlinks (codex r2 c2: timeouts and
+    // permission errors must NOT reach the stale-socket path — they
+    // report without removing).
+    if (!isRefusal(err)) return out("stderr", STOP_LINES.unresponsive);
     await deps.sleep(250);
     const accepted = await deps.recheckConnect();
     if (!accepted) {
-      deps.unlinkSocket();
+      // The unlink can FAIL (permissions) — report it, never claim
+      // success on a live socket (codex r2 c3).
+      if (!deps.unlinkSocket()) return out("stderr", STOP_LINES.ownerChanged);
       return out("stdout", STOP_LINES.staleRemoved);
     }
     // Accepted on recheck: ask identity again for the real answer.
     identity = await safeIdentity(deps);
   }
-  if (!identity) return out("stderr", STOP_LINES.unresponsive);
+  // FAIL CLOSED (codex r2 c1): only a VALID daemon/embedded identity
+  // proceeds — anything malformed is unresponsive, and ONLY an explicit
+  // "daemon" ever receives the shutdown RPC.
+  if (!isValidIdentity(identity)) return out("stderr", STOP_LINES.unresponsive);
 
   // 3) Embedded → the row. STOP (never signaled — the original repro).
   //    NOTE the matrix's ONE exception: an INFORMATIONAL stdout line with
@@ -126,6 +136,18 @@ export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
   return deps.pidAlive(pid)
     ? out("stderr", STOP_LINES.survived)
     : out("stdout", STOP_LINES.stoppedSigterm);
+}
+
+function isRefusal(err: unknown): boolean {
+  const code = (err as { code?: string })?.code;
+  return code === "ECONNREFUSED" || String((err as Error)?.message ?? err).includes("refused");
+}
+
+function isValidIdentity(v: unknown): v is { mode: "daemon" | "embedded"; pid: number } {
+  if (!v || typeof v !== "object") return false;
+  const o = v as { mode?: unknown; pid?: unknown };
+  if (o.mode !== "daemon" && o.mode !== "embedded") return false;
+  return typeof o.pid === "number" && Number.isInteger(o.pid) && o.pid > 0;
 }
 
 async function safeIdentity(deps: StopDeps): Promise<{ mode: "daemon" | "embedded"; pid: number } | null> {

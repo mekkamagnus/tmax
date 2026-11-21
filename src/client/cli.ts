@@ -10,6 +10,7 @@
 import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import { TmaxClient, parseKeySequence, parseSingleKey } from './rpc-client.ts';
+import { defaultSocketPath } from '../core/socket-path.ts';
 import { tuiSpawnTarget } from '../cli/exec-target.ts';
 
 /**
@@ -335,19 +336,16 @@ Examples:
     process.exit(code ?? 0);
   }
 
-  // Special handling for --stop - send shutdown RPC
+  // Special handling for --stop: the #276 GATED sequence (the identity
+  // RPC refuses embedded sessions; the SIGTERM fallback verifies the
+  // pid) — tmaxclient --stop must never kill an embedded session either.
   if (stopDaemon) {
-    const stopClient = new TmaxClient(socketPath);
-    try {
-      await stopClient.connect();
-      await stopClient.sendRequest('shutdown', {});
-      stopClient.close();
-      console.log('Daemon stopped');
-      process.exit(0);
-    } catch (error) {
-      console.error('Daemon not running');
-      process.exit(1);
-    }
+    const { runStopSequence } = await import('../cli/stop-sequence.ts');
+    const { realStopDeps } = await import('../cli/stop-sequence-deps.ts');
+    const sock = socketPath ?? defaultSocketPath();
+    const outcome = await runStopSequence(realStopDeps(sock));
+    for (const row of outcome.rows) (row.stream === 'stdout' ? console.log : console.error)(row.line);
+    process.exit(outcome.exitCode);
   }
 
   // Special handling for ping - don't require server connection
