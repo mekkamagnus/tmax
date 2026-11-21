@@ -310,24 +310,26 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     // Long raw links display as 'a': rowsOf must count DISPLAY rows, the
     // cursor must sit on its rendered row, and the wire must cover the
     // frame (no blank tail).
+    // RAW links that WRAP at 100 cols (200-char raw targets displaying
+    // as 'a' — the raw-vs-display difference is the point).
     const lines: string[] = [];
-    for (let i = 0; i < 99; i++) lines.push(i === 40 ? "cursor-line-here" : `[[some/long/page-${i}|a]] tail`);
+    for (let i = 0; i < 99; i++) lines.push(i === 40 ? "cursor-line-here" : `[[${"p".repeat(190)}/page-${i}|a]] tail`);
     lines.push("L99 TAIL end");
     const state = makeState(lines, true, 40, 22);
     const md = { ...state, currentMajorMode: "markdown", currentFilename: "note.md", activeMinorModes: ["wiki-link-display"] };
-    // 1) The cursor row: display rows are ~1/line → row 40 fits on screen
-    //    (the RAW count would push it far below the fold).
-    expect(getWrappedCursorRow(md as any, 22, 100)).toBeLessThan(22);
-    // 2) The wire covers the advanced frame: through the wire, no long
-    //    blank tail in the buffer area.
-    const wire = editorStateToJson(md as any, 22, 100);
-    const view = jsonToEditorState(wire);
-    const frame = captureFrame(view, 100, 24);
+    // 1) The cursor row EQUALS the rendered row: the frame's row holding
+    //    'cursor-line-here' — found through the wire + captureFrame.
+    const view = jsonToEditorState(editorStateToJson(md as any, 22, 100));
+    const frame = captureFrame(view, 100, 24).map((l: string) => l.replace(/\u001b\[[0-9;]*m/g, ""));
+    const renderedRow = frame.findIndex((l: string) => l.includes("cursor-line-here"));
+    expect(renderedRow).toBeGreaterThanOrEqual(0);
+    expect(getWrappedCursorRow(view as any, 22, 100)).toBe(Math.min(renderedRow, 21));
+    // 2) The wire covers the advanced frame: no long blank tail.
     const bufRows = frame.slice(0, frame.length - 1);
     let blanks = 0;
     for (let i = bufRows.length - 1; i >= 0 && bufRows[i]!.trim() === ""; i--) blanks++;
     expect(blanks).toBeLessThan(4);
-    expect(frame.join("\n").replace(/\u001b\[[0-9;]*m/g, "")).toContain("cursor-line-here"); // faces stripped
+    expect(frame.join("\n")).toContain("cursor-line-here"); // already stripped
   });
 
 /** Exposed for the fix-phase test + recording: the matrix table. */

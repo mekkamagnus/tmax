@@ -77,11 +77,40 @@ export function makeDisplayFoldAwareRowsOf(
   state: EditorState,
   cw: number,
 ): (ln: number) => number {
-  const raw = makeFoldAwareRowsOf((ln: number) => getLine(state, ln), cw, state.foldRanges);
-  if (!wikiDisplayActive(state)) return raw;
+  return makeRowsOfDisplay(
+    (ln: number) => getLine(state, ln),
+    cw,
+    state.foldRanges,
+    wikiDisplayActive(state) ? (text: string) => transformWikiLine(text, undefined) : undefined,
+  );
+}
+
+/**
+ * The ONE display-aware row counter (closes the parity class
+ * structurally — codex r4/r5/r6 each found another raw-counting
+ * instance): fold-hidden rows 0, fold-heading rows 1, else the DISPLAY
+ * text's wrapped rows (the transform applies before wrapping).
+ */
+export function makeRowsOfDisplay(
+  getRawLine: (ln: number) => string,
+  cw: number,
+  foldRanges?: Map<number, number>,
+  transform?: (text: string) => { changed: boolean; text: string },
+): (ln: number) => number {
+  const hidden = new Set<number>();
+  const starts = new Set<number>();
+  if (foldRanges) {
+    for (const [foldStart, foldEnd] of foldRanges) {
+      starts.add(foldStart);
+      for (let ln = foldStart + 1; ln <= foldEnd; ln++) hidden.add(ln);
+    }
+  }
   return (ln: number) => {
-    const [disp] = displayLineForWrap(state, getLine(state, ln) ?? "", 0);
-    return Math.max(raw(ln) === 0 ? 0 : 1, wrapLine(disp, cw).length);
+    if (hidden.has(ln)) return 0;
+    if (starts.has(ln)) return 1; // the renderer emits ONE "... [N lines]" row
+    const rawLine = getRawLine(ln) ?? "";
+    const disp = transform && transform(rawLine);
+    return wrapLine(disp && disp.changed ? disp.text : rawLine, cw).length;
   };
 }
 
@@ -589,6 +618,8 @@ function renderSingleWindowWrapped(
   // (every line may occupy multiple rows, so [top, cursorLine] can consume
   // far more than `visibleLines` rows — the cursor + tail render below the
   // fold: the blank/frozen tail). Shared helper, fold-aware here.
+  // #321 (codex r6): the advance counts DISPLAY rows when the wiki
+  // transform is active — the same text the loop below renders.
   const top = isFocused
     ? advanceWrappedTop(
         (ln) => getLineForBuffer(buffer, ln),
@@ -597,7 +628,12 @@ function renderSingleWindowWrapped(
         totalLines,
         visibleLines,
         cw,
-        makeFoldAwareRowsOf((ln) => getLineForBuffer(buffer, ln), cw, foldRanges),
+        makeRowsOfDisplay(
+          (ln) => getLineForBuffer(buffer, ln),
+          cw,
+          foldRanges,
+          wikiDisplay ? (text: string) => transformWikiLine(text, undefined) : undefined,
+        ),
       )
     : viewportTop;
 
