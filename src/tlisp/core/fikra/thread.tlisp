@@ -921,12 +921,15 @@ thread→adapter has no cycle but keep the lazy convention)."
   ;; (plan requires thread; the cycle forbids top-level).
   (if (string= status "completed")
     (progn
-      ;; #217: the COMPLETION ref (refs/fikra/<id>/<n>). Async — the
-      ;; process exit is the authoritative turn end; the capture follows.
+      ;; #217: the COMPLETION ref (refs/fikra/<id>/<n>). r134d (codex
+      ;; r134c catch): SYNC — the async form let the NEXT turn's edits
+      ;; land before this capture's git add (the completed turn's ref
+      ;; then absorbed them). Synchronous here, the snapshot is exactly
+      ;; the turn's end state: the next turn cannot begin mid-eval.
       (condition-case nil
         (progn
           (require-module fikra/checkpoint)
-          (fikra/checkpoint/fikra-checkpoint-capture-async "completion"))
+          (fikra/checkpoint/fikra-checkpoint-capture "completion"))
         (error () nil))
       (condition-case nil
         (progn

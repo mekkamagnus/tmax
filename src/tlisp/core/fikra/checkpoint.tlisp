@@ -163,8 +163,14 @@ events; nil when disabled or failed. Never touches turn state."
     (let* ((suffix (fikra-checkpoint-suffix kind))
            (ref (concat "refs/fikra/" (fikra/thread/fikra-thread-field "id") "/"
                        (number-to-string (fikra/thread/fikra-thread-turn-count)) suffix))
+           ;; r134d (codex r134c catch): the tmp index carries the FULL
+           ;; identity — two threads' captures in one root (or any other
+           ;; overlap) can never share an index file.
            (tmp (concat (fikra/thread/fikra-thread-field "root")
-                        "/.tmax/fikra/tmp-index-" kind suffix))
+                        "/.tmax/fikra/tmp-index-" kind "-"
+                        (fikra/thread/fikra-thread-field "id") "-"
+                        (number-to-string (fikra/thread/fikra-thread-turn-count))
+                        suffix))
            (out (shell-command (fikra-checkpoint-command-for tmp ref kind))))
       (let ((sha (fikra-checkpoint-tail out)))
         (setq fikra-checkpoint-last-ref sha)
@@ -233,7 +239,8 @@ keys the sentinel's ref name (concurrent captures cannot race)."
            ;; shared name let one capture rm -f the index another was
            ;; reading.
            (tmp (concat (fikra/thread/fikra-thread-field "root")
-                        "/.tmax/fikra/tmp-index-" kind suffix))
+                        "/.tmax/fikra/tmp-index-" kind "-"
+                        thread-id "-" (number-to-string turn-n) suffix))
            (pid (make-process
                   :command (list "sh" "-c" (fikra-checkpoint-command-for tmp ref kind))
                   :cwd (fikra/thread/fikra-thread-field "root")
