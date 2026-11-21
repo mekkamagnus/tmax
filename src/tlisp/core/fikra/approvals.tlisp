@@ -86,12 +86,6 @@ decides instead."
         (if (null (string-match "^[0-9]+$" turn-str))
           nil
           (let ((turn (string-to-number turn-str)))
-            (append-file "/tmp/scope-debug.log"
-              (concat "scope=" scope
-                      " cur=" (if (fikra/thread/fikra-thread-current) (fikra/thread/fikra-thread-current) "nil")
-                      " turn=" (number-to-string (fikra/thread/fikra-thread-turn-count))
-                      " st=" (if (fikra/thread/fikra-thread-status) (fikra/thread/fikra-thread-status) "nil") "
-"))
             (and (string= thread (fikra/thread/fikra-thread-current))
                  (= turn (fikra/thread/fikra-thread-turn-count))
                  (string= (fikra/thread/fikra-thread-status) "running"))))))))

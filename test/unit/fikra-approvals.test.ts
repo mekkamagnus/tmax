@@ -630,6 +630,35 @@ describe("r86 — once-per-scope minting + abort settles the parked mediate", ()
     expect((await p3).scope).toBe("unknown-token");
   });
 
+  test("a DECLINED mint disarms: args omit the L2 flags entirely (codex r87 P1)", async () => {
+    const editor = await l2setup();
+    e(editor, "(require-module fikra/backend-claude)");
+    e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "on")');
+    // OCCUPY the live scope — the adapter's own mint is then declined.
+    expect(String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value)).not.toBe("null");
+    expect(String(e(editor, "(fikra/backend-claude/fikra-claude-write-mcp-config)").value)).toBe("null");
+    // Honest degradation: the args carry NO --mcp-config and NO
+    // permission-prompt-tool (the old code armed on nil and handed
+    // claude a dead permission tool).
+    const args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).not.toContain("--mcp-config");
+    expect(args).not.toContain("--permission-prompt-tool");
+  });
+
+  test("the focused turn-end REVOKES the token (the sentinel path — codex r87 P2)", async () => {
+    const editor = await l2setup();
+    e(editor, "(require-module fikra/backend-claude)");
+    e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "on")');
+    const token = String(e(editor, "(fikra/backend-claude/fikra-claude-write-mcp-config)").value);
+    expect(token).toMatch(/^[0-9a-f]{48}$/);
+    // The stored token exists; the focused-end revoke (what the sentinel
+    // calls on exit 0) kills it.
+    expect(String(e(editor, "(fikra/backend-claude/fikra-claude-revoke-thread-token \"main\")").value)).not.toBe("null");
+    const after = await mediate(token, "bash", "post-turn arrival");
+    expect(after.decision).toBe("reject");
+    expect(after.scope).toBe("unknown-token"); // pre-prompt — never a handler call
+  });
+
   test("a HEADLESS interrupt still unblocks the bridge (cancel is the policy-free denial direction — codex r86 P2)", async () => {
     const editor = await l2setup();
     e(editor, "(require-module fikra/chat)");

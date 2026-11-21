@@ -9,7 +9,8 @@
           fikra-claude-approvals-probe fikra-claude-write-mcp-config
           fikra-claude-mcp-config-path fikra-claude-mcp-ensure-dir
           fikra-claude-trust-arg
-          fikra-claude-set-approvals-override)
+          fikra-claude-set-approvals-override
+          fikra-claude-revoke-thread-token)
 
 ;; #214 (RFC-027 §D3/§D4): Claude Code CLI adapter, agent edition.
 ;; Process-per-turn + session resume; JSONL lines normalize to FAEP events
@@ -227,6 +228,14 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
            ;; the L2 flags when it declined.
            (token (confirmation-token-mint "fikra" scope))
            (path (fikra-claude-mcp-config-path)))
+      (if (not token)
+        ;; r88 (codex r87 P1): a DECLINED mint (occupied scope, not-live
+        ;; turn) writes nothing and DISARMS — the args omit the L2 flags
+        ;; (honest L1), never a config pointing at a dead token.
+        (progn
+          (setq fikra-claude-l2-armed nil)
+          nil)
+        (progn
       (fikra-claude-mcp-ensure-dir)
       ;; ABSOLUTE bridge path (round-34 live catch): the CLI resolves the
       ;; MCP server's args against ITS cwd (the thread working dir), so a
@@ -244,7 +253,7 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
       ;; Best-effort 0600 (gate note): the token authorizes ORIGINATING a
       ;; mediate, never resolving — but don't leave it world-readable.
       (shell-command (concat "chmod 600 " (fikra-claude-shq path)))
-      token)))
+      token)))))
 
 ;; #298 (codex r2/r3): shell-quoting for interpolated paths — a project
 ;; path containing spaces/metachars must not split the mkdir/chmod
@@ -596,8 +605,12 @@ not mutate the focused thread's state."
       nil)
     (if (and thread-id (not (hashmap-get fikra-claude-aborteds thread-id)))
       (if focused
-        (fikra/thread/fikra-thread-turn-end
-          (if (= exit-code 0) "completed" "error"))
+        ;; r88: the FOCUSED end revokes the token too (the bg helper had
+        ;; it; this path bypassed it — the token outlived the turn).
+        (progn
+          (fikra/thread/fikra-thread-turn-end
+            (if (= exit-code 0) "completed" "error"))
+          (fikra-claude-revoke-thread-token thread-id))
         ;; Background thread: settle it WITHOUT stealing focus.
         (fikra-backend-claude-turn-end-bg thread-id exit-code)))))
 
@@ -606,16 +619,20 @@ not mutate the focused thread's state."
     (fikra/thread/fikra-thread-focus thread-id)
     (fikra/thread/fikra-thread-turn-end
       (if (= exit-code 0) "completed" "error"))
-    ;; r87: the turn ended — REVOKE its approval token (multi-use within
-    ;; the turn is the service's re-arm rule; the token must not outlive
-    ;; the turn). Guarded: revocation must never break turn-end.
-    (condition-case nil
-      (let ((tok (hashmap-get fikra-claude-tokens thread-id)))
-        (if tok (confirmation-token-revoke tok))
-        (editor/keymaps/keymap-mutable-set! fikra-claude-tokens thread-id nil))
-      (error () nil))
+    (fikra-claude-revoke-thread-token thread-id)
     (fikra/thread/fikra-thread-focus prev)
     thread-id))
+
+;; r88 (codex r87 P2): the token dies on EVERY turn end — the BACKGROUND
+;; completion, the FOCUSED sentinel, and the ABORT all route here. The
+;; token must not outlive its turn on any path. Guarded: revocation must
+;; never break turn-end.
+(defun fikra-claude-revoke-thread-token (thread-id)
+  (condition-case nil
+    (let ((tok (hashmap-get fikra-claude-tokens thread-id)))
+      (if tok (confirmation-token-revoke tok))
+      (editor/keymaps/keymap-mutable-set! fikra-claude-tokens thread-id nil))
+    (error () nil)))
 
 ;; Test seam: reset the line accumulator (module vars are not settable
 ;; cross-module; #215's replay backend reuses this drain and resets it).
@@ -658,6 +675,7 @@ not mutate the focused thread's state."
         (signal pid "SIGTERM")
         (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id nil)
         (fikra/thread/fikra-thread-turn-end "interrupted")
+        (fikra-claude-revoke-thread-token thread-id)
         t)
       nil)))
 
