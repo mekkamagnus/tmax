@@ -481,3 +481,56 @@ describe("ollama focus-switch lifecycle (r119 — codex r118 P1)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("main");
   });
 });
+
+describe("ollama resume + buffer-read (r120 — codex r119 P2s)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireCalls = (ed: Editor, seed: number, calls: { name: string; args: unknown }[]) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls:
+      calls.map((c) => ({ function: { name: c.name, arguments: c.args } })) } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  test("ALLOW resumes the parked reply's REMAINING calls (they were dropped)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "two step")');
+    fireCalls(ed, 131, [
+      { name: "bash", args: { command: "rm -rf q/" } },
+      { name: "bash", args: { command: "echo AFTER-RESUME" } },
+    ]);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    expect(String(e(ed, "(buffer-text)").value)).not.toContain("AFTER-RESUME");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toContain("AFTER-RESUME");
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).toContain("AFTER-RESUME");
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 132 "live")');
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "done both" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 132 "${reply}")`);
+    e(ed, `(fikra-http-complete 132 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+
+  test("buffer_read returns the file's content to the model (and not-found is honest)", async () => {
+    const ed = await armed();
+    e(ed, '(shell-command "printf \'hello-read-target\' > read-me.txt")');
+    e(ed, '(fikra/chat/fikra-turn-send "read it")');
+    fireCalls(ed, 133, [
+      { name: "buffer_read", args: { path: "read-me.txt" } },
+      { name: "buffer_read", args: { path: "absent.txt" } },
+    ]);
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toContain("buffer-read");
+    expect(text).toContain("read-me.txt: 17 chars");
+    expect(text).toContain("not found: absent.txt");
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("hello-read-target");
+    expect(acc).toContain("file not found: absent.txt");
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 134 "live")');
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "read both" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 134 "${reply}")`);
+    e(ed, `(fikra-http-complete 134 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+});
