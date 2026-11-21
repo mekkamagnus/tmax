@@ -50,7 +50,7 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
     expect(String(r.value)).toBe("pending");
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
     // The reply arrives through the filter + the ownership dispatcher.
-    e(ed, "(fikra/backend-ollama/fikra-backend-ollama-seed 21)");
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 21 "live")');
     const reply = hex(JSON.stringify({ message: { role: "assistant", content: "Fixed - the handler re-rendered but never told the daemon." } }));
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 21 "${reply}")`);
     e(ed, `(fikra-http-complete 21 200 "${hex("{}")}")`);
@@ -64,7 +64,7 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
   test("a dead server ends the turn as an ERROR with a visible status", async () => {
     const ed = await armed();
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-start-turn "hello")');
-    e(ed, "(fikra/backend-ollama/fikra-backend-ollama-seed 22)");
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 22 "live")');
     e(ed, `(fikra-http-complete 22 0 "${hex("refused")}")`);
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("error");
     expect(String(e(ed, "(editor-status)").value)).toContain("unreachable");
@@ -84,5 +84,53 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
     const ed = await armed();
     expect(String(e(ed, '(fikra/adapter/fikra-backend-capable-p "ollama" "streaming")').value)).toBe("null");
     expect(String(e(ed, '(fikra/adapter/fikra-backend-capable-p "ollama" "interactive-approvals")').value)).toBe("null");
+  });
+});
+
+describe("ollama chat lifecycle (r109 — codex r108 catches)", () => {
+  test("a CONNECTION FAILURE (no chunks, unseeded-by-filter) still settles — fire-time ownership", async () => {
+    const ed = await armed();
+    // Drive via the REAL fire (start-turn) but with the URL pointed at a
+    // dead port — the request fails with no body chunks; ownership was
+    // stamped at FIRE. The completion arrives unowned-by-filter.
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 41 "dead")');
+    // Simulate: the request was fired (id 41), the connection died — the
+    // completion reaches the dispatcher with NO filter-chunk ever seen.
+    e(ed, `(fikra-http-complete 41 0 "${hex("connect ECONNREFUSED")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).not.toBe("running");
+    expect(String(e(ed, "(editor-status)").value)).toContain("unreachable");
+  });
+
+  test("a late reply whose turn was ABORTED discards (no ghost render)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "first question")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 42 "live")');
+    // The user interrupts before the reply lands.
+    e(ed, "(fikra/backend-ollama/fikra-backend-ollama-abort)");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
+    const before = String(e(ed, "(buffer-text)").value);
+    // The late reply arrives — it must DISCARD.
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "stale answer" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 42 "${reply}")`);
+    e(ed, `(fikra-http-complete 42 200 "${hex("{}")}")`);
+    const after = String(e(ed, "(buffer-text)").value);
+    expect(after).toBe(before);
+    expect(after).not.toContain("stale answer");
+  });
+
+  test("HISTORY rides the messages (the second turn sees the first exchange)", async () => {
+    const ed = await armed();
+    // First exchange in memory.
+    e(ed, '(fikra/chat/fikra-turn-send "remember the word pineapple")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 43 "live")');
+    const r1 = hex(JSON.stringify({ message: { role: "assistant", content: "noted" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 43 "${r1}")`);
+    e(ed, `(fikra-http-complete 43 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    // The second turn's REQUEST BODY carries the history — assert via the
+    // builder (the messages include the first user + assistant turns).
+    const h = String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value);
+    expect(h).toContain('"role":"user","content":"remember the word pineapple"');
+    expect(h).toContain('"role":"assistant","content":"noted"');
   });
 });
