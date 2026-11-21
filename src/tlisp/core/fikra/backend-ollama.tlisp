@@ -882,12 +882,30 @@ availability gate must be synchronous; the turn itself is async)."
                 ;; arrives via the sentinel (appending the pid would
                 ;; corrupt the acc; 'async used to append junk).
                 (if (numberp approved)
-                  nil
-                  (setq fikra-ollama-parked-acc
-                    (concat fikra-ollama-parked-acc approved)))
-                ;; r120-r121: the remainder resumes; a RE-PARK holds the
-                ;; next model request until ITS decision.
-                (fikra-ollama-continue-home home-thread)))))))))
+                  ;; r132 (codex r130 P1#2): an async approved command
+                  ;; HOLDS the continuation — the remainder + the
+                  ;; pre-park acc + the re-fire ride the pid's ownership
+                  ;; entry; the SENTINEL resumes them at exit (the model's
+                  ;; next request must carry the approved result — before,
+                  ;; the round continued immediately and re-fired without
+                  ;; it, racing a second re-fire through the no-cont
+                  ;; branch).
+                  (let ((entry (hashmap-get fikra-ollama-async-procs
+                                  (number-to-string approved))))
+                    (if entry
+                      (keymap-mutable-set! entry "cont"
+                        (list fikra-ollama-parked-rest 0
+                              fikra-ollama-parked-acc))
+                      nil)
+                    (setq fikra-ollama-parked-rest nil)
+                    (setq fikra-ollama-parked-acc "")
+                    'held)
+                  (progn
+                    (setq fikra-ollama-parked-acc
+                      (concat fikra-ollama-parked-acc approved))
+                    ;; r120-r121: the remainder resumes; a RE-PARK holds
+                    ;; the next model request until ITS decision.
+                    (fikra-ollama-continue-home home-thread)))))))))))
 
 ;; r120: run the parked reply's remaining calls (their results append;
 ;; a SECOND destructive call parks again — the rest re-rides).

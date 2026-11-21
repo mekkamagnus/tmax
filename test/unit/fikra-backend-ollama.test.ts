@@ -620,14 +620,21 @@ describe("ollama resume + buffer-read (r120 — codex r119 P2s)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
     expect(String(e(ed, "(buffer-text)").value)).not.toContain("AFTER-RESUME");
     e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
-    const text = String(e(ed, "(buffer-text)").value);
-    expect(text).toContain("AFTER-RESUME");
+    // r132: the approved command runs ASYNC and HOLDS the round — the
+    // remainder (echo AFTER-RESUME) runs at ITS exit, then the re-fire.
+    // Immediately after the allow there is NO result yet — the ordering
+    // r132 enforces (codex r130 P1#2: the model must never receive the
+    // next request before the approved result exists).
+    expect(String(e(ed, "(buffer-text)").value)).not.toContain("AFTER-RESUME");
+    const text = strip(await until(ed, "(buffer-text)", "→ ok", 60));
+    expect(text).toMatch(/→ ok\s*$/m);
+    expect(await until(ed, "(buffer-text)", "AFTER-RESUME", 60)).toContain("AFTER-RESUME");
     expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).toContain("AFTER-RESUME");
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 132 "live")');
     const reply = hex(JSON.stringify({ message: { role: "assistant", content: "done both" } }));
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 132 "${reply}")`);
     e(ed, `(fikra-http-complete 132 200 "${hex("{}")}")`);
-    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
   });
 
   tt("buffer_read returns the file's content to the model (and not-found is honest)", async () => {
@@ -1012,5 +1019,41 @@ describe("ollama async ownership + interruption (r131 — codex r130 P1#1/P1#3)"
     expect(st).toBe("error");
     // Restore a sane root for teardown.
     e(ed, `(fikra/thread/fikra-thread-set-field "root" "${process.cwd()}")`);
+  });
+});
+
+describe("ollama allow-await ordering (r132 — codex r130 P1#2)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireCalls = (ed: Editor, seed: number, calls: { name: string; args: unknown }[]) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls:
+      calls.map((c) => ({ function: { name: c.name, arguments: c.args } })) } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  // The codex r131/r131d probe, now the contract: after an ALLOW, the
+  // next model request must NOT exist until the approved command's
+  // result does (before r132 the round continued immediately and
+  // re-fired without it).
+  tt("an allowed ASYNC command holds the next request until its result exists", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "slow approve")');
+    fireCalls(ed, 181, [{ name: "bash", args: { command: "sleep 1 && rm -rf slowdir && echo SLOW-OK" } }]);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    // DURING the 1s command: no re-fire (latest frozen), no result row.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value)).toBe(before);
+    expect(strip(String(e(ed, "(buffer-text)").value))).not.toMatch(/→ ok\s*SLOW-OK/);
+    // At exit: the result row, THEN the re-fire — which settles.
+    const row = strip(await until(ed, "(buffer-text)", "→ ok", 60));
+    expect(row).toMatch(/→ ok\s*SLOW-OK/);
+    await settleRefireFrom(ed, before, "ALLOWED-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // The model's context carries the approved result.
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value))
+      .toContain('"role":"tool","content":"SLOW-OK"');
   });
 });
