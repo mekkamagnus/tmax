@@ -432,6 +432,20 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
   });
 
+  test("the refusal reaches the MODEL (no false 'wrote' after a refusal)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "escape")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 115 "live")');
+    const r = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "buffer_edit", arguments: { path: "../out.txt", content: "x" } } }] } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 115 "${r}")`);
+    e(ed, `(fikra-http-complete 115 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("refused: path escapes");
+    expect(acc).not.toContain("wrote ../out.txt");
+    expect(String(e(ed, "(buffer-text)").value)).not.toContain("wrote ../out.txt");
+  });
+
   test("an edit with ../ ESCAPE refuses (containment)", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "escape")');

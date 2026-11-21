@@ -6,8 +6,7 @@
           fikra-backend-ollama-seed fikra-ollama-history-messages
           fikra-ollama-messages-get fikra-ollama-tools-json
           fikra-backend-ollama-set-model
-          fikra-backend-ollama-pending-p fikra-backend-ollama-decide
-          fikra-backend-ollama-decide-inner)
+          fikra-backend-ollama-pending-p fikra-backend-ollama-decide)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -275,6 +274,7 @@ availability gate must be synchronous; the turn itself is async)."
 
 (defun fikra-ollama-park (call cmd)
   (setq fikra-ollama-parked-call call)
+  (setq fikra-ollama-parked-thread (fikra/thread/fikra-thread-current))
   (require-module fikra/approvals)
   (fikra/event/fikra-event-emit
     (list (list "kind" "permission-request")
@@ -377,11 +377,11 @@ availability gate must be synchronous; the turn itself is async)."
     (condition-case nil
       (progn (require-module fikra/checkpoint)
              (fikra/checkpoint/fikra-checkpoint-capture-async "completion"))
-      (error () nil))))
-    (fikra/event/fikra-event-emit
-      (list (list "kind" "tool-result") (list "ok" t)
-            (list "summary" (concat "wrote " path))))
-    (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "wrote " path)) "},")))
+      (error () nil))
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "tool-result") (list "ok" t)
+              (list "summary" (concat "wrote " path))))
+      (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "wrote " path)) "},")))))
 
 (defun fikra-ollama-tool-skip (call fname)
   (concat "{\"role\":\"tool\",\"content\":\"unknown tool: "
