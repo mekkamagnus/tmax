@@ -38,8 +38,13 @@ export function realStopDeps(socket: string): StopDeps {
         // Connected but silent (the 1s timeout) → NULL — the
         // unresponsive branch; the socket is LEFT IN PLACE.
         const r = await c.sendRequest("server-identity", {}, 1000).catch(() => null);
+        // RAW validation, no coercion (codex r4 c1): a string pid
+        // ("123") once Number()'d past the sequence's checks and
+        // received shutdown — only a true integer pid passes.
         if (!r || typeof r !== "object") return null;
-        return { mode: r.mode as "daemon" | "embedded", pid: Number(r.pid) };
+        if (r.mode !== "daemon" && r.mode !== "embedded") return null;
+        if (typeof r.pid !== "number" || !Number.isInteger(r.pid) || r.pid <= 0) return null;
+        return { mode: r.mode, pid: r.pid };
       } catch (err) {
         // PRESERVE the error kind (codex r2 c2): the Node error's code
         // rides through untouched — the sequence's isRefusal admits
@@ -80,7 +85,11 @@ export function realStopDeps(socket: string): StopDeps {
     },
     signal: (pid, sig) => { process.kill(Number(pid), sig); },
     pidAlive: (pid) => {
-      try { process.kill(Number(pid), 0); return true; } catch { return false; }
+      // EPERM means the process EXISTS but is not ours (codex r4 c2):
+      // alive — only ESRCH is 'gone'. (The old catch-all made an
+      // EPERM-failed SIGTERM report success.)
+      try { process.kill(Number(pid), 0); return true; }
+      catch (err) { return (err as { code?: string })?.code !== "ESRCH"; }
     },
     // The daemon invocation in BOTH spawn forms: the flag (--daemon) or
     // the daemon ENTRY (source-mode spawns `bun .../src/server/server.ts`
