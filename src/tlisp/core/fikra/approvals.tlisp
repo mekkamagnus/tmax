@@ -259,9 +259,10 @@ segment reads)."
     nil
     (let ((c (substring d k (+ k 1))))
       (cond
-        ((or (string= c ";") (string= c "|") (string= c "&")) nil)
+        ((or (string= c ";") (string= c "|") (string= c "&") (string= c "
+")) nil)
         ((fikra-risk-ws-p d k) (fikra-risk-rm-words-r d (+ k 1)))
-        ((string= c "-") (fikra-risk-flag-word-r d (+ k 1)))
+        ((string= c "-") (fikra-risk-long-or-short-r d k))
         (t (fikra-risk-skip-word-r d (+ k 1)))))))
 
 (defun fikra-risk-skip-word-r (d k)
@@ -269,11 +270,15 @@ segment reads)."
     nil
     (let ((c (substring d k (+ k 1))))
       (cond
-        ((or (string= c ";") (string= c "|") (string= c "&")) nil)
+        ((or (string= c ";") (string= c "|") (string= c "&") (string= c "
+")) nil)
         ((fikra-risk-ws-p d k) (fikra-risk-rm-words-r d (+ k 1)))
         (t (fikra-risk-skip-word-r d (+ k 1)))))))
 
 ;; Inside a flag word: r/R anywhere → t; word end → next word.
+;; r133f (codex r133e findings, FP-direction): a "--" LONG flag only
+;; counts as its named form (--recursive / --rec...); "--verbose" and
+;; "--force" contain r but are not recursive.
 (defun fikra-risk-flag-word-r (d k)
   (if (>= k (length d))
     nil
@@ -282,8 +287,21 @@ segment reads)."
         ((string= c "r") t)
         ((string= c "R") t)
         ((or (string= c ";") (string= c "|") (string= c "&")) nil)
+        ((string= c "
+") nil)
         ((fikra-risk-ws-p d k) (fikra-risk-rm-words-r d (+ k 1)))
         (t (fikra-risk-flag-word-r d (+ k 1)))))))
+
+;; A flag word starting "--" is a NAMED long flag: only --rec... is
+;; recursive (--verbose/--force carry an r but are not).
+(defun fikra-risk-long-or-short-r (d k)
+  (if (string= (substring d (+ k 1) (+ k 2)) "-")
+    (if (string-prefix-p "rec" (substring d (+ k 2) (min (length d) (+ k 5))))
+      t
+      ;; a non-recursive long flag: keep scanning the NEXT word
+      ;; ("rm --verbose -r tree").
+      (fikra-risk-skip-word-r d (+ k 1)))
+    (fikra-risk-flag-word-r d (+ k 1))))
 
 (defun fikra-risk-flag-chars (d k)
   (if (>= k (length d))

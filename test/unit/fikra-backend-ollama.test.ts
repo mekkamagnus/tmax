@@ -662,6 +662,14 @@ describe("ollama gate pattern gaps (r133 — codex r130 P1#5)", () => {
     expect(String(e(ed, `(fikra/approvals/fikra-approval-risk "bash" (hex-decode "${tabCmd}"))`).value)).toBe("destructive");
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm tree -r")').value)).toBe("destructive");
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm x; grep -r pat")').value)).toBe("shell");
+    // r133f (codex r133e findings, FP-direction): --verbose/--force are
+    // not recursive; a newline ends the scan like ; | &.
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm --verbose file")').value)).toBe("shell");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm --force file")').value)).toBe("shell");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm --recursive x")').value)).toBe("destructive");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm --verbose -r tree/")').value)).toBe("destructive");
+    const nlCmd = Buffer.from("rm x\ngrep -r pat", "utf8").toString("hex");
+    expect(String(e(ed, `(fikra/approvals/fikra-approval-risk "bash" (hex-decode "${nlCmd}"))`).value)).toBe("shell");
     // A dangling link whose RAW target hops with ".. — refuses now.
     e(ed, '(shell-command "ln -s ../outside-hop/gone2.txt hop-link")');
     e(ed, '(fikra/chat/fikra-turn-send "hop link")');
