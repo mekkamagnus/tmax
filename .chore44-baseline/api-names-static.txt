@@ -1,3 +1,6 @@
+# Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
+# r88 L2-token arc's primitive landed without the refreeze — caught at the #318
+# rebase re-verify; also carries #318's editor-transient-timer-start/-stop).
 add-hook
 append-file
 aref
@@ -106,6 +109,7 @@ confirmation-resolve
 confirmation-resolver-kind
 confirmation-set-resolve-policy
 confirmation-token-mint
+confirmation-token-revoke
 current-module
 cursor-column
 cursor-line

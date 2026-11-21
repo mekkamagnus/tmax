@@ -36,7 +36,7 @@ import type { EditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 describe("CHORE-44 Change 7 — editor API registry", () => {
   // ── AC7.1: live inventory matches the checked-in baseline ────────────
-  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (432 names)", () => {
+  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (433 names)", () => {
     const baselinePath = join(import.meta.dir, "..", "..", ".chore44-baseline", "api-names-static.txt");
     const expected = readFileSync(baselinePath, "utf8")
       .split("\n")
@@ -51,7 +51,10 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // #298: 426 → 427 — client-launch-dir (client-context thread roots).
     // 8.8 arc: 427 → 430 — ghost-text-set/clear + ghost-anchor-set.
     // #318: 430 → 432 — the transient-timer shell primitives.
-    expect(live.length).toBe(432);
+    // #318 landing rebase: 432 → 433 — confirmation-token-revoke (the r88
+    // L2-token arc's primitive landed without the refreeze; caught at the
+    // #318 rebase re-verify).
+    expect(live.length).toBe(433);
     expect(live).toEqual(expected);
   });
 
