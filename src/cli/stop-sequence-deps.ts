@@ -73,7 +73,11 @@ export function realStopDeps(socket: string): StopDeps {
     },
     socketGone: () => !existsSync(socket),
     pidsOnSocket: () => {
-      const res = spawnSync("lsof", ["-t", "-U", socket], { encoding: "utf8" });
+      // -a INTERSECTS the selections (codex r5): -t -U <path> ORs by
+      // default — every OTHER Unix-socket owner on the system appeared
+      // as an extra pid, tripping the exactly-one check and refusing
+      // to signal a VERIFIED daemon.
+      const res = spawnSync("lsof", ["-a", "-t", "-U", socket], { encoding: "utf8" });
       if (res.error || res.status !== 0) return null;
       const pids = (res.stdout ?? "").trim().split("\n").filter(Boolean);
       return pids.length > 0 ? pids : null;

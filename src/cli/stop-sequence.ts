@@ -70,7 +70,10 @@ export const STOP_LINES = {
  * the caller prints (stdout informational, stderr failures).
  */
 export async function runStopSequence(deps: StopDeps): Promise<StopOutcome> {
-  const out = (stream: StopRow["stream"], line: string): StopOutcome => ({ rows: [{ stream, line }], exitCode: stream === "stdout" ? 0 : 1 });
+  const out = (stream: StopRow["stream"], line: string): StopOutcome => {
+    deps.close(); // every terminal row releases the held connection
+    return { rows: [{ stream, line }], exitCode: stream === "stdout" ? 0 : 1 };
+  };
 
   // 0) Socket file ABSENT → not running. STOP.
   if (!deps.socketExists()) return out("stdout", STOP_LINES.notRunning);
