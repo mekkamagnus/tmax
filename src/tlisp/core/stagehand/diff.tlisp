@@ -1,0 +1,220 @@
+(defmodule stagehand/diff
+  (export stagehand-diff-parse stagehand-diff-classify
+          stagehand-diff-face stagehand-diff-face-line
+          stagehand-diff-buffer-name stagehand-diff-open
+          stagehand-diff-next stagehand-diff-prev
+          stagehand-diff-quit stagehand-diff-hunk-lines)
+
+;; #289 — Stagehand T0: the diff GRAMMAR + faces. `git diff
+;; --no-color` output is PARSED into line classes (never ANSI
+;; passthrough), and faces are EMITTED from the classes through the
+;; buffer-carries-ANSI pipeline (the fikra-diff render precedent) —
+;; one face source for the cluster (#312/#313 adopt this mapping).
+;;
+;; The *Stagehand-Diff* view: n/p navigate hunk headers, q closes
+;; (recency restore). The `d` dispatch lives in stagehand/status (it
+;; reads the status buffer's row/section state); this module renders.
+
+(defvar stagehand-diff-hunks (list)
+  "The buffer line indices of hunk-header lines (n/p targets).")
+
+(major-mode-register "stagehand-diff" '() nil)
+(major-mode-doc "stagehand-diff" "Stagehand diff view — n/p navigate hunk headers (wrap), q closes")
+
+;; ── the grammar (pure — unit-testable without git) ─────────────────
+(defun stagehand-diff-parse (text)
+  "Diff TEXT → ((class line) ...) in order. Pure: no git, no state."
+  (stagehand-diff-scan (string-split text "\n") (list)))
+
+(defun stagehand-diff-scan (lines out)
+  (if (null lines)
+    (reverse out)
+    (stagehand-diff-scan (cdr lines)
+      (cons (list (stagehand-diff-classify (car lines)) (car lines))
+        out))))
+
+(defun stagehand-diff-classify (line)
+  "One diff line → its class: file-header, hunk-header, add, remove,
+context, meta. Precedence matters: ---/+++ are file headers (they
+LEAD with -/+), and the meta markers precede the add/remove catch."
+  (cond
+    ((or (string-prefix-p "diff --git " line)
+         (string-prefix-p "index " line)
+         (string-prefix-p "--- " line)
+         (string-prefix-p "+++ " line))
+      "file-header")
+    ((string-prefix-p "@@" line) "hunk-header")
+    ;; The meta family (rename/copy/mode/no-newline markers). The
+    ;; backslash literal is hex — the T-Lisp reader strips backslash
+    ;; escapes, so "\\ No newline" cannot be written directly.
+    ((or (string-prefix-p "new file mode" line)
+         (string-prefix-p "deleted file mode" line)
+         (string-prefix-p "old mode" line)
+         (string-prefix-p "new mode" line)
+         (string-prefix-p "similarity index" line)
+         (string-prefix-p "dissimilarity index" line)
+         (string-prefix-p "rename from" line)
+         (string-prefix-p "rename to" line)
+         (string-prefix-p "copy from" line)
+         (string-prefix-p "copy to" line)
+         (string-prefix-p (hex-decode "5c204e6f") line))
+      "meta")
+    ((string-prefix-p "+" line) "add")
+    ((string-prefix-p "-" line) "remove")
+    (t "context")))
+
+;; ── faces (the one class → SGR source) ──────────────────────────────
+;; Emitted ANSI rides the established buffer-carries-ANSI render path.
+;; The literals are hex (the T-Lisp reader strips backslash escapes,
+;; so "\x1b[32m" cannot be written directly).
+(defun stagehand-diff-face (class)
+  "CLASS → its SGR opening sequence ('' for default/context)."
+  (cond
+    ((string= class "file-header") (stagehand-ansi "1;36"))
+    ((string= class "hunk-header") (stagehand-ansi "1;34"))
+    ((string= class "add") (stagehand-ansi "32"))
+    ((string= class "remove") (stagehand-ansi "31"))
+    ((string= class "meta") (stagehand-ansi "2"))
+    (t "")))
+
+(defun stagehand-diff-face-line (pair)
+  "(class line) → the FACED display line (ANSI open + line + reset;
+context passes through bare)."
+  (let ((class (car pair))
+        (line (car (cdr pair))))
+    (if (string= class "context")
+      line
+      (concat (stagehand-diff-face class) line (stagehand-ansi-reset)))))
+
+(defun stagehand-ansi (sgr)
+  (hex-decode (concat "1b5b" (stagehand-hex-encode sgr) "6d")))
+
+(defun stagehand-ansi-reset ()
+  (hex-decode "1b5b306d"))
+
+(defun stagehand-hex-encode (s)
+  ;; string-join is the BUILTIN (separator first); stagehand-join
+  ;; belongs to the status module, not this one.
+  (string-join "" (mapcar (lambda (ch) (stagehand-hex-byte ch)) (string-split s ""))))
+
+(defun stagehand-hex-byte (ch)
+  (cond
+    ((string= ch "0") "30") ((string= ch "1") "31")
+    ((string= ch "2") "32") ((string= ch "3") "33")
+    ((string= ch "4") "34") ((string= ch "5") "35")
+    ((string= ch "6") "36") ((string= ch "7") "37")
+    ((string= ch "8") "38") ((string= ch "9") "39")
+    ((string= ch ";") "3b")
+    (t "")))
+
+;; ── the view ────────────────────────────────────────────────────────
+(defun stagehand-diff-buffer-name () "*Stagehand-Diff*")
+
+(defun stagehand-diff-open (text title)
+  "Render the parsed, FACED diff into *Stagehand-Diff* and switch to
+it. TEXT is raw `git diff --no-color` output; TITLE rides the first
+line (the path or section the diff is for)."
+  (let ((pairs (stagehand-diff-parse text)))
+    (if (and (null (cdr pairs)) (string= (car (car pairs)) "context") (string= (car (cdr (car pairs))) ""))
+      (editor-set-status "Stagehand: empty diff")
+      (progn
+        (stagehand-diff-ensure-buffer)
+        (major-mode-set "stagehand-diff")
+        (editor-set-mode "normal")
+        (buffer-set-read-only nil)
+        (stagehand-diff-clear)
+        (buffer-append (concat title "\n"))
+        (setq stagehand-diff-hunks (list))
+        (stagehand-diff-emit pairs 1)
+        (buffer-set-read-only t)
+        (stagehand-diff-ensure-keymap)
+        (setq stagehand-diff-hunks (reverse stagehand-diff-hunks))
+        (cursor-move 1 0)))))
+
+(defun stagehand-diff-emit (pairs line)
+  ;; Append each faced line; record hunk-header buffer indices.
+  (if (not (null pairs))
+    (let ((pair (car pairs)))
+      (buffer-append (concat (stagehand-diff-face-line pair) "\n"))
+      (if (string= (car pair) "hunk-header")
+        (setq stagehand-diff-hunks (cons line stagehand-diff-hunks)))
+      (stagehand-diff-emit (cdr pairs) (+ line 1)))))
+
+(defun stagehand-diff-hunk-lines ()
+  "The buffer line indices of hunk headers (n/p targets)."
+  stagehand-diff-hunks)
+
+(defun stagehand-diff-next ()
+  "n — the next hunk header (wraps)."
+  (stagehand-diff-nav 1))
+
+(defun stagehand-diff-prev ()
+  "p — the previous hunk header (wraps)."
+  (stagehand-diff-nav -1))
+
+(defun stagehand-diff-nav (dir)
+  (let ((hunks stagehand-diff-hunks))
+    (if (null hunks)
+      (editor-set-status "Stagehand: no hunks")
+      (let ((target (stagehand-diff-next-hunk hunks dir)))
+        (cursor-move target 0)))))
+
+(defun stagehand-diff-next-hunk (hunks dir)
+  ;; The first hunk strictly beyond the cursor (dir 1) / the last
+  ;; strictly before it (dir -1); wraps to the far end (forward → the
+  ;; FIRST hunk, backward → the LAST). HUNKS is ascending.
+  (let* ((cur (cursor-line))
+         (ahead (stagehand-diff-filter-ahead hunks cur dir)))
+    (cond
+      ((not (null ahead)) (if (> dir 0) (car ahead) (stagehand-diff-last ahead)))
+      ((> dir 0) (car hunks))
+      (t (stagehand-diff-last hunks)))))
+
+(defun stagehand-diff-filter-ahead (hunks cur dir)
+  ;; Hunks strictly past CUR in DIR order.
+  (stagehand-filter-scan hunks cur dir (list)))
+
+(defun stagehand-filter-scan (hunks cur dir out)
+  (if (null hunks)
+    (reverse out)
+    (let ((h (car hunks)))
+      (stagehand-filter-scan (cdr hunks) cur dir
+        (if (or (and (> dir 0) (> h cur))
+                (and (< dir 0) (< h cur)))
+          (cons h out)
+          out)))))
+
+(defun stagehand-diff-last (lst)
+  (if (null (cdr lst)) (car lst) (stagehand-diff-last (cdr lst))))
+
+(defun stagehand-diff-quit ()
+  "q — close (buffer-kill's Editor path picks the recency survivor)."
+  (buffer-kill (stagehand-diff-buffer-name)))
+
+(defun stagehand-diff-ensure-buffer ()
+  (if (not (string= (buffer-current) (stagehand-diff-buffer-name)))
+    (progn
+      (if (not (member (stagehand-diff-buffer-name) (buffer-list)))
+        (buffer-create (stagehand-diff-buffer-name)))
+      (buffer-switch (stagehand-diff-buffer-name)))))
+
+(defun stagehand-diff-clear ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+(defun stagehand-diff-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-diff-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-diff"))
+        (editor/keymaps/keymap-set-key kmap "n" "(stagehand/diff/stagehand-diff-next)")
+        (editor/keymaps/keymap-set-key kmap "p" "(stagehand/diff/stagehand-diff-prev)")
+        (editor/keymaps/keymap-set-key kmap "q" "(stagehand/diff/stagehand-diff-quit)")
+        (editor/keymaps/buffer-set-keymap (stagehand-diff-buffer-name) kmap))))
+  t)
+
+(provide "stagehand-diff"))
