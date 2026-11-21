@@ -496,8 +496,12 @@ arg; the quoting is the apostrophe-escape pattern)."
   (concat "'" (stagehand-shq-scan s) "'"))
 
 (defun stagehand-shq-scan (s)
-  (let ((parts (string-split s "'")))
-    (stagehand-join parts "'\\''")))
+  ;; The separator is hex-built (the fikra-thread-sq-join pattern) —
+  ;; the T-Lisp reader strips backslashes, so a literal '\'' mangles
+  ;; into three bare quotes and any apostrophe-bearing filename BREAKS
+  ;; OUT of shell quoting (gate r2 reproduced command execution via a
+  ;; crafted filename + d). Never write escape literals directly.
+  (stagehand-join (string-split s "'") (concat "'" (hex-decode "5c") "''")))
 
 (defun stagehand-join (parts sep)
   (if (null parts)

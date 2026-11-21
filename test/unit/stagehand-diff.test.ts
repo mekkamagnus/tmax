@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
@@ -349,6 +349,29 @@ describe("#289 — the view (integration, real temp repos)", () => {
     expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand-Diff*");
     e(editor, "(stagehand/diff/stagehand-diff-next)");
     expect(String(e(editor, "(editor-status)").value)).toContain("no hunks");
+  });
+
+  test("an APOSTROPHE filename quotes safely — no command injection (gate r2 security)", () => {
+    const c = process.cwd();
+    // The exact injection shape the gate reproduced: the mangled
+    // separator let the trailing fragment execute as a command.
+    writeFileSync(join(c, "evil';touch PWNED;'x.txt"), "evil content\n");
+    statusOf();
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("evil'"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    expect(existsSync(join(c, "PWNED"))).toBe(false); // NO execution
+    // And a plain apostrophe filename diff works at all.
+    writeFileSync(join(c, "it's.txt"), "apostrophe\n");
+    commit("more");
+    writeFileSync(join(c, "it's.txt"), "apostrophe changed\n");
+    statusOf();
+    const lines2 = strip(bufferText(editor)).split("\n");
+    const row2 = lines2.findIndex((l) => l.includes("it's"));
+    e(editor, `(cursor-move ${row2} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    expect(strip(bufferText(editor))).toContain("+apostrophe changed");
   });
 
   test("git failure mid-diff → status names it; the buffer is unchanged", () => {
