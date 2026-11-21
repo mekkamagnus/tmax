@@ -543,7 +543,12 @@ availability gate must be synchronous; the turn itself is async)."
                         (if (and entry (hashmap-get entry "mediated"))
                           (condition-case nil
                             (progn (require-module fikra/checkpoint)
-                                   (fikra/checkpoint/fikra-checkpoint-capture-async "action"))
+                                   ;; r134c (codex r134b catch): SYNC — the
+                                   ;; snapshot completes BEFORE the
+                                   ;; continuation resumes (an async capture's
+                                   ;; git add -A could stage a LATER edit into
+                                   ;; this action's ref).
+                                   (fikra/checkpoint/fikra-checkpoint-capture "action"))
                             (error () nil)))
                         (if (not cont)
                           (progn

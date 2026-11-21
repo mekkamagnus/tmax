@@ -275,22 +275,31 @@ sentinel could adopt another process's REF sha).")
          ;; r134: the SPAWN-STAMPED suffix (an action's -aN was
          ;; allocated at spawn; deriving it here would collide).
          (suffix (let ((s (hashmap-get fikra-checkpoint-async-suffixes key)))
-                   (if s s ""))))
+                   (if s s "")))
+         ;; r134c (codex r134b catch): the OWNER thread of this capture
+         ;; (the spawn stamp's id part) — the events emit through the
+         ;; EXPLICIT-PATH emitter so a focus change cannot route the
+         ;; checkpoint event into another thread's log (the turn-end
+         ;; lesson applied here).
+         (owner (let ((slash (string-match "/" (if stamped stamped "/"))))
+                  (if (and slash (numberp slash) (> slash 0))
+                    (substring stamped 0 slash)
+                    (fikra/thread/fikra-thread-current)))))
     (let ((sha (fikra-checkpoint-tail out)))
       (setq fikra-checkpoint-last-ref sha)
       (keymap-mutable-set! fikra-checkpoint-outputs key nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-kinds key nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-ids key nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-suffixes key nil)
-      (fikra/event/fikra-event-emit
-        (if sha
-          (list (list "kind" "checkpoint-ready")
-                (list "ref" (if stamped
-                              (concat "refs/fikra/" stamped suffix)
-                              (fikra-checkpoint-ref kind)))
-                (list "sha" sha))
-          (list (list "kind" "checkpoint-error")
-                (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))))
+      (fikra/event/fikra-event-emit-batch-for owner
+        (list (if sha
+                (list (list "kind" "checkpoint-ready")
+                      (list "ref" (if stamped
+                                    (concat "refs/fikra/" stamped suffix)
+                                    (fikra-checkpoint-ref kind)))
+                      (list "sha" sha))
+                (list (list "kind" "checkpoint-error")
+                      (list "reason" (string-trim (substring out 0 (min 200 (length out))))))))))))
 
 (provide "fikra-checkpoint")
 )
