@@ -1650,6 +1650,11 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               stdout: 'pipe',
               stderr: 'pipe',
               stdin: 'pipe',
+              // r131b (codex r131 P1): the child gets its OWN process
+              // group — `signal` kills the GROUP, so a shell wrapping
+              // command substitutions (fikra's async bash) cannot leave
+              // the inner $( ) subshells running past an abort.
+              detached: true,
               ...(cwdArg ? { cwd: String(cwdArg.value) } : {}),
               ...(envArg ? { env: { ...process.env, ...envExtra } } : {}),
             });
@@ -1783,7 +1788,16 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           if (!entry) return Either.left(createValidationError('FormatError', `No process with pid ${pid}`));
 
           try {
-            entry.process.kill(sigName as NodeJS.Signals);
+            // r131b: the child runs in its own process group — kill the
+            // GROUP first (the outer shell's command-substitution
+            // subshells die too); fall back to the direct pid for
+            // groupless/foreign processes.
+            const osPid = (entry.process as { pid?: number }).pid;
+            let killed = false;
+            if (osPid) {
+              try { process.kill(-osPid, sigName as NodeJS.Signals); killed = true; } catch { /* group gone */ }
+            }
+            if (!killed) entry.process.kill(sigName as NodeJS.Signals);
             return Either.right(createNil());
           } catch (e) {
             return Either.left(createValidationError('FormatError', `signal failed: ${e instanceof Error ? e.message : String(e)}`));

@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -112,10 +112,13 @@ const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
 console.log(l.port);
 `);
   stubProc = Bun.spawn(["bun", "run", script], { stdout: "pipe", stderr: "ignore" });
-  // Read the FIRST LINE only (the child keeps running to serve).
+  // Read the FIRST LINE only (the child keeps running to serve) — under
+  // a 10s guard: a hung beforeAll defeats every test timeout and the
+  // runner sits silent forever (codex r131's gate hung exactly so).
   const stream = stubProc.stdout;
   if (!stream || typeof stream === "number") throw new Error("stub ollama: no stdout");
   const port = await new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("stub ollama did not print a port within 10s")), 10_000);
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let acc = "";
@@ -125,8 +128,9 @@ console.log(l.port);
         if (done) break;
         acc += decoder.decode(value);
         const nl = acc.indexOf("\n");
-        if (nl >= 0) { resolve(acc.slice(0, nl)); await reader.cancel(); return; }
+        if (nl >= 0) { clearTimeout(timer); resolve(acc.slice(0, nl)); await reader.cancel(); return; }
       }
+      clearTimeout(timer);
       reject(new Error(`stub ollama exited before printing a port: ${acc}`));
     })();
   });
@@ -909,19 +913,25 @@ describe("ollama async ownership + interruption (r131 — codex r130 P1#1/P1#3)"
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
   });
 
-  // P1#3: the interrupt KILLS the child and INVALIDATES its sentinel —
-  // no result row, no resume, no re-fire.
-  tt("an interrupt kills the child: the late sentinel drops everything", async () => {
+  // P1#3: the interrupt KILLS the child — the whole process GROUP (the
+  // descendant side effect never happens) — and INVALIDATES its
+  // sentinel: no result row, no resume, no re-fire.
+  tt("an interrupt kills the child (and its descendants): the late sentinel drops everything", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "interrupt me")');
-    fireCalls(ed, 172, [{ name: "bash", args: { command: "sleep 2 && echo NEVER-LANDS" } }]);
+    fireCalls(ed, 172, [{ name: "bash", args: { command: "sleep 2 && printf X > desc-r131.txt && echo NEVER-LANDS" } }]);
     expect(String(e(ed, "(buffer-text)").value)).toContain("sleep 2");
     const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
     const abort = e(ed, "(fikra/backend-ollama/fikra-backend-ollama-abort)");
     expect(String(abort.value)).toBe("true");
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
-    // Wait past the child's full 2s sleep — the (killed) sentinel fires.
+    // Wait past the child's full 2s sleep — the (killed) sentinel fires
+    // and the descendant's file write would have landed by now.
     await new Promise((r) => setTimeout(r, 2500));
+    // The process GROUP died: the descendant side effect NEVER happened
+    // (killing only the outer shell left the $( ) subshell running —
+    // codex r131's probe).
+    expect(existsSync(join(process.cwd(), "desc-r131.txt"))).toBe(false);
     // No RESULT row (the command text in the call row is expected; the
     // result shape never renders).
     const text = strip(String(e(ed, "(buffer-text)").value));
