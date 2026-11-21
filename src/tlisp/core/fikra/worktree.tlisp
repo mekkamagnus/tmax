@@ -127,6 +127,9 @@ in thread state, refreshes the lighter. Returns the worktree path."
           (progn (editor-set-status (concat "Fikra: worktree create failed: " (string-trim out))) nil)
           (progn
             (fikra/thread/fikra-thread-set-field "worktree" path)
+            ;; r103 (codex r102 P2): a NEW worktree cycle starts clean —
+            ;; the previous cycle's merged marker must not linger.
+            (fikra/thread/fikra-thread-set-field "merged-via-patch" nil)
             (fikra/thread/fikra-thread-set-field "worktree-base" base)
             (fikra/thread/fikra-thread-save)
             (fikra-refresh-worktree-lighter)

@@ -66,15 +66,18 @@ L<level>, worktree/main-tree, last activity), and the key-hint row."
                         (fikra-threads-level-of (hashmap-get row "mode")))) 5)
                   ;; #298: the legacy label must stay visible in the 8.5
                   ;; list (the rewrite regressed it — main went red).
+                  ;; r103 (codex r102 P2): the merged row KEEPS its
+                  ;; location (worktree ✓/main-tree); the merged marker
+                  ;; rides the LAST column (mockup row 4).
                   (cond
-                    ((hashmap-get row "merged") "merged via patch ✓")
                     ((fikra-threads-fixture-p row) "fixture     ")
                     ((string= (if (hashmap-get row "location") (hashmap-get row "location") "") "worktree") "worktree ✓")
                     ((if (hashmap-get row "legacy") t nil) "legacy      ")
                     (t "main-tree   "))
-                  (if (fikra-threads-fixture-p row)
-                    "  (deterministic test thread)"
-                    (concat "  last: " (fikra-threads-last-ago (hashmap-get row "last-at"))))
+                  (cond
+                    ((hashmap-get row "merged") "  merged via patch ✓")
+                    ((fikra-threads-fixture-p row) "  (deterministic test thread)")
+                    (t (concat "  last: " (fikra-threads-last-ago (hashmap-get row "last-at")))))
                   "\n"))
         (setq i (+ i 1))))
     (buffer-insert "\n")

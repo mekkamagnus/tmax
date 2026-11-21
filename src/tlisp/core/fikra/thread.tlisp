@@ -196,7 +196,7 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count" "context-dir" "approval-allow-list" "last-at" "status"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count" "context-dir" "approval-allow-list" "last-at" "merged-via-patch" "status"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
@@ -249,6 +249,7 @@ history into it (daemon-restart reopen path), focus it."
                      (list "runtime-mode" (fikra-thread-field "runtime-mode"))
                      (list "trust" (fikra-thread-field "trust"))
                      (list "worktree" (fikra-thread-field "worktree"))
+                     (list "merged-via-patch" (fikra-thread-field "merged-via-patch"))
                      (list "worktree-base" (fikra-thread-field "worktree-base"))
                      (list "archived" (fikra-thread-field "archived"))
                      (list "interaction" (fikra-thread-field "interaction"))

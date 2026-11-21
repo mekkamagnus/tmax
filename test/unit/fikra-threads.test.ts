@@ -296,8 +296,13 @@ describe("8.5 merged + fixture markers (r102)", () => {
     e(ed, "(require-module fikra/threads)");
     e(ed, "(fikra/threads/fikra-threads-list-open)");
     const text = String(bufferText(ed));
-    expect(text).toMatch(/done\s+merged via patch ✓/);
-    expect(text).not.toMatch(/L2\s+merged/);
+    expect(text).toMatch(/done\s+worktree ✓\s+merged via patch ✓/);
+    // The reload check (codex r102 P1): the marker persists via state.json.
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "main")');
+    e(ed, '(fikra-thread-focus "mg")');
+    e(ed, "(fikra/threads/fikra-threads-list-open)");
+    expect(String(bufferText(ed))).toMatch(/done\s+worktree ✓\s+merged via patch ✓/);
   });
 
   test("a REPLAY backend row shows — · fixture · (deterministic test thread)", async () => {
@@ -310,5 +315,32 @@ describe("8.5 merged + fixture markers (r102)", () => {
     e(ed, "(fikra/threads/fikra-threads-list-open)");
     const text = String(bufferText(ed));
     expect(text).toMatch(/fixture\s+\(deterministic test thread\)/);
+  });
+});
+
+describe("8.5 merged lifecycle (r103 — codex r102 catches)", () => {
+  test("re-entering a NEW worktree clears the merged marker", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, "(require-module fikra/adapter)");
+    e(ed, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(ed, "(require-module fikra/worktree)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "mc")');
+    e(ed, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = String(e(ed, '(fikra/thread/fikra-thread-field "worktree")').value);
+    writeFileSync(join(wt, "c1.txt"), "one\n");
+    e(ed, "(fikra/worktree/fikra-worktree-review)");
+    e(ed, "(fikra/worktree/fikra-worktree-review-apply)");
+    e(ed, "(require-module fikra/threads)");
+    e(ed, "(fikra/threads/fikra-threads-list-open)");
+    expect(String(bufferText(ed))).toMatch(/done.*merged via patch ✓/);
+    // Close + commit the applied work, then enter a NEW worktree cycle.
+    e(ed, "(fikra/worktree/fikra-worktree-close)");
+    execFileSync("git", ["add", "-A"], { cwd: process.cwd() });
+    try { execFileSync("git", ["commit", "-q", "-m", "merged"], { cwd: process.cwd() }); } catch { /* clean */ }
+    e(ed, "(fikra/worktree/fikra-worktree-enter)");
+    e(ed, "(fikra/threads/fikra-threads-list-open)");
+    expect(String(bufferText(ed))).not.toMatch(/merged via patch/);
+    expect(String(bufferText(ed))).toMatch(/worktree ✓/);
   });
 });
