@@ -113,7 +113,8 @@ g does the same). Unborn → 'no commits yet'; no repo → a status."
   "The streaming filter: complete lines render immediately; the
 GENERATION GUARD drops chunks from any run that is no longer current."
   (let ((gen (hashmap-get stagehand-log-pid-gen (number-to-string pid))))
-    (if (and (numberp gen) (= gen stagehand-log-generation))
+    (if (and (numberp gen) (= gen stagehand-log-generation)
+             (not stagehand-log-sealed))
       (progn
         (let* ((joined (concat stagehand-log-partial output))
              (lines (string-split joined "\n"))
@@ -401,12 +402,12 @@ candidate — a bare Enter must CANCEL, never confirm a mutation)."
 (defun stagehand-do-checkout (sha)
   (let* ((refs (stagehand-refs-at sha))
          (ref (stagehand-pick-ref refs))
-         ;; CLASS-AWARE unambiguous target: the bare qualified ref
-         ;; detaches (a rev, not a branch); the bare SHORT name is
-         ;; ambiguous when a tag and a branch share it (git prefers
-         ;; the branch — possibly a DIFFERENT commit than confirmed;
-         ;; codex r1 reproduced). tags/<n> and remotes/<n>
-         ;; disambiguate; plain <n> for heads is git's branch form.
+         ;; CLASS-AWARE unambiguous target: heads → the bare SHORT
+         ;; name (git resolves heads FIRST — the branch updates); tags
+         ;; and remotes → the FULLY QUALIFIED ref (unambiguous even
+         ;; against a branch literally named tags/<n> — codex r2's
+         ;; repro; both classes detach by nature, so the qualified
+         ;; form's detach is the correct outcome).
          (target (stagehand-checkout-target ref sha))
          (res (shell-exec-argv (list "git" "checkout" target) stagehand-log-root)))
     (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
@@ -445,10 +446,8 @@ candidate — a bare Enter must CANCEL, never confirm a mutation)."
   (cond
     ((null ref) sha)
     ((string-prefix-p "refs/heads/" ref) (stagehand-short-ref ref))
-    ((string-prefix-p "refs/tags/" ref)
-      (concat "tags/" (stagehand-short-ref ref)))
-    ((string-prefix-p "refs/remotes/" ref)
-      (concat "remotes/" (stagehand-short-ref ref)))
+    ((string-prefix-p "refs/tags/" ref) ref)
+    ((string-prefix-p "refs/remotes/" ref) ref)
     (t sha)))
 
 (defun stagehand-short-ref (ref)

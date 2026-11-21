@@ -274,15 +274,34 @@ describe("#290 — gate r1 coverage", () => {
     expect(git("describe", "--tags", "--exact-match")).toContain("amb");
   });
 
-  test("SEALED stream: straggler chunks after the sentinel are dropped (codex r1 #2)", async () => {
+  test("a branch LITERALLY NAMED tags/<tag> cannot shadow the tag (codex r2 #1)", async () => {
+    commit("target");
+    commit("moved");
+    execFileSync("git", ["tag", "amb", "HEAD~1"], { cwd: process.cwd() });
+    execFileSync("git", ["branch", "tags/amb"], { cwd: process.cwd() }); // a different commit!
+    await openLog(editor);
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("target"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-checkout)");
+    e(editor, '(stagehand/log/stagehand-log-checkout-accept "y")');
+    expect(git("rev-parse", "HEAD")).toBe(git("rev-parse", "amb^{commit}")); // the TAG's commit
+    expect(git("describe", "--tags", "--exact-match")).toContain("amb");
+  });
+
+  test("SEALED stream: straggler chunks after the sentinel are dropped (codex r1 #2 + r2 #2)", async () => {
     commit("one");
     await openLog(editor);
     const before = strip(bufferText(editor));
     const pid = Number(String(e(editor, "(stagehand/log/stagehand-log-last-pid-get)").value));
-    // A LATE chunk (post-sentinel): the seal must drop it — the
-    // buffer (now read-only) and the bookkeeping stay consistent.
-    e(editor, `(stagehand/log/stagehand-log-filter ${pid} (hex-decode "${Buffer.from("* deadbeef late-row\n").toString("hex")}"))`);
+    // A LATE chunk (post-sentinel): the seal must drop it — buffer,
+    // commit count, AND the line→sha map stay consistent (codex r2:
+    // the bookkeeping-side drop, not just the buffer text).
+    const beforeCount = Number(String(e(editor, "(stagehand/log/stagehand-log-commit-count)").value));
+    const straggler = Buffer.from("* deadbee newcommit\u001f\u001flate subject\n").toString("hex");
+    e(editor, `(stagehand/log/stagehand-log-filter ${pid} (hex-decode "${straggler}"))`);
     expect(strip(bufferText(editor))).toBe(before); // unchanged
+    expect(Number(String(e(editor, "(stagehand/log/stagehand-log-commit-count)").value))).toBe(beforeCount);
   });
 
   test("GRAPH PREFIXES survive on COMMIT rows (codex r1 #3)", async () => {
