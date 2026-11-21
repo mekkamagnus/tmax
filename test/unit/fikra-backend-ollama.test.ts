@@ -807,22 +807,25 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(acc).toContain('"role":"assistant","content":"Running the check now."');
   });
 
-  // P2: the edit row carries INLINE change evidence (the mockup's
-  // +/- lines) — old vs new first lines with counted tails.
-  tt("a buffer_edit renders - old / + new preview lines under the row", async () => {
+  // P2 + r138: the edit row carries CHANGE-FOCUSED evidence — the
+  // common prefix/suffix trim away; only the CHANGED middle shows (a
+  // middle change with an unchanged tail used to display the whole
+  // opening as changed).
+  tt("a buffer_edit renders the CHANGED lines (- old / + new) under the row", async () => {
     const ed = await armed();
-    writeFileSync(join(process.cwd(), "old135.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    writeFileSync(join(process.cwd(), "old135.txt"), "alpha\nbeta\ngamma\ndelta\nepsilon\n");
     e(ed, '(fikra/chat/fikra-turn-send "rewrite it")');
     fireReply(ed, 196, { role: "assistant", content: "",
       tool_calls: [{ function: { name: "buffer_edit",
         arguments: { path: "old135.txt", content: "alpha\nBETA-X\ngamma\ndelta\nepsilon\n" } } }] });
     const text = strip(await until(ed, "(buffer-text)", "buffer-edit", 60));
-    expect(text).toContain("- alpha");
+    // The CHANGED middle only: beta → BETA-X.
     expect(text).toContain("- beta");
-    expect(text).toContain("- … 2 more");
-    expect(text).toContain("+ alpha");
     expect(text).toContain("+ BETA-X");
-    expect(text).toContain("+ … 3 more");
+    // The unchanged context does NOT render as changed.
+    expect(text).not.toContain("- alpha");
+    expect(text).not.toContain("+ gamma");
+    expect(text).not.toContain("- gamma");
     expect(String(e(ed, '(shell-command "cat old135.txt")').value)).toContain("BETA-X");
   });
 });
@@ -857,6 +860,14 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     // hit the call itself — assert the tool-role message with output).
     expect(body2).toContain('"role":"tool"');
     expect(body2).toMatch(/"role":"tool"[^}]*TOOL-CTX|"role":"tool","content":"[^"]*TOOL-CTX/);
+    // r138 (codex ordering finding): the exchange rides INSIDE turn 1 —
+    // after turn 1's assistant reply, BEFORE turn 2's user message.
+    const replyAt = body2.indexOf("first done");
+    const toolAt = body2.indexOf('"role":"tool"');
+    const user2At = body2.indexOf("second turn");
+    expect(replyAt).toBeGreaterThan(-1);
+    expect(toolAt).toBeGreaterThan(replyAt);
+    expect(user2At).toBeGreaterThan(toolAt);
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the

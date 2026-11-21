@@ -53,12 +53,12 @@ context; rebuilt per turn).")
 (defvar fikra-ollama-round-text ""
   "r137: the round's accompanying text (scope bridge into the results
 let).")
-(defvar fikra-ollama-tool-exchanges ""
-  "r137 (codex re-grade): the accumulated tool exchanges across turns —
-each completed round's assistant tool_calls fragment + its results.
-Rides history-messages so LATER requests keep the tool context the
-user can see in the transcript (a follow-up asking about a previous
-command's output lacked the evidence).")
+(defvar fikra-ollama-tool-exchanges (hashmap)
+  "r137+r138 (codex): the tool exchanges, keyed by TURN NUMBER — each
+completed round's assistant tool_calls fragment + its results. The
+history walker interleaves each turn's exchange INSIDE its turn (after
+its text, before the next user message) so later requests see the true
+conversation order.")
 (defvar fikra-ollama-parked-thread nil
   "The thread the parked call BELONGS to (r117: the decision resolves
 against the originating thread's working dir — a focus switch must not
@@ -283,10 +283,9 @@ availability gate must be synchronous; the turn itself is async)."
       (progn
         (setq fikra-ollama-messages
           (concat fikra-ollama-messages results))
-        ;; r137: the completed exchange persists for LATER turns.
-        (setq fikra-ollama-tool-exchanges
-          (concat fikra-ollama-tool-exchanges
-                  "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string fikra-ollama-round-text)
+        ;; r137+r138: the completed exchange persists IN ITS TURN's slot.
+        (fikra-ollama-remember-exchange
+          (concat "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string fikra-ollama-round-text)
                   ",\"tool_calls\":["
                   (fikra-ollama-calls-json tool-calls 0 "")
                   "]}," results))
@@ -645,11 +644,10 @@ availability gate must be synchronous; the turn itself is async)."
         (t (progn
           (setq fikra-ollama-messages
             (concat fikra-ollama-messages "" results))
-          ;; r137: the async round's exchange persists too (the sync
-          ;; branch lives in tool-round; the bash round resumes here).
-          (setq fikra-ollama-tool-exchanges
-            (concat fikra-ollama-tool-exchanges
-                    "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string fikra-ollama-round-text)
+          ;; r137+r138: the async round's exchange persists in its turn's
+          ;; slot (the sync branch lives in tool-round).
+          (fikra-ollama-remember-exchange
+            (concat "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string fikra-ollama-round-text)
                     ",\"tool_calls\":["
                     (fikra-ollama-calls-json calls 0 "")
                     "]}," (if acc acc "") msg results))
@@ -745,6 +743,44 @@ availability gate must be synchronous; the turn itself is async)."
 ;; r135 (codex r130 P2): up to 3 sign-prefixed lines + a counted tail
 ;; (the r106 evidence shape; the claude backend's preview builder is
 ;; module-scoped — a local twin).
+;; r138 (codex r137 finding): a CHANGE-FOCUSED preview — the common
+;; prefix/suffix lines trim away; only the CHANGED middles show (the
+;; first-3-of-each shape displayed unchanged opening lines while a
+;; change below them hid).
+(defun fikra-ollama-diff-preview (old-text new-text)
+  (let* ((a (string-split old-text (hex-decode "0a")))
+         (b (string-split new-text (hex-decode "0a")))
+         (p (fikra-ollama-diff-prefix a b 0))
+         (s (fikra-ollama-diff-suffix a b 1 p))
+         (removed (fikra-ollama-join-slice a p (- (length a) s)))
+         (added (fikra-ollama-join-slice b p (- (length b) s))))
+    (concat (if (> (length removed) 0) (fikra-ollama-preview-lines "-" removed) "")
+            (if (> (length added) 0) (fikra-ollama-preview-lines "+" added) ""))))
+
+;; The first index where the lines differ.
+(defun fikra-ollama-diff-prefix (a b i)
+  (if (or (>= i (length a)) (>= i (length b))
+          (not (string= (nth i a) (nth i b))))
+    i
+    (fikra-ollama-diff-prefix a b (+ i 1))))
+
+;; The count of MATCHING TAIL lines (bounded so it never overlaps the
+;; prefix; stops at the first mismatch from the end).
+(defun fikra-ollama-diff-suffix (a b i p)
+  (if (or (>= i (length a)) (>= i (length b))
+          (< (- (length a) i) p) (< (- (length b) i) p))
+    (- i 1)
+    (if (string= (nth (- (length a) i) a) (nth (- (length b) i) b))
+      (fikra-ollama-diff-suffix a b (+ i 1) p)
+      (- i 1))))
+
+(defun fikra-ollama-join-slice (lines from to)
+  (if (>= from to)
+    ""
+    (concat (nth from lines)
+            (if (< (+ from 1) to) (hex-decode "0a") "")
+            (fikra-ollama-join-slice lines (+ from 1) to))))
+
 (defun fikra-ollama-preview-lines (sign text)
   (let ((lines (string-split text "\n"))
         (out ""))
@@ -808,9 +844,9 @@ availability gate must be synchronous; the turn itself is async)."
                   (list "summary" (concat path " @" (number-to-string (length content))))
                   (list "preview"
                     (if written
-                      (concat (if (and old-content (stringp old-content) (> (length old-content) 0))
-                                (fikra-ollama-preview-lines "-" old-content) "")
-                              (fikra-ollama-preview-lines "+" content))
+                      (fikra-ollama-diff-preview
+                        (if (and old-content (stringp old-content)) old-content "")
+                        content)
                       ""))))
           (if (not written)
             (progn
@@ -842,13 +878,20 @@ availability gate must be synchronous; the turn itself is async)."
 ;; everything up to and including the LAST turn-end (the in-flight
 ;; user message is emitted BEFORE its turn-start — a turn-start cut
 ;; would double it; the turn-end boundary excludes the whole open turn).
+;; r138: append FRAGMENT into the CURRENT turn's exchange slot.
+(defun fikra-ollama-remember-exchange (fragment)
+  (let* ((key (number-to-string (fikra/thread/fikra-thread-turn-count)))
+         (prior (hashmap-get fikra-ollama-tool-exchanges key)))
+    (keymap-mutable-set! fikra-ollama-tool-exchanges key
+      (concat (if prior prior "") fragment))))
+
 (defun fikra-ollama-history-messages ()
   (let* ((events (fikra/event/fikra-event-events))
          (cutoff (+ (fikra-ollama-last-turn-end events 0 -1) 1)))
-    ;; r137: the text history + the persisted tool exchanges (later
-    ;; turns keep the tool context).
-    (concat (fikra-ollama-history-scan events 0 cutoff "")
-            fikra-ollama-tool-exchanges)))
+    ;; r138: the walker interleaves each turn's exchange AT its turn-end
+    ;; (after its text, before the next user message — codex r137's
+    ;; ordering finding).
+    (fikra-ollama-history-scan events 0 cutoff "")))
 
 ;; The index of the LAST turn-end (-1 when none — a first turn has no
 ;; history).
@@ -865,15 +908,25 @@ availability gate must be synchronous; the turn itself is async)."
     (let* ((e (nth i events))
            (k (fikra/event/fikra-event-get-str e "kind")))
       (fikra-ollama-history-scan events (+ i 1) cutoff
-        (if (string= k "text-delta")
-          (let ((sp (fikra/event/fikra-event-get-str e "speaker"))
-                (tx (fikra/event/fikra-event-get-str e "text")))
-            (if (> (length tx) 0)
-              (concat acc "{\"role\":\""
-                      (if (string= sp "user") "user" "assistant")
-                      "\",\"content\":" (fikra-ollama-json-string tx) "},")
-              acc))
-          acc)))))
+        (cond
+          ((string= k "text-delta")
+            (let ((sp (fikra/event/fikra-event-get-str e "speaker"))
+                  (tx (fikra/event/fikra-event-get-str e "text")))
+              (if (> (length tx) 0)
+                (concat acc "{\"role\":\""
+                        (if (string= sp "user") "user" "assistant")
+                        "\",\"content\":" (fikra-ollama-json-string tx) "},")
+                acc)))
+          ;; r138: at turn N's END, its exchange rides next (the true
+          ;; conversation order: text, tools, next turn).
+          ((string= k "turn-end")
+            (let* ((raw (fikra/event/fikra-event-get e "turn"))
+                   (n (if (numberp raw)
+                        (number-to-string raw)
+                        (if raw raw "")))
+                   (frag (hashmap-get fikra-ollama-tool-exchanges n)))
+              (if frag (concat acc frag) acc)))
+          (t acc))))))
 
 ;; JSON-string escaping (quotes + backslashes; runtime concat is
 ;; reader-safe, the embedded chars must be JSON-escaped — hex-built
