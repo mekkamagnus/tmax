@@ -653,6 +653,20 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     return createString((args[0].value as string).toLowerCase());
   }));
 
+  // r135d (codex r135c catch): the char's numeric code — the JSON
+  // escaper's generic control-character range check needs it (the
+  // digit-scan workaround in the approval classifier showed the gap).
+  interpreter.defineBuiltin("char-code", raw((args: TLispValue[]) => {
+    if (args.length !== 1) {
+      throw new Error("char-code requires exactly 1 argument: a 1-character string");
+    }
+    const s = args[0]!;
+    if (s.type !== "string" || String(s.value).length !== 1) {
+      throw new Error("char-code requires a 1-character string");
+    }
+    return createNumber(String(s.value).codePointAt(0)!);
+  }));
+
   interpreter.defineBuiltin("char-toggle-case", raw((args: TLispValue[]) => {
     if (args.length !== 1 || args[0]?.type !== "string") {
       throw new Error("char-toggle-case requires a single-character string");

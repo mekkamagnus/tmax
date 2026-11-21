@@ -289,11 +289,13 @@ availability gate must be synchronous; the turn itself is async)."
            (args (if fn (fikra-ollama-alist-get "arguments" fn) "{}")))
       (fikra-ollama-calls-json calls (+ i 1)
         (concat acc (if (> i 0) ",")
-                "{\"function\":{\"name\":\"" (if name name "?")
+                ;; r135d (codex r135c catch): the NAME escapes too (a
+                ;; quote in a model-supplied tool name broke the array).
+                "{\"function\":{\"name\":" (fikra-ollama-json-string (if name name "?"))
                 ;; json-encode handles BOTH shapes (the reply's arguments
                 ;; arrive as a string OR a parsed object — raw concat
                 ;; stringified objects to "[object Object]", r113 live).
-                "\",\"arguments\":" (condition-case nil (json-encode args) (error () "{}"))
+                ",\"arguments\":" (condition-case nil (json-encode args) (error () "{}"))
                 "}}")))))
 
 ;; r117 (codex r116 P1#2): a PARKED call STOPS the round — later calls
@@ -854,7 +856,19 @@ availability gate must be synchronous; the turn itself is async)."
           ((string= c (hex-decode "08")) (concat acc bs "b"))
           ((string= c (hex-decode "0c")) (concat acc bs "f"))
           ((string= c (hex-decode "1b")) (concat acc bs "u001b"))
+          ;; r135d (codex catch): ANY remaining control character
+          ;; escapes as backslash-u00XX (JSON forbids raw U+0000-001F).
+          ((< (char-code c) 32)
+            (concat acc bs "u00" (fikra-ollama-hex2 (char-code c))))
           (t (concat acc c)))))))
+
+;; Two lowercase hex digits (the control-char range fits a byte).
+(defun fikra-ollama-hex2 (n)
+  (concat (fikra-ollama-hex-nibble (/ n 16))
+          (fikra-ollama-hex-nibble (- n (* 16 (/ n 16))))))
+
+(defun fikra-ollama-hex-nibble (k)
+  (substring "0123456789abcdef" k (+ k 1)))
 
 ;; The http filter: stamp ownership + accumulate the body. A TAGS request
 ;; is recognizable by its marker entry ("tags-<id>"); a chat request by a
