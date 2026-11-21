@@ -5,7 +5,7 @@
           fikra-set-approval-guard fikra-approval-pending-p
           fikra-approvals-ensure-bindings fikra-approval-target-rich
           fikra-approval-baseline-ref fikra-approval-json-command
-          fikra-approval-abort-pending)
+          fikra-approval-abort-pending fikra-approval-scope-live-p)
 
 ;; #220 (RFC-027 §D5 L2, §Security) — Fikra policy on the generic
 ;; confirmation mechanism (#210): the daemon parks a mediate from the MCP
@@ -330,7 +330,11 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
         (fikra/event/fikra-event-emit
           (list (list "kind" "permission-response")
                 (list "decision" "reject")))
-        (confirmation-resolve id "reject"))
+        ;; confirmation-CANCEL, not resolve (r87, codex r86 P2#3): cancel
+        ;; is the policy-free DENIAL direction — the interactive-only
+        ;; resolve policy rightly refuses headless callers, and an abort
+        ;; must unblock the bridge regardless of who interrupted.
+        (confirmation-cancel id))
       (if (string= (fikra/thread/fikra-thread-status) "confirming")
         (fikra/thread/fikra-thread-status-set "running"))
       t)))

@@ -89,9 +89,26 @@ export function createConfirmationOps(deps: ConfirmationOpsDeps): Map<string, TL
     if (Either.isLeft(sourceE)) return Either.left(sourceE.left);
     const scopeE = stringArg(args, 1, "confirmation-token-mint");
     if (Either.isLeft(scopeE)) return Either.left(scopeE.left);
-    // Once-per-scope (first mint wins): a second mint for a live scope
-    // yields NIL — the T-Lisp caller branches (codex r85 P1: unrestricted
-    // re-mint made the approval prompt forgeable by any eval caller).
+    // r86/r87 hardening (codex r85/r86 P1s): (1) once-per-scope — first
+    // mint wins, a repeat yields NIL; (2) MINT-TIME SCOPE-LIVENESS — the
+    // scope's thread+turn must be LIVE (running) at mint time, so a token
+    // minted for a not-yet-started turn is refused and cannot be held for
+    // the live turn later. The adapter mints inside start-turn, after
+    // turn-begin — always live; a pre-mint from any other caller is not.
+    const liveness = deps.evalTlisp(
+      `(condition-case nil (progn (require-module fikra/approvals)` +
+      ` (if (fikra/approvals/fikra-approval-scope-live-p "${scopeE.right.replace(/"/g, '')}") t nil))` +
+      ` (error () nil))`);
+    // evalTlisp returns Either<EvalError, TLispValue>: live ONLY on a
+    // Right whose value is boolean-true (anything else — Left, nil, an
+    // unloaded module — declines the mint).
+    const lv = liveness as { _tag?: string; right?: { type?: string; value?: unknown } };
+    const live = lv?._tag === "Right"
+      && ((lv.right?.type === "boolean" && lv.right?.value === true)
+        || (lv.right?.type === "string" && lv.right?.value === "true"));
+    if (!live) {
+      return Either.right(createNil());
+    }
     const token = confirmationService.mintToken(sourceE.right, scopeE.right);
     return token === null
       ? Either.right(createNil())
@@ -116,6 +133,17 @@ export function createConfirmationOps(deps: ConfirmationOpsDeps): Map<string, TL
     }
     const record = confirmationService.resolve(Number(args[0]!.value), decisionE.right as ConfirmationDecision);
     return Either.right(createBoolean(record !== null));
+  });
+
+  // (confirmation-token-revoke "token") → t when the token was removed
+  // (r87: the turn ENDED — the bridge's token dies with it; later
+  // arrivals are unknown-token).
+  api.set("confirmation-token-revoke", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const count = validateArgsCount(args, 1, "confirmation-token-revoke");
+    if (Either.isLeft(count)) return Either.left(count.left);
+    const tokenE = stringArg(args, 0, "confirmation-token-revoke");
+    if (Either.isLeft(tokenE)) return Either.left(tokenE.left);
+    return Either.right(createBoolean(confirmationService.revokeToken(tokenE.right)));
   });
 
   // (confirmation-cancel id) → t if a pending request was cancelled

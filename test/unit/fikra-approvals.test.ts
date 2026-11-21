@@ -425,14 +425,23 @@ describe("#220 L2 — token gates: forged / stale / cross-turn reject pre-prompt
     expect(String(e(editor, "(fikra/event/fikra-event-replay)").value)).toBe(eventsBefore); // no prompt event
   });
 
-  test("stale (single-use) token → reject on reuse", async () => {
+  test("token lifecycle (r87): re-arms within the turn; revoked after — no prompt", async () => {
     const editor = await l2setup();
     const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
     const first = mediate(token, "write-file", "one");
     e(editor, "(fikra/approvals/fikra-approval-answer-allow)");
     expect((await first).decision).toBe("allow");
-    const second = await mediate(token, "write-file", "two");
-    expect(second.decision).toBe("reject"); // used token — no second prompt
+    // r87: the token RE-ARMS — the turn's SECOND gated action prompts
+    // again (per-action gating; single-use starved every action but the
+    // first, codex r86 P2).
+    const second = mediate(token, "write-file", "two");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    e(editor, "(fikra/approvals/fikra-approval-answer-reject)");
+    expect((await second).decision).toBe("reject");
+    // Turn end (revocation): reuse is rejected PRE-PROMPT (unknown-token).
+    e(editor, `(confirmation-token-revoke "${token}")`);
+    const third = await mediate(token, "write-file", "three");
+    expect(third.decision).toBe("reject"); // dead token — no third prompt
     expect(confirmationService.pendingList()).toHaveLength(0);
   });
 
@@ -587,16 +596,52 @@ describe("r83 — escaped quotes in the JSON command survive the target scan", (
 describe("r86 — once-per-scope minting + abort settles the parked mediate", () => {
   beforeEach(() => { confirmationService.reset(); });
 
-  test("a SECOND mint for a live scope is denied — the forge path is closed (codex r85 P1)", async () => {
+  test("mint gates: not-live scope denied; live scope mints ONCE; repeat denied (codex r85/r86 P1s)", async () => {
     const editor = await l2setup();
-    // The adapter mints at turn-start...
-    const first = e(editor, '(confirmation-token-mint "fikra" "forge/1")');
-    expect(first.value).toBeTruthy();
-    // ...a headless caller minting the SAME scope afterwards gets NIL —
-    // no token to fabricate a prompt with.
+    // A scope whose turn is NOT live (another thread / not running) is
+    // refused at MINT time — no token can be held for a future turn.
     expect(String(e(editor, '(confirmation-token-mint "fikra" "forge/1")').value)).toBe("null");
-    // A DIFFERENT scope still mints (turns keep working).
-    expect(String(e(editor, '(confirmation-token-mint "fikra" "forge/2")').value)).not.toBe("null");
+    // The LIVE scope (main/1, turn begun, running) mints — the adapter's
+    // own path...
+    const first = e(editor, '(confirmation-token-mint "fikra" "main/1")');
+    expect(first.value).toBeTruthy();
+    // ...and only ONCE: a repeat for the same scope yields NIL.
+    expect(String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value)).toBe("null");
+  });
+
+  test("multi-use within the turn: the token RE-ARMS after a settle — the second gated action prompts (codex r86 P2)", async () => {
+    const editor = await l2setup();
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    // First action parks + resolves.
+    const p1 = mediate(token, "bash", "first command");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    e(editor, "(fikra/approvals/fikra-approval-answer-allow)");
+    expect((await p1).decision).toBe("allow");
+    // The SAME token gates the SECOND action (used to be stale-token).
+    const p2 = mediate(token, "bash", "second command");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    e(editor, "(fikra/approvals/fikra-approval-answer-reject)");
+    expect((await p2).decision).toBe("reject");
+    // Turn end REVOKES: a third arrival with the dead token is rejected
+    // pre-prompt (unknown-token).
+    (await import("../../src/editor/api/confirmation-service.ts")).confirmationService.revokeToken(token);
+    const p3 = mediate(token, "bash", "after the turn");
+    expect((await p3).decision).toBe("reject");
+    expect((await p3).scope).toBe("unknown-token");
+  });
+
+  test("a HEADLESS interrupt still unblocks the bridge (cancel is the policy-free denial direction — codex r86 P2)", async () => {
+    const editor = await l2setup();
+    e(editor, "(require-module fikra/chat)");
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    const parked = mediate(token, "bash", "headless abort probe");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    confirmationService.resolverHint = "headless"; // even the interrupt is eval-spawned
+    e(editor, "(fikra/chat/fikra-turn-interrupt)");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+    const settled = await parked;
+    expect(settled.decision).toBe("reject"); // NOT left parked to timeout
+    confirmationService.resolverHint = "interactive";
   });
 
   test("C-g (turn-interrupt) settles a parked mediate as rejected — no approval state outlives the turn (codex r85 P2)", async () => {

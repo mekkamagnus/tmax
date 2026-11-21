@@ -39,6 +39,10 @@ interface PendingEntry {
   scope: string;
   kind: string;
   detail: string;
+  /** The token that parked this request (r87: multi-use-within-scope —
+   * the token RE-ARMS on settle so a turn's SECOND gated action can
+   * prompt; the turn's end revokes it). */
+  token: string;
   createdAt: number;
   expiresAt: number;
   resolve: (result: MediateResult) => void;
@@ -137,7 +141,12 @@ export class ConfirmationService {
     binding.used = true;
 
     const handler = this.handlers.get(request.source);
-    if (!handler) return invalid("no-handler-registered");
+    if (!handler) {
+      // No handler: re-arm (r87 — the token must survive a transient
+      // no-handler window; only a settle or revoke consumes it).
+      binding.used = false;
+      return invalid("no-handler-registered");
+    }
 
     const id = this.nextId++;
     const timeoutMs = request.timeoutMs ?? 60_000;
@@ -148,6 +157,7 @@ export class ConfirmationService {
         scope: binding.scope,
         kind: request.kind,
         detail: request.detail,
+        token: request.token,
         createdAt: Date.now(),
         expiresAt: Date.now() + timeoutMs,
         resolve,
@@ -156,6 +166,7 @@ export class ConfirmationService {
       entry.timer = setTimeout(() => {
         this.pending.delete(id);
         this.recordResolution(id, "reject", "timeout", this.resolverHint);
+        this.rearmToken(entry); // r87: a timeout is not the turn's end
         resolve({ decision: "reject", scope: entry.scope });
       }, timeoutMs);
       this.pending.set(id, entry);
@@ -201,8 +212,23 @@ export class ConfirmationService {
     this.clearTimer(entry);
     this.pending.delete(id);
     const record = this.recordResolution(id, decision, "resolver", this.resolverHint);
+    this.rearmToken(entry); // r87: settled ≠ revoked — the turn may gate again
     entry.resolve({ decision, scope: entry.scope });
     return record;
+  }
+
+  /** r87: re-arm the entry's token for the NEXT gated action in the same
+   * turn (per-action gating — the token is multi-use within its scope's
+   * lifetime; revokeToken at turn-end is what kills it). */
+  private rearmToken(entry: PendingEntry): void {
+    const binding = this.tokens.get(entry.token);
+    if (binding) binding.used = false;
+  }
+
+  /** r87: revoke a token outright (the turn ENDED — later arrivals with
+   * this token are unknown-token). Returns t when a token was removed. */
+  revokeToken(token: string): boolean {
+    return this.tokens.delete(token);
   }
 
   /** Cancel one pending request → reject. */
@@ -212,6 +238,7 @@ export class ConfirmationService {
     this.clearTimer(entry);
     this.pending.delete(id);
     this.recordResolution(id, "reject", "cancel", this.resolverHint);
+    this.rearmToken(entry); // r87: cancellation is denial, not revocation
     entry.resolve({ decision: "reject", scope: entry.scope });
     return true;
   }
@@ -223,6 +250,7 @@ export class ConfirmationService {
       this.clearTimer(entry);
       this.pending.delete(entry.id);
       this.recordResolution(entry.id, "reject", "sweep", this.resolverHint);
+      this.rearmToken(entry);
       entry.resolve({ decision: "reject", scope: entry.scope });
       swept++;
     }

@@ -40,6 +40,17 @@ must not end it AGAIN (double turn-end, gate catch).")
 (defvar fikra-claude-pid-thread (hashmap)
   "pid → thread-id (the filter/sentinel dispatch key).")
 
+(defvar fikra-claude-l2-armed nil
+  "t when THIS turn's approval token mint succeeded — the L2 flags ride
+the args only when armed (r87, codex r86 P1#2: a declined mint used to
+write a nil-token config while the flags still rode, giving claude a
+dead permission tool instead of the promised visible L1 degradation).")
+
+(defvar fikra-claude-tokens (hashmap)
+  "thread-id → this turn's approval token (r87: the sentinel REVOKES it
+at turn-end — the bridge's token dies with the turn; multi-use WITHIN
+the turn is the service's re-arm rule).")
+
 (defun fikra-backend-claude-available-p ()
   "t when the claude CLI is on PATH."
   (let ((result (shell-command "command -v claude 2>/dev/null")))
@@ -154,7 +165,7 @@ config is written per turn by fikra-claude-write-mcp-config)."
                  (append base (list "--allowedTools" trust-arg))
                  base))))
          (with-l2
-           (if (fikra-claude-approvals-probe)
+           (if (and (fikra-claude-approvals-probe) fikra-claude-l2-armed)
              (append with-trust
                      (list "--mcp-config"
                            (fikra-claude-mcp-config-path)
@@ -204,9 +215,16 @@ the virtual path was the last failure)."
   "Mint the turn's approval token and write the --mcp-config JSON.
 Returns the token (nil when the capability probe failed — L2 stays off)."
   (if (not (fikra-claude-approvals-probe))
-    nil
+    (progn
+      (setq fikra-claude-l2-armed nil)
+      nil)
     (let* ((scope (concat (fikra/thread/fikra-thread-current) "/"
                           (number-to-string (fikra/thread/fikra-thread-turn-count))))
+           ;; r87: the mint is SCOPE-LIVENESS-GATED service-side (a live
+           ;; running turn only — pre-mints for not-yet-started turns are
+           ;; refused, so no held token can survive into the live turn).
+           ;; ARMED tracks the mint here (the mint's owner) — args omit
+           ;; the L2 flags when it declined.
            (token (confirmation-token-mint "fikra" scope))
            (path (fikra-claude-mcp-config-path)))
       (fikra-claude-mcp-ensure-dir)
@@ -220,6 +238,9 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
                 "\"command\":\"bun\","
                 "\"args\":[\"" (fikra-claude-mcp-bridge-path) "\",\"fikra\",\""
                 token "\"]}}}"))
+      (editor/keymaps/keymap-mutable-set! fikra-claude-tokens
+        (fikra/thread/fikra-thread-current) token)
+      (setq fikra-claude-l2-armed t)
       ;; Best-effort 0600 (gate note): the token authorizes ORIGINATING a
       ;; mediate, never resolving — but don't leave it world-readable.
       (shell-command (concat "chmod 600 " (fikra-claude-shq path)))
@@ -499,7 +520,9 @@ scope names THIS turn) and BEFORE the spawn (args reference the path)."
     (setq fikra-claude-saw-partial nil)
     (fikra/thread/fikra-thread-turn-begin)
     ;; L2: mint the turn's token + config (nil-op when the CLI lacks the
-    ;; permission hook — args omit the flags too, same probe).
+    ;; permission hook — args omit the flags too, same probe). r87: the
+    ;; mint's success/failure arms/disarms the flags INSIDE (a declined
+    ;; mint = honest L1, never a dead permission tool).
     (fikra-claude-write-mcp-config)
     (let ((args (fikra-backend-claude-args message sid)))
       (let ((pid (make-process
@@ -583,6 +606,14 @@ not mutate the focused thread's state."
     (fikra/thread/fikra-thread-focus thread-id)
     (fikra/thread/fikra-thread-turn-end
       (if (= exit-code 0) "completed" "error"))
+    ;; r87: the turn ended — REVOKE its approval token (multi-use within
+    ;; the turn is the service's re-arm rule; the token must not outlive
+    ;; the turn). Guarded: revocation must never break turn-end.
+    (condition-case nil
+      (let ((tok (hashmap-get fikra-claude-tokens thread-id)))
+        (if tok (confirmation-token-revoke tok))
+        (editor/keymaps/keymap-mutable-set! fikra-claude-tokens thread-id nil))
+      (error () nil))
     (fikra/thread/fikra-thread-focus prev)
     thread-id))
 
