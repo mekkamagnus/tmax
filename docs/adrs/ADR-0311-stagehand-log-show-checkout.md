@@ -12,9 +12,13 @@ generation-guard pattern), a faced show view (#289's grammar), and
 the tier's only remaining mutation (checkout). Three debugging
 findings shaped the implementation and are recorded for the cluster:
 
-1. **`:filter`/`:sentinel` names eval GLOBALLY** — module functions
-   are invisible there (qualified or not). Top-level bridge defuns
-   outside the defmodule forward to the qualified module fns.
+1. **`:filter`/`:sentinel` callbacks must be EXPORTED module fns**
+   — the callback name evals outside the module's lexical context, so
+   an unexported filter is an invisible "Undefined symbol" (the
+   process-callback-exports inventory test pins this). CORRECTION of
+   an earlier reading: global bridge defuns are NOT needed once the
+   fns are exported — an initial bridge workaround masked a second
+   bug (finding 3) and was removed.
 2. **`buffer-append-to` is unreliable for streaming** — it appends
    into a buffer object the current-buffer read path does not observe;
    fikra's event.tlisp already documents the TEMPORARY-SWITCH

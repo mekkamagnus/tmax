@@ -83,8 +83,8 @@ g does the same). Unborn → 'no commits yet'; no repo → a status."
                                     (concat "--format=%h" (stagehand-us) "%d" (stagehand-us) "%s")
                                     "--color=never")
                      :cwd root
-                     :filter "stagehand-log-filter-bridge"
-                     :sentinel "stagehand-log-sentinel-bridge")))
+                     :filter "stagehand/log/stagehand-log-filter"
+                     :sentinel "stagehand/log/stagehand-log-sentinel")))
           (keymap-mutable-set! stagehand-log-pid-gen
             (number-to-string pid) stagehand-log-generation))
         (editor-set-status "Stagehand: log streaming…"))))))
@@ -461,12 +461,3 @@ streaming contexts; switch-append-restore is verified end-to-end)."
   t)
 
 (provide "stagehand-log"))
-
-;; Global bridges (top-level, OUTSIDE the module): make-process's
-;; :filter/:sentinel names eval in the GLOBAL environment, where
-;; module functions are not visible (the process-ops test pattern).
-(defun stagehand-log-filter-bridge (pid output)
-  (stagehand/log/stagehand-log-filter pid output))
-
-(defun stagehand-log-sentinel-bridge (pid exit-code)
-  (stagehand/log/stagehand-log-sentinel pid exit-code))
