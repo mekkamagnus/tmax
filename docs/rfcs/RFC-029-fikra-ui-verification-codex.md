@@ -963,3 +963,12 @@ The standing 6 predated the screen's r24-r37 evolution (verified patch generatio
 - **r119 (`50ca291`, PASS 6/10)**: settle-home — decisions settle the ORIGINATING thread (no stranding after a focus switch).
 
 **The native loop now mediates its own model actions.** Named: per-action ref independence, parked-reply resumption, async exec, streaming, buffer-read. Board stays **70/80** pending the section re-grade.
+
+## Rounds 120-123 — the native loop's decision lifecycle (resumption, ordering, home-binding)
+
+- **r120 (`2ccab7d`, 6/10)**: parked-reply resumption + buffer_read. Interpreter catches: quoted symbols are not interned across reader literals ((eq res 'parked) across fns is FALSE — name comparison); `cons` requires a proper-list tail ((cons x nil) THROWS — swallowed errors silently dropped the park's rest).
+- **r121 (`d879bb2`, 6/10)**: pre-park results ride the park (parked-acc); a re-park holds the next model request (done/reparked signals).
+- **r122 (`0c3fe1c`, PASS-on-claims 7/10)**: tool results keep CALL order — both decision paths join their result to the saved acc at the parked call's position.
+- **r123 (`2195def`, PASS 7/10)**: the resumed remainder runs home-bound (resume-rest-for) — every resumed bash/read/edit resolves the originating dir; focus restored.
+
+**Named**: next-round ownership (the continuation's chat re-fire must stay home-bound), regression strength (a distinct away-dir), per-action ref independence, async exec, streaming. Board stays **70/80** pending the re-grade.
