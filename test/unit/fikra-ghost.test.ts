@@ -279,9 +279,27 @@ describe("#8.8 ghost — landing guards (r90, codex r89 catches)", () => {
     e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: " OLD" }))}")`);
     e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
     expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
-    // The newer request's pending state SURVIVED the stale arrival.
-    const after = e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 8 "const total = items." "http://127.0.0.1:1")');
-    expect(String(after.value)).toBe("8");
+    // The NEWER request's response still lands afterwards (its pending
+    // state survived the stale arrival — r90: codex noted the reseed
+    // proved nothing; DELIVER request 8's response).
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 8 "${hex(JSON.stringify({ response: " NEW" }))}")`);
+    e(editor, `(fikra-http-complete 8 200 "${hex("{}")}")`);
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-text)").value)).toBe(" NEW");
+  });
+
+  test("a stale ERROR is ignored entirely (no pending clear, no error footer — codex r90 P1)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "const total = items.")');
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 7 "const total = items." "http://127.0.0.1:1")');
+    e(editor, '(fikra/ghost/fikra-ghost-ollama-seed 8 "const total = items." "http://127.0.0.1:1")');
+    // The OLD request errors late.
+    e(editor, `(fikra-http-complete 7 500 "${hex("boom")}")`);
+    expect(String(e(editor, "(editor-status)").value)).not.toContain("unavailable");
+    // The NEWER request still lands — the error cleared nothing.
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 8 "${hex(JSON.stringify({ response: " after-error" }))}")`);
+    e(editor, `(fikra-http-complete 8 200 "${hex("{}")}")`);
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-text)").value)).toBe(" after-error");
   });
 
   test("switching the source to none CANCELS the landing", async () => {
