@@ -370,6 +370,50 @@ describe("#286 — folding + navigation", () => {
     expect(strip(bufferText(editor))).toContain("newline content");
   });
 
+  test("a NESTED package dir: the GIT root wins over the project marker; RET joins correctly (codex r3 #1)", () => {
+    const top = process.cwd();
+    mkdirSync(join(top, "sub"));
+    writeFileSync(join(top, "sub", "package.json"), "{}\n");
+    writeFileSync(join(top, "sub", "nested.txt"), "nested content\n");
+    // cwd INSIDE the marked package — the root must still be the repo.
+    process.chdir(join(top, "sub"));
+    editor.setClientLaunchDir(join(top, "sub"));
+    statusOf(editor);
+    const root = String(e(editor, "(stagehand/status/stagehand-status-root)").value);
+    expect(root).toBe(top); // the GIT root, not the package dir
+    // RET joins the porcelain path (sub/nested.txt) to the GIT root.
+    e(editor, "(cursor-move 3 0)"); // first file row
+    e(editor, "(stagehand/status/stagehand-status-open-file)");
+    expect(strip(bufferText(editor))).toContain("nested content");
+    process.chdir(top);
+    editor.setClientLaunchDir(top);
+  });
+
+  test("a project marker WITHOUT .git → 'not in a repository' (codex r3 #1)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "i286m-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "package.json"), "{}\n");
+    process.chdir(dir);
+    editor.setClientLaunchDir(dir);
+    const before = String(e(editor, "(buffer-current)").value);
+    e(editor, "(stagehand/status/stagehand-status)");
+    expect(String(e(editor, "(buffer-current)").value)).toBe(before);
+    expect(String(e(editor, "(editor-status)").value)).toContain("not in a repository");
+  });
+
+  test("files INSIDE an untracked directory are individually listed and openable (codex r3 #2)", () => {
+    mkdirSync(join(process.cwd(), "newdir"));
+    writeFileSync(join(process.cwd(), "newdir", "inner.txt"), "inner content\n");
+    const t = statusOf(editor);
+    expect(t).toContain("?? newdir/inner.txt");
+    // The collapsed form is gone: 'newdir/' appears ONLY inside the
+    // full per-file row.
+    expect((t.match(/\?\? newdir\/$/m) || []).length).toBe(0);
+    e(editor, "(cursor-move 3 0)"); // first file row = newdir/inner.txt
+    e(editor, "(stagehand/status/stagehand-status-open-file)");
+    expect(strip(bufferText(editor))).toContain("inner content");
+  });
+
   test("the KEYS: SPC g opens; n/p/TAB/g/q/RET dispatch in the buffer", async () => {
     writeFileSync(join(process.cwd(), "a.txt"), "a\n");
     // SPC g dispatches the status command from anywhere.

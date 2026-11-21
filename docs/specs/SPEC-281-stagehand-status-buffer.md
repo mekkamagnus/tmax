@@ -23,15 +23,23 @@ buffer's keymap.
 - **Sections**: `??` → Untracked; worktree-side column → Unstaged;
   index-side column → Staged; the conflicted set (DD AU UD UA DU AA UU)
   → a distinct fourth Conflicted section.
-- **Repository + error states**: fresh `project-detect-root` every
-  invocation (no cached root). Not a repo → status message, no buffer.
-  Git failure (exit ≥1) → status names exit + first stderr line, no
-  buffer. Unborn → buffer renders, header `unborn: <branch>`
-  (symbolic-ref resolves on unborn repos; `rev-parse --verify HEAD`
-  failing is the discriminator — a bare symbolic-ref failure means
-  DETACHED, giving `HEAD detached at <sha>`). Empty → the four empty
-  sections + `nothing to commit, working tree clean`. No upstream →
-  the ` no upstream` suffix.
+- **Repository + error states** (codex r3): fresh detection every
+  invocation via `git rev-parse --show-toplevel` from the current
+  file's directory (NOT the generic project-detect-root — a nested
+  package.json marker must not win, since porcelain paths are relative
+  to the REPO root and RET joins would mis-target in a monorepo); a
+  failing rev-parse with a `.git` entry present = a BROKEN repo → the
+  render path reports the honest git failure; no `.git` → status
+  message, no buffer. Git failure (exit ≥1) → status names exit +
+  first stderr line, no buffer. Unborn → buffer renders, header
+  `unborn: <branch>` (symbolic-ref resolves on unborn repos;
+  `rev-parse --verify HEAD` failing is the discriminator — a bare
+  symbolic-ref failure means DETACHED, giving `HEAD detached at
+  <sha>`). Empty → the four empty sections + `nothing to commit,
+  working tree clean`. No upstream → the ` no upstream` suffix.
+  Untracked directories list their FILES individually
+  (`--untracked-files=all` — git's default `?? dir/` collapsing hides
+  them from navigation and RET).
 - **Folding + navigation**: TAB on a section header toggles fold state
   keyed by SECTION NAME in a hashmap — survives refresh (g re-parses in
   place). The rendered buffer is fold-aware (a folded section shows its
@@ -77,7 +85,9 @@ buffer's keymap.
       sections
 - [x] Real temp-repo tests: normal, empty, unborn, detached,
       no-upstream, conflicted (UU via a real merge), rename with spaces
-      in BOTH names, leading-dash filename, unicode filename
+      in BOTH names, leading-dash filename, unicode filename, the
+      nested-package-marker git-root case, the marker-without-.git
+      not-a-repo case, and files inside an untracked directory
 - [x] Git-failure and non-repo statuses (no buffer switch); fold
       persistence across refresh
 - [x] n/p/TAB/g/q/RET behaviors tested — via exported functions AND

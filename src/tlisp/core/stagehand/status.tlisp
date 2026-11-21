@@ -328,11 +328,47 @@ cursor's row is synced BEFORE the re-render so j/k position survives)."
     (editor-set-status "Stagehand: no status to refresh")))
 
 ;; ── the entry point ────────────────────────────────────────────────
+(defun stagehand-detect-root ()
+  "The GIT repository root for the current file/cwd (`rev-parse
+--show-toplevel`), or nil outside a repository. NOT the generic
+project-detect-root: porcelain paths are relative to the REPO root,
+so a nested package.json marker must not win (a monorepo package
+would mis-join every RET path), and a marker-only directory with no
+.git must report 'not in a repository', not a git failure."
+  (let* ((dir (or (stagehand-dir-of (buffer-filename)) "."))
+         (res (shell-exec
+                (concat "cd " (stagehand-shq dir)
+                        " && git rev-parse --show-toplevel")))
+         (out (car res))
+         (exit (car (cdr (cdr res)))))
+    (cond
+      ((and (numberp exit) (= exit 0))
+        (string-trim (stagehand-first-line out)))
+      ;; A .git entry with a failing rev-parse = a BROKEN repo — return
+      ;; the directory itself so the render path reports the honest git
+      ;; failure (exit + stderr), not a false 'not in a repository'.
+      ((file-exists-p (concat dir "/.git")) dir)
+      (t nil))))
+
+(defun stagehand-dir-of (path)
+  ;; The directory portion of PATH (up to the LAST '/'), else nil.
+  (if (or (null path) (string= path ""))
+    nil
+    (let ((cut (stagehand-last-slash path (- (length path) 1))))
+      (if cut (substring path 0 cut) nil))))
+
+(defun stagehand-last-slash (s i)
+  (if (< i 0)
+    nil
+    (if (string= (substring s i (+ i 1)) "/")
+      i
+      (stagehand-last-slash s (- i 1)))))
+
 (defun stagehand-status ()
   "Open/refresh the *Stagehand* status buffer for the current
 repository (fresh root detection every invocation)."
   (interactive)
-  (let ((root (project-detect-root (or (buffer-filename) "."))))
+  (let ((root (stagehand-detect-root)))
     (if (null root)
       (editor-set-status "Stagehand: not in a repository")
       (progn
@@ -369,7 +405,9 @@ arg; the quoting is the apostrophe-escape pattern)."
       (concat (car parts) sep (stagehand-join (cdr parts) sep)))))
 
 (defun stagehand-status-render (root)
-  (let* ((res (stagehand-git "status --porcelain=v1 -z" root))
+  ;; --untracked-files=all: git collapses a new directory to '?? dir/'
+  ;; by default — its files must be individually navigable/openable.
+  (let* ((res (stagehand-git "status --porcelain=v1 -z --untracked-files=all" root))
           (out (car res))
           (err (car (cdr res)))
           (exit (car (cdr (cdr res)))))
