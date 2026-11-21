@@ -35,11 +35,13 @@ describe("make-promise (RFC-018 Step 1.4)", () => {
       `(async-let () (make-promise (lambda () (shell-exec "echo hi"))))`,
     );
     const value = expectRight(result, `T-Lisp failed`);
-    // shell-exec returns (stdout stderr exitCode); the first element is "hi\n".
+    // shell-exec returns (stdout stderr exitCode) BYTE-FAITHFUL (#286
+    // codex r4: no trim — porcelain records can lead with a space), so
+    // the first element is "hi\n".
     expect(value).toEqual({
       type: "list",
       value: [
-        { type: "string", value: "hi" },
+        { type: "string", value: "hi\n" },
         { type: "string", value: "" },
         { type: "number", value: 0 },
       ],
