@@ -23,6 +23,10 @@ export interface RepaintSnapshot {
   flashJson: string;
   /** §8.8: ghost onset/clear/supersede. */
   ghostText: string | undefined;
+  /** #319: the transient segment STRING — frozen onset, clear, and any
+   * served change repaint (a frozen frame the client never displays
+   * must not slip through on an unchanged counter pair). */
+  transientSegment: string | undefined;
 }
 
 export function repaintSnapshot(
@@ -40,6 +44,7 @@ export function repaintSnapshot(
     cursorColumn: state.cursorPosition.column,
     flashJson: JSON.stringify(state.flashSpans),
     ghostText: state.ghostText,
+    transientSegment: state.transientSegment,
   };
 }
 
@@ -56,7 +61,10 @@ export function shouldRepaint(prev: RepaintSnapshot, next: RepaintSnapshot): boo
     prev.cursorLine !== next.cursorLine ||
     prev.cursorColumn !== next.cursorColumn ||
     prev.flashJson !== next.flashJson ||
-    prev.ghostText !== next.ghostText
+    prev.ghostText !== next.ghostText ||
+    // #319: segment onset (undefined → frozen string), clear (→
+    // undefined), and any served change.
+    prev.transientSegment !== next.transientSegment
   );
 }
 

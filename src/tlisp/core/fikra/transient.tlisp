@@ -277,7 +277,11 @@ regardless of the tick/poll race order."
             (fikra-transient-format-elapsed
               (fikra-transient-frozen-ms-of id))))
   (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-age id 0)
-  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 1))
+  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 1)
+  ;; Announce: the terminal frame CHANGES the display — clients whose
+  ;; only delta is this segment must repaint (codex r2: a frozen frame
+  ;; the client never displays must not be served-then-cleared unseen).
+  (setq fikra-transient-rev (+ 1 fikra-transient-rev)))
 
 ;; The SERVE path (serialize's withTransientRevision) calls this after a
 ;; frozen segment rides a response: the NEXT tick may clear it.

@@ -20,6 +20,7 @@ const base: RepaintSnapshot = {
   cursorColumn: 0,
   flashJson: "undefined",
   ghostText: undefined,
+  transientSegment: undefined,
 };
 const snap = (over: Partial<RepaintSnapshot> = {}): RepaintSnapshot => ({ ...base, ...over });
 
@@ -44,6 +45,12 @@ describe("#318 — the pure repaint decision", () => {
     expect(shouldRepaint(snap({ flashJson: '"yy"' }), snap({ flashJson: '"y"' }))).toBe(true);
     // §8.8: ghost onset.
     expect(shouldRepaint(snap(), snap({ ghostText: "suggestion" }))).toBe(true);
+    // #319 (codex r2): frozen-segment ONSET, CLEAR, and change repaint even
+    // with the counter pair fixed — a frame the client never displays must
+    // not slip through.
+    expect(shouldRepaint(snap(), snap({ transientSegment: "✓ reading · 4 chunks · 1s" }))).toBe(true);
+    expect(shouldRepaint(snap({ transientSegment: "✓ reading · 4 chunks · 1s" }), snap())).toBe(true);
+    expect(shouldRepaint(snap({ transientSegment: "✓ reading · 4 chunks · 1s" }), snap({ transientSegment: "✓ editing · 4 chunks · 1s" }))).toBe(true);
   });
 
   test("repaintSnapshot maps the state + BOTH counters (the poll's inputs)", () => {

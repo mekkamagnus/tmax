@@ -17,22 +17,34 @@ a bare `working…` — no counts, no elapsed, and no honest token line.
 The indicator rides #318's layer unchanged in mechanism, enriched in
 content: `<glyph> <gerund> · N chunks · elapsed`.
 
-- **Honesty split**: the LIVE count is CHUNKS (FAEP `text-delta` +
-  `tool-call` — the issue's named rule, counted at both emit funnels);
-  TOKENS appear only as the provider's report — the CLI `result` line
-  maps to a PERSISTED `usage` FAEP event rendered as `✓ 1,234 tokens`
-  (replay-identical; transient state never touches the final line).
-- **Elapsed**: per-thread start stamped at the FIRST streamed event via
-  the new `editor-time-now` primitive (raw TS clock — same altitude as
-  the timer shell; baselines 433→434); rendered against the
-  tick-stamped now.
-- **The one-tick terminal delay**: a terminal edge FREEZES the frame
-  (elapsed captured then — the clock stops) for two ticks: the frozen ✓
-  frame rides the first post-terminal poll, the next tick clears it,
-  and only then does the interval stop. This amends #318's stop rule
-  (stop on last terminal → stop one tick AFTER) so both frames ride
-  real poll cycles; the reconcile branch (inactive tick + running
-  thread → resume) is unchanged.
+- **Honesty split**: the LIVE count is CHUNKS — the two DELTA kinds
+  (`text-delta` + `tool-input-delta`, the issue's named rule; the CLI's
+  `input_json_delta` partials become persisted invisible
+  `tool-input-delta` events — completions are not deltas and do not
+  count), tallied at both emit funnels; TOKENS appear only as the
+  provider's report — the CLI `result` line maps to a PERSISTED `usage`
+  FAEP event rendered as `✓ 1,234 tokens` (replay-identical;
+  transient state never touches the final line).
+- **Elapsed**: per-thread start stamped at the turn's FIRST STREAMED
+  event (any content kind — a thought starts the clock though it does
+  not count) via the new `editor-time-now` primitive (raw TS clock —
+  same altitude as the timer shell; baselines 433→434); rendered
+  against the tick-stamped now. The approval resume
+  (confirming→running, the same turn) preserves the turn's state —
+  reset only on a fresh turn.
+- **The RENDER-GATED terminal sequence**: a terminal edge captures the
+  COMPLETE frozen frame as a STRING (elapsed at the edge, ✓, the gerund
+  as it stands — byte-stable across later ticks) AND bumps the
+  transient revision (clients whose only delta is the segment repaint).
+  The clear is render-gated: the first tick after a poll SERVES the
+  frame clears it, then the interval stops — both the frozen and clear
+  frames ride real poll cycles in either tick/poll order. A headless
+  bound (~10 unserved ticks) prevents a no-client leak. Single
+  acknowledgment: one serve marks the frame for all viewers of that
+  thread — a second viewer's poll within the 200ms window still sees it
+  (named limitation). This amends #318's stop rule (stop on last
+  terminal → stop once every frozen frame has cleared); the reconcile
+  branch is unchanged.
 - **Determinism in tests**: the live 200ms shell races manual ticks, so
   the suites silence the shell after setup and drive ticks with
   explicit clocks — the reconcile branch re-activates the state machine
