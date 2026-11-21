@@ -9,8 +9,10 @@ filings, and the dependency corrections — nothing else.
 ## Design
 
 - **The as-built surface** (ADR-0306): `make-process` (argv, `:cwd`,
-  `:env`, `:filter` CHUNKED streaming — the consumer reassembles
-  lines, `:sentinel` exit chained after the filters) + `process-write`
+  `:env`, `:filter` CHUNKED STDOUT streaming — the consumer reassembles
+  lines; stderr drains to the exit-tail, never the filter;
+  `:sentinel` fires on the exit-captured filter chain (straggler
+  chunks may follow it by design) + `process-write`
   (table handles) + the signal surface with generation guards
   (#308's contract); the fikra claude backend is the live production
   consumer.

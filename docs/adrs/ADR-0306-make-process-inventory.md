@@ -16,13 +16,15 @@ as-built surface and the REAL gaps, each routed to its own issue.
 ## The as-built surface (verified in `src/editor/tlisp-api.ts`)
 
 - **`make-process`** (line ~1594): argv command + args; `:cwd`, `:env`
-  kwargs; a `:filter` callback receiving CHUNKED stdout/stderr (NOT
-  line-buffered — the fikra backend's filter itself reassembles lines
-  from raw chunks, the #208 serialized-filter contract); a
-  `:sentinel` callback (exit-code + pid, chained after ALL filter
-  evals settle — post-sentinel output is possible in principle and is
-  dropped by the fikra reassembly, not the primitive). Returns the
-  per-editor PROCESS-TABLE handle (an internal id, not the OS pid).
+  kwargs; a `:filter` callback receiving CHUNKED STDOUT only (NOT
+  line-buffered, and NOT stderr — stderr drains into the exit-tail,
+  never the filter; the fikra backend's filter itself reassembles
+  lines from raw chunks, the #208 serialized-filter contract); a
+  `:sentinel` callback (exit-code + pid, fired on the filter chain
+  CAPTURED AT PROCESS EXIT — a bounded drain, not a wait for all
+  evals: straggler chunks keep flowing through the serialized chain
+  AFTER the sentinel by design). Returns the per-editor PROCESS-TABLE
+  handle (an internal id, not the OS pid).
 - **`process-write`** (line ~1754): stdin writes (table-handle, data).
 - **Signals**: kill via the signal surface; the generation-guard
   discipline (a stale pid is never signaled) is #308's contract.
