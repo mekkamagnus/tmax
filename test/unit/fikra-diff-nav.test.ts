@@ -237,7 +237,7 @@ describe("#8.4 binary numstat (r76 — codex r75 P1)", () => {
     expect(text).toContain("bin.o");
     expect(text).toContain("feature-a");
     // Exactly ONE keys line (r76: the completed view doubled the hint).
-    expect(text.split("n/N: next/prev file").length - 1).toBe(1);
+    expect(text.split("n/N file").length - 1).toBe(1);
   });
 });
 
@@ -353,5 +353,26 @@ describe("#8.4 directory renames (r99 — codex r98 P2)", () => {
     e(ed, "(fikra/diff/fikra-turn-diff-for 1)");
     const text = String(e(ed, "(buffer-text)").value);
     expect(text).toMatch(/R .*olddir.*=>.*newdir.*file\.txt/);
+  });
+});
+
+describe("#8.4 SPC a n (r100 — the mockup footer command)", () => {
+  test("SPC a n is registered and opens the LATEST completed turn from outside the viewer", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, "(require-module fikra/mode)");
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    ref("nav", 1, "baseline", "line1\n");
+    ref("nav", 1, "completion", "line1\nfeature-a\n");
+    e(ed, '(require-module "fikra/diff")');
+    expect(JSON.stringify(e(ed, '(key-binding "SPC a n" "normal")').value)).toContain("fikra-diff-turn-cmd-next");
+    e(ed, "(fikra/diff/fikra-diff-turn-cmd-next)");
+    expect(String(e(ed, "(buffer-text)").value)).toContain("turn 1");
+    // Inside the viewer it steps turns (the mockup's 'next turn').
+    e(ed, "(fikra/diff/fikra-diff-turn-cmd-prev)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("turn");
   });
 });

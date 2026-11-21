@@ -4,7 +4,8 @@
           fikra-diff-for-paths
           fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
           fikra-revert-confirm-table fikra-revert-confirm-accept
-          fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed fikra-last-completed-turn fikra-turn-diff-for)
+          fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed fikra-last-completed-turn fikra-turn-diff-for
+          fikra-diff-turn-cmd-next fikra-diff-turn-cmd-prev)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -301,10 +302,25 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
 (defun fikra-diff-arrow-pos (s i)
   (fikra-diff-strpos s " => " i))
 
-;; The mockup's footer hint — AFTER the patch (r97: the controls ride
-;; below the content, not between the summary and the patch).
+;; The mockup's footer — AFTER the patch (r97: the controls ride below
+;; the content). r100: the mockup's SPC-a vocabulary leads (revert /
+;; prev-turn / next-turn); the viewer's LOCAL keys follow.
 (defun fikra-diff-keys-footer ()
-  (concat "\n n/N: next/prev file · ]/[ next/prev turn · r revert turn · SPC a d live view \n"))
+  (concat "\n SPC a R revert this turn · SPC a n next turn · [ prev turn · n/N file · r revert · SPC a d live view \n"))
+
+;; SPC a n / SPC a p (mockup 8.4's footer commands): step turns from
+;; OUTSIDE the viewer too — with no completed view open, `n` opens the
+;; LATEST completed turn first (the entry matches SPC a R's behavior).
+(defun fikra-diff-turn-cmd (delta)
+  (if (not fikra-diff-view-turn)
+    (let ((latest (fikra-last-completed-turn)))
+      (if (> latest 0)
+        (fikra-turn-diff-for latest)
+        (editor-set-status "Fikra: no completed turns")))
+    (fikra-diff-turn-step delta)))
+
+(defun fikra-diff-turn-cmd-next () (interactive) (fikra-diff-turn-cmd 1))
+(defun fikra-diff-turn-cmd-prev () (interactive) (fikra-diff-turn-cmd -1))
 
 ;; ROWS are ((path adds dels) ...); IDX 1 = adds column, 2 = dels.
 (defun fikra-diff-total (rows idx)
