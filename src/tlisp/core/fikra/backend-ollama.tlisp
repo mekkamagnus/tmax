@@ -3,7 +3,9 @@
           fikra-backend-ollama-start-turn fikra-backend-ollama-abort
           fikra-backend-ollama-model-get fikra-backend-ollama-http-filter
           fikra-backend-ollama-complete
-          fikra-backend-ollama-seed fikra-ollama-history-messages)
+          fikra-backend-ollama-seed fikra-ollama-history-messages
+          fikra-ollama-messages-get fikra-ollama-tools-json
+          fikra-backend-ollama-set-model)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -40,6 +42,15 @@ completion source uses).")
 (defvar fikra-ollama-threads (hashmap)
   "request-id → the THREAD the turn belongs to (a late reply must land
 on its own thread, never whatever is focused at land time).")
+(defvar fikra-ollama-messages ""
+  "The turn's accumulated messages-array body (history + user, then each
+tool round's assistant tool_call + tool results — the loop's working
+context; rebuilt per turn).")
+(defvar fikra-ollama-round 0
+  "The current tool round (the loop cap guard).")
+(defvar fikra-ollama-max-rounds 4
+  "Tool rounds before the loop stops honestly (an endless tool loop must
+not spin forever).")
 (defvar fikra-ollama-latest-id nil
   "The LATEST fired request (r110: a replacement turn's pending must not
 adopt the REPLACED request's reply — only the latest may land).")
@@ -58,6 +69,24 @@ availability gate must be synchronous; the turn itself is async)."
         (list "interactive-approvals" nil)
         (list "streaming" nil)))
 
+;; Drop ONE trailing comma (the accumulator appends separators; the
+;; array close must not follow a comma — ollama 400s ',]').
+(defun fikra-ollama-chomp (s)
+  (if (and (> (length s) 0) (string= (substring s (- (length s) 1) (length s)) ","))
+    (substring s 0 (- (length s) 1))
+    s))
+
+;; Test accessor for the message accumulator (defvars unreadable
+;; cross-module).
+(defun fikra-ollama-messages-get ()
+  fikra-ollama-messages)
+
+;; Admin: pin the chat model (the auto-resolution takes the FIRST
+;; installed model, which may lack tool support — the live script pins
+;; a tools-capable one).
+(defun fikra-backend-ollama-set-model (name)
+  (setq fikra-ollama-model name))
+
 (defun fikra-backend-ollama-model-get ()
   "The resolved chat model (the modeline's backend segment reads it)."
   fikra-ollama-model)
@@ -69,13 +98,20 @@ availability gate must be synchronous; the turn itself is async)."
   the turn). Model unknown → the tags request resolves it and its
   completion re-fires the chat for the still-pending message."
   (setq fikra-ollama-pending-message message)
+  (setq fikra-ollama-round 0)
   (fikra/thread/fikra-thread-turn-begin)
   ;; The model resolves SYNCHRONOUSLY (a light curl, like the probe) —
   ;; no tags round-trip through the async machinery.
   (if (not fikra-ollama-model)
     (fikra-ollama-resolve-model))
   (if fikra-ollama-model
-    (fikra-ollama-chat message)
+    (progn
+      ;; The accumulator starts as history + the user message (once per
+      ;; turn; tool rounds append to it).
+      (setq fikra-ollama-messages
+        (concat (fikra-ollama-history-messages)
+                "{\"role\":\"user\",\"content\":" (fikra-ollama-json-string message) "},"))
+      (fikra-ollama-chat message))
     (progn
       (fikra/thread/fikra-thread-turn-end "error")
       (editor-set-status "Fikra-ollama: no model installed")))
@@ -85,15 +121,17 @@ availability gate must be synchronous; the turn itself is async)."
   "The message awaiting its reply (the land-time guard).")
 
 (defun fikra-ollama-chat (message)
-  ;; The messages payload: system + the thread's PRIOR user/assistant
-  ;; turns (r109, codex r108 P2: historyless turns could not follow a
-  ;; conversation) + the new user message.
+  ;; The messages payload: system + the ACCUMULATOR (the history built
+  ;; once at the first fire, then each tool round appends its exchange —
+  ;; r112: tool rounds must ride the NEXT request or the model forgets
+  ;; its own tool use) + TOOLS (the model-driven loop).
   (let* ((body (concat "{\"model\":\"" fikra-ollama-model
                        "\",\"stream\":false,\"messages\":["
-                       "{\"role\":\"system\",\"content\":\"You are a concise coding assistant inside the tmax editor. Reply briefly.\"},"
-                       (fikra-ollama-history-messages)
-                       "{\"role\":\"user\",\"content\":" (fikra-ollama-json-string message)
-                       "}]}")))
+                       "{\"role\":\"system\",\"content\":\"You are a concise coding assistant inside the tmax editor. Reply briefly. Use the provided tools when they help.\"},"
+                       (fikra-ollama-chomp fikra-ollama-messages)
+                       "],\"tools\":["
+                       (fikra-ollama-tools-json)
+                       "],\"options\":{\"num_ctx\":4096}}")))
     ;; Content-Type matters: bun's fetch defaults a string body to
     ;; text/plain — ollama 400s it (r108 live catch; curl -d worked).
     (let ((id (http-request (concat fikra-ollama-url "/api/chat")
@@ -118,6 +156,118 @@ availability gate must be synchronous; the turn itself is async)."
 ;; in order; the memory is newest-first — reverse for array order). The
 ;; in-flight user message is NOT yet in memory (the caller emits it), so
 ;; the history ends just before it.
+;; ── the tools (the model-driven loop, r112) ─────────────────────────
+;; Two tools, hand-built JSON (the schema layer): bash {command} and
+;; buffer_edit {path, content}. The loop is L1-honest (no mediation —
+;; the L2 gate integration is the named follow-up).
+(defun fikra-ollama-tools-json ()
+  (concat "{\"type\":\"function\",\"function\":{"
+          "\"name\":\"bash\",\"description\":\"Run a shell command in the project directory and return its output.\","
+          "\"parameters\":{\"type\":\"object\",\"properties\":{"
+          "\"command\":{\"type\":\"string\",\"description\":\"The command to run\"}},"
+          "\"required\":[\"command\"]}}},"
+          "{\"type\":\"function\",\"function\":{"
+          "\"name\":\"buffer_edit\",\"description\":\"Write the full new content of a file (relative path).\","
+          "\"parameters\":{\"type\":\"object\",\"properties\":{"
+          "\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},"
+          "\"required\":[\"path\",\"content\"]}}}"))
+
+;; One tool ROUND: append the assistant tool_call message (the model's
+;; own record), execute each call, append the tool results, RE-FIRE. The
+;; arguments ride as a JSON STRING inside the reply's JSON — re-embed
+;; verbatim (the accumulated messages keep the model's exact shape).
+(defun fikra-ollama-tool-round (msg tool-calls)
+  (setq fikra-ollama-round (+ fikra-ollama-round 1))
+  (setq fikra-ollama-messages
+    (concat fikra-ollama-messages
+            "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
+            (fikra-ollama-calls-json tool-calls 0 "")
+            "]},")) 
+  (let ((results (fikra-ollama-run-calls tool-calls 0 "")))
+    (setq fikra-ollama-messages
+      (concat fikra-ollama-messages results))
+    (if (>= fikra-ollama-round fikra-ollama-max-rounds)
+      (progn
+        (setq fikra-ollama-pending-message nil)
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "text-delta")
+                (list "speaker" "assistant")
+                (list "text" "(tool round cap reached — stopping the loop)")))
+        (fikra/thread/fikra-thread-turn-end "completed"))
+      (fikra-ollama-chat fikra-ollama-pending-message))))
+
+;; The tool_calls array re-embedded as JSON (the raw arguments string
+;; must survive verbatim — re-parsing loses its exact shape).
+(defun fikra-ollama-calls-json (calls i acc)
+  (if (>= i (length calls))
+    acc
+    (let* ((call (nth i calls))
+           (fn (fikra-ollama-alist-get "function" call))
+           (name (if fn (fikra-ollama-alist-get "name" fn) "?"))
+           (args (if fn (fikra-ollama-alist-get "arguments" fn) "{}")))
+      (fikra-ollama-calls-json calls (+ i 1)
+        (concat acc (if (> i 0) ",")
+                "{\"function\":{\"name\":\"" (if name name "?")
+                "\",\"arguments\":" (if args args "{}") "}}")))))
+
+(defun fikra-ollama-run-calls (calls i acc)
+  (if (>= i (length calls))
+    acc
+    (fikra-ollama-run-calls calls (+ i 1)
+      (concat acc (fikra-ollama-run-tool (nth i calls))))))
+
+;; One tool_call: execute, emit the ⚙ row + the result row, return the
+;; tool-result MESSAGE json fragment.
+(defun fikra-ollama-run-tool (call)
+  (let* ((fname (fikra-ollama-alist-get "name"
+                 (fikra-ollama-alist-get "function" call)))
+         (args-raw (fikra-ollama-alist-get "arguments"
+                     (fikra-ollama-alist-get "function" call)))
+         (args (condition-case nil (json-read-from-string (if args-raw args-raw "{}")) (error () ()))))
+    (if (string= fname "bash")
+      (fikra-ollama-run-bash call args)
+      (if (string= fname "buffer_edit")
+        (fikra-ollama-run-edit call args)
+        (fikra-ollama-tool-skip call fname)))))
+
+(defun fikra-ollama-run-bash (call args)
+  (let* ((cmd (if (fikra-ollama-alist-get "command" args)
+                (fikra-ollama-alist-get "command" args) ""))
+         (dir (fikra/thread/fikra-thread-working-dir))
+         (out (string-trim (shell-command
+                 (concat "cd " (fikra/thread/fikra-thread-shq dir)
+                         " && (" cmd ") 2>&1 | head -30")))))
+    (fikra/event/fikra-event-emit
+      (list (list "kind" "tool-call") (list "tool" "bash")
+            (list "summary" cmd)))
+    (fikra/event/fikra-event-emit
+      (list (list "kind" "tool-result") (list "ok" t)
+            (list "summary" out)))
+    ;; The tool message for the next round.
+    (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string out) "},")))
+
+(defun fikra-ollama-run-edit (call args)
+  (let* ((path (if (fikra-ollama-alist-get "path" args)
+                 (fikra-ollama-alist-get "path" args) ""))
+         (content (if (fikra-ollama-alist-get "content" args)
+                    (fikra-ollama-alist-get "content" args) ""))
+         (dir (fikra/thread/fikra-thread-working-dir))
+         (abs (concat dir "/" path)))
+    (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
+                                         (fikra/thread/fikra-thread-dirname abs))))
+    (write-file-content abs content)
+    (fikra/event/fikra-event-emit
+      (list (list "kind" "tool-call") (list "tool" "buffer-edit")
+            (list "summary" (concat path " @" (number-to-string (length content))))))
+    (fikra/event/fikra-event-emit
+      (list (list "kind" "tool-result") (list "ok" t)
+            (list "summary" (concat "wrote " path))))
+    (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "wrote " path)) "},")))
+
+(defun fikra-ollama-tool-skip (call fname)
+  (concat "{\"role\":\"tool\",\"content\":\"unknown tool: "
+          (if fname fname "?") "\"},"))
+
 ;; Events arrive OLDEST-FIRST; the history is every COMPLETED turn —
 ;; everything up to and including the LAST turn-end (the in-flight
 ;; user message is emitted BEFORE its turn-start — a turn-start cut
@@ -190,16 +340,26 @@ availability gate must be synchronous; the turn itself is async)."
          (body (hashmap-get fikra-ollama-bodies k)))
     (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k nil)
     (editor/keymaps/keymap-mutable-set! fikra-ollama-threads k nil)
-    ;; r109-r110: a reply whose turn is GONE discards — request
-    ;; identity (only the LATEST fired request may land), the thread
-    ;; guard, and the pending guard.
+    ;; r109-r110: only the LATEST fired request may land; a gone turn
+    ;; discards. r111 (codex r110 P2): a SWITCHED-AWAY thread no longer
+    ;; discards — the reply SETTLES ITS OWN THREAD via the bg-settle
+    ;; pattern (focus the firing thread, work, restore).
     (if (not (= id (if fikra-ollama-latest-id fikra-ollama-latest-id -1)))
       nil
-    (if (not (and thread-id (string= thread-id (fikra/thread/fikra-thread-current))))
+    (if (not (and thread-id fikra-ollama-pending-message))
       nil
-    (if (not fikra-ollama-pending-message)
-      nil
-    (if (not (= status 200))
+    (if (string= thread-id (fikra/thread/fikra-thread-current))
+      (fikra-ollama-handle-reply status body)
+      (let ((prev (fikra/thread/fikra-thread-current)))
+        (fikra/thread/fikra-thread-focus thread-id)
+        (fikra-ollama-handle-reply status body)
+        (fikra/thread/fikra-thread-focus prev)
+        t))))))
+
+;; The reply handling, thread-local (runs with the FIRING thread
+;; focused; the guards already ran).
+(defun fikra-ollama-handle-reply (status body)
+  (if (not (= status 200))
       (progn
         ;; The turn dies honestly: an error turn-end, a visible status.
         (setq fikra-ollama-pending-message nil)
@@ -207,12 +367,18 @@ availability gate must be synchronous; the turn itself is async)."
         (editor-set-status
           (concat "Fikra-ollama: server unreachable (" (number-to-string status)
                   ") " (substring (if body body "") 0 120))))
-      ;; The chat reply: {"message":{"role":"assistant","content":"..."}}
-      (let ((content (condition-case nil
-                        (fikra-ollama-alist-get "content"
-                          (fikra-ollama-alist-get "message"
-                            (json-read-from-string body)))
-                        (error () nil))))
+      ;; The chat reply: tool_calls → the ROUND (execute, append,
+      ;; re-fire); plain content → render + end (the existing path).
+      (let* ((msg (condition-case nil
+                     (fikra-ollama-alist-get "message"
+                       (json-read-from-string body))
+                     (error () nil)))
+             (content (if msg (fikra-ollama-alist-get "content" msg) nil))
+             (tool-calls (if msg (fikra-ollama-alist-get "tool_calls" msg) nil)))
+        (if (and tool-calls (listp tool-calls) (> (length tool-calls) 0)
+                 (< fikra-ollama-round fikra-ollama-max-rounds))
+          (fikra-ollama-tool-round msg tool-calls)
+          (progn
         (setq fikra-ollama-pending-message nil)
         (if (and content (stringp content) (> (length content) 0))
           (progn
@@ -226,7 +392,7 @@ availability gate must be synchronous; the turn itself is async)."
               (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
           (progn
             (fikra/thread/fikra-thread-turn-end "error")
-            (editor-set-status "Fikra-ollama: empty reply"))))))))))
+            (editor-set-status "Fikra-ollama: empty reply"))))))))
 
 ;; Model resolution: the tags body is small — the filter DID accumulate
 ;; nothing for tags (marker-shaped); resolve via one sync curl instead

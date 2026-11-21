@@ -34,7 +34,16 @@ if ! curl -s --max-time 3 http://localhost:11434/api/tags | grep -q '"models"'; 
 fi
 
 say "== fikra ollama CHAT live e2e ($(date '+%H:%M:%S')) =="
-MODEL=$(curl -s --max-time 5 http://localhost:11434/api/tags | python3 -c 'import sys,json; print(json.load(sys.stdin)["models"][0]["name"])')
+MODEL=$(curl -s --max-time 5 http://localhost:11434/api/tags | python3 -c '
+import sys, json
+models = [m["name"] for m in json.load(sys.stdin)["models"]]
+# Prefer a TOOLS-capable model (gemma3 lacks tool support; qwen3 and
+# dolphin-mistral carry it).
+for pref in ("qwen", "dolphin", "llama"):
+    for m in models:
+        if pref in m:
+            print(m); sys.exit()
+print(models[0])')
 say "  (pre-warming $MODEL)"
 curl -s --max-time 120 http://localhost:11434/api/generate \
   -d "{\"model\":\"$MODEL\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":4}}" > /dev/null
@@ -52,11 +61,13 @@ for i in $(seq 1 40); do [ -S "$SOCK" ] && break; sleep 0.5; done
 
 
 # ── the chat open + the raw-API turn ──────────────────────────────────
-OUT=$(ev '(progn (require-module fikra/chat) (require-module fikra/backend-ollama)
+SETUP_EXPR="(progn (require-module fikra/chat) (require-module fikra/backend-ollama)
   (require-module fikra/approvals)
   (fikra/chat/fikra-chat-open)
-  (fikra/adapter/fikra-set-backend "ollama")
-  (concat "be=" (fikra/adapter/fikra-current-backend)))' | tail -1)
+  (fikra/adapter/fikra-set-backend \"ollama\")
+  (fikra/backend-ollama/fikra-backend-ollama-set-model \"$MODEL\")
+  (concat \"be=\" (fikra/adapter/fikra-current-backend) \" model=\" (fikra/backend-ollama/fikra-backend-ollama-model-get)))"
+OUT=$(ev "$SETUP_EXPR" | tail -1)
 echo "$OUT" | grep -q "be=ollama" && ok "backend=ollama (registered + available)" || { bad "setup: $OUT"; exit 1; }
 
 ev '(fikra/chat/fikra-turn-send "Reply with exactly: the resize handler is fixed")' > /dev/null

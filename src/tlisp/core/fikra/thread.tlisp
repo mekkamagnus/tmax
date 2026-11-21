@@ -8,7 +8,7 @@
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
           fikra-thread-set-session-id fikra-thread-save fikra-thread-field
           fikra-thread-set-field
-          fikra-thread-context-dir fikra-root-from-context
+          fikra-thread-context-dir fikra-root-from-context fikra-thread-dirname
           fikra-thread-root-shell fikra-thread-shq)
 
 ;; #213 (RFC-027 §D3/§D7, Phase 1 — MINIMAL subset): one implicit "main"

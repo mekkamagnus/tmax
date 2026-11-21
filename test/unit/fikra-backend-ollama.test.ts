@@ -181,3 +181,79 @@ describe("ollama replacement turns (r110 — codex r109 P1)", () => {
     expect(bodyParts.length - 1).toBe(0);
   });
 });
+
+describe("ollama thread-switch routing (r111 — codex r110 P2)", () => {
+  test("a reply arriving after the user SWITCHED AWAY settles ITS thread", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "question on main")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 71 "live")');
+    // The user switches to another thread before the reply lands.
+    e(ed, '(require-module fikra/threads)');
+    e(ed, '(fikra/thread/fikra-thread-focus "away")');
+    expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "background answer" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 71 "${reply}")`);
+    e(ed, `(fikra-http-complete 71 200 "${hex("{}")}")`);
+    // The MAIN thread settled (not stranded); focus RESTORED to away.
+    e(ed, '(fikra/thread/fikra-thread-focus "main")');
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).toContain("background answer");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("main");
+  });
+});
+
+describe("ollama tool-using loop (r112 — the 8.1 native loop)", () => {
+  test("a tool_call round: the ⚙ rows render, the tool RUNS, the next request carries the exchange", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "list the files")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 81 "live")');
+    // Round 1: the model calls bash.
+    const r1 = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: JSON.stringify({ command: "echo tool-round-ran" }) } },
+    ] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 81 "${r1}")`);
+    e(ed, `(fikra-http-complete 81 200 "${hex("{}")}")`);
+    // The tool EXECUTED: its result row renders with the real output.
+    const mid = strip(String(e(ed, "(buffer-text)").value));
+    expect(mid).toContain("⚙ bash");
+    expect(mid).toContain("echo tool-round-ran");
+    expect(mid).toContain("tool-round-ran");
+    // The turn continues (round 2 fired — still running).
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    // The accumulator carries the exchange (the next request's context).
+    const acc = String(e(ed, "(progn (require-module fikra/backend-ollama) (fikra-ollama-messages-get))").value);
+    expect(acc).toContain('"role":"tool"');
+    expect(acc).toContain("tool-round-ran");
+    // Round 2: the model answers in plain text — the loop ends.
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 82 "live")');
+    const r2 = hex(JSON.stringify({ message: { role: "assistant", content: "done listing" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 82 "${r2}")`);
+    e(ed, `(fikra-http-complete 82 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    const final = strip(String(e(ed, "(buffer-text)").value));
+    expect(final).toContain("assistant › done listing");
+    expect(final).toContain("── completed ──");
+  });
+
+  test("buffer_edit WRITES the file and renders its row", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "create the file")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 83 "live")');
+    const r1 = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "buffer_edit", arguments: JSON.stringify({ path: "made-by-model.txt", content: "model content\n" }) } },
+    ] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 83 "${r1}")`);
+    e(ed, `(fikra-http-complete 83 200 "${hex("{}")}")`);
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text).toContain("⚙ buffer-edit");
+    expect(text).toContain("made-by-model.txt");
+    expect(String(e(ed, '(shell-command "cat made-by-model.txt")').value)).toContain("model content");
+    // End the turn (round 2 reply).
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 84 "live")');
+    const r2 = hex(JSON.stringify({ message: { role: "assistant", content: "file created" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 84 "${r2}")`);
+    e(ed, `(fikra-http-complete 84 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+  });
+});
