@@ -197,4 +197,21 @@ describe("#318 — the wire: segment + revision through the REAL helper", () => 
     const wireIdle = editorStateToJson(withTransientRevision(editor.getEditorState(), interpOf(editor)), 22, 100);
     expect((jsonToEditorState(wireIdle) as { transientSegment?: string }).transientSegment).toBeUndefined();
   });
+
+  test("the spinner reservation over-sends ONE row: the former bottom line survives the client's viewport advance (codex r4)", () => {
+    // A 30-line buffer; the wire normally carries the 22-row window
+    // (lines 0-21). With the segment present the client reserves the
+    // spinner row and may display 1-22 — the wire must cover line 22.
+    e(editor, `(buffer-insert "${Array.from({ length: 30 }, (_, i) => `line-${i}`).join("\\n")}\\n")`);
+    const state = editor.getEditorState();
+    const withSeg = { ...state, viewportTop: 0, transientSegment: "| working…" };
+    const wireSeg = editorStateToJson(withSeg, 22, 100);
+    expect(wireSeg.visibleLines!.length).toBe(23); // rows + the reserved row
+    const client = jsonToEditorState(wireSeg);
+    const formerBottom = client.currentBuffer!.getLine(22);
+    expect(String((formerBottom as { right?: unknown }).right ?? formerBottom)).toContain("line-22");
+    // Control: WITHOUT the segment the wire stays at the 22-row window.
+    const wirePlain = editorStateToJson({ ...state, viewportTop: 0 }, 22, 100);
+    expect(wirePlain.visibleLines!.length).toBe(22);
+  });
 });

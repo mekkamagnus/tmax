@@ -146,6 +146,13 @@ export function editorStateToJson(
   // gutter-reduced width conservatively; over-sending is harmless — the
   // client's ViewportBuffer just holds extra rows).
   let neededRows = rows;
+  // #318 (codex r4): the client RESERVES the spinner row from its buffer
+  // (spinnerRowReserved) and may then advance its effective viewport to
+  // keep the cursor visible — the wire must cover that window or the
+  // former bottom row renders blank. Over-sending is harmless (the
+  // ViewportBuffer just holds extra rows) — the same remedy as the wrap
+  // expansion below.
+  if (state.transientSegment) neededRows += 1;
   if (state.config?.wordWrap && renderWidth && renderWidth > 24 && buffer) {
     const cw = Math.max(20, renderWidth - 12);
     const rowLimit = rows * 6; // wire bound: pathological single-line walls
