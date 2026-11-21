@@ -700,7 +700,11 @@ turn's init event); persisted on save."
           (progn
             (require-module fikra/transient)
             (if (string= new-status "running")
-              (fikra/transient/fikra-transient-note-running (fikra-thread-current)))
+              ;; #319 (codex r1 catch 3): pass FROM — the approval resume
+              ;; (confirming→running, the SAME turn) must not reset the
+              ;; indicator; only a fresh turn (idle/error/interrupted→)
+              ;; resets.
+              (fikra/transient/fikra-transient-note-running (fikra-thread-current) from))
             (if (or (string= new-status "idle")
                     (string= new-status "error")
                     (string= new-status "interrupted"))

@@ -124,7 +124,17 @@ export function withTransientRevision<T extends object>(
     ? `(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-viewed-segment-for (hex-decode "${Buffer.from(viewedBuffer, "utf8").toString("hex")}"))) (error () nil))`
     : "(condition-case nil (progn (require-module fikra/transient) (fikra-transient-viewed-segment)) (error () nil))";
   const seg = readTransient(segExpr);
-  if (typeof seg === "string" && seg.length > 0) (state as { transientSegment?: string }).transientSegment = seg;
+  if (typeof seg === "string" && seg.length > 0) {
+    (state as { transientSegment?: string }).transientSegment = seg;
+    // #319 (codex r1 catch 4): the frozen terminal frame is RENDER-GATED —
+    // this serve stamps it, so the next tick's clear lands only after a
+    // real poll carried the frozen frame (both frames ride poll cycles
+    // regardless of the tick/poll race order).
+    const markExpr = typeof viewedBuffer === "string"
+      ? `(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-mark-rendered-for (hex-decode "${Buffer.from(viewedBuffer, "utf8").toString("hex")}"))) (error () nil))`
+      : "(condition-case nil (progn (require-module fikra/transient) (fikra/transient-mark-rendered (fikra/thread/fikra-thread-current))) (error () nil))";
+    readTransient(markExpr);
+  }
   return state;
 }
 

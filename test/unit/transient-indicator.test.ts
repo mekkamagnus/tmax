@@ -49,21 +49,28 @@ afterAll(() => {
 
 const delta = (text: string) => `(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" "${text}")))`;
 const toolCall = (name: string) => `(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "${name}")))`;
+const toolInputDelta = () => '(fikra/event/fikra-event-emit (list (list "kind" "tool-input-delta")))';
 
 describe("#319 — the honest chunk counter (the named rule)", () => {
-  test("text-delta + tool-call count; thought/turn-start/session do NOT", () => {
+  test("the DELTA kinds count (text-delta + tool-input-delta); completions/thought do NOT (but they stream)", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     silence(editor);
     e(editor, delta("hello "));
     e(editor, delta("world"));
+    e(editor, toolInputDelta());
     e(editor, toolCall("buffer-edit"));
     e(editor, '(fikra/event/fikra-event-emit (list (list "kind" "thought") (list "text" "hm")))');
     expect(chunksOf(editor, "main")).toBe(3);
-    // A NEW turn resets the counter (note-running on the ->running edge).
+    // A NEW turn resets the counter (note-running on the ->running edge);
+    // a tool-call COMPLETION streams (starts the clock) but never counts.
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")');
+    tick(editor);
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     expect(chunksOf(editor, "main")).toBe(0);
     e(editor, toolCall("bash"));
+    expect(chunksOf(editor, "main")).toBe(0);
+    e(editor, toolInputDelta());
     expect(chunksOf(editor, "main")).toBe(1);
   });
 
@@ -80,6 +87,35 @@ describe("#319 — the honest chunk counter (the named rule)", () => {
 });
 
 describe("#319 — elapsed (first-event start; the daemon owns it)", () => {
+  test("a THOUGHT starts the clock (first streamed event — not first counted)", () => {
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    silence(editor);
+    // A thought streams BEFORE any counted delta — the clock starts here.
+    e(editor, '(fikra/event/fikra-event-emit (list (list "kind" "thought") (list "text" "hm")))');
+    expect(Number(e(editor, '(fikra/transient/fikra-transient-chunks-of "main")').value)).toBe(0);
+    tick(editor, Date.now() + 2000);
+    expect(Number(e(editor, '(fikra/transient/fikra-transient-elapsed-of "main")').value)).toBeGreaterThanOrEqual(1900);
+  });
+
+  test("the APPROVAL RESUME (confirming→running, the same turn) preserves chunks + elapsed", () => {
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    silence(editor);
+    e(editor, delta("one "));
+    e(editor, delta("two"));
+    // The approval round-trip: running → confirming → running.
+    e(editor, '(fikra/thread/fikra-thread-status-set "confirming")');
+    e(editor, '(fikra/thread/fikra-thread-status-set "running")');
+    // SAME turn: the indicator survives (codex r1 catch 3).
+    expect(chunksOf(editor, "main")).toBe(2);
+    tick(editor, Date.now() + 100);
+    // A FRESH turn (idle→running) DOES reset.
+    e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")');
+    tick(editor);
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    expect(chunksOf(editor, "main")).toBe(0);
+  });
+
   test("starts at the FIRST streamed event, grows with ticks, formats Ns / NmNNs", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     silence(editor);
@@ -127,9 +163,9 @@ describe("#319 — per-thread isolation", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     silence(editor);
     tick(editor); // reconcile: the state machine runs again (shell dead)
-    e(editor, toolCall("edit"));
-    e(editor, toolCall("bash"));
-    e(editor, toolCall("read"));
+    e(editor, toolInputDelta());
+    e(editor, toolInputDelta());
+    e(editor, toolInputDelta());
     expect(chunksOf(editor, "fix-1")).toBe(3);
     expect(chunksOf(editor, "main")).toBe(1);
     const segFix = segment(editor, "fix-1");
@@ -158,16 +194,16 @@ describe("#319 — the frozen→clear terminal sequence at EVERY terminal kind",
       const frozen = segment(editor, "main");
       expect(frozen).toMatch(/^✓/);
       expect(frozen).toContain("4 chunks");
-      const elapsedInFrozen = (frozen.match(/· (\S+)$/) || [])[1] ?? "";
-      // A much-later tick does NOT advance the frozen elapsed (the clock
-      // stopped at the terminal edge) — and ages the frame.
-      tick(editor, now + 300_000);
-      const frozen2 = segment(editor, "main");
-      expect(frozen2).toMatch(/^✓/);
-      expect(frozen2).toContain(elapsedInFrozen);
-      // The next tick CLEARS the transient; with no runner left the
-      // interval settles (the one-tick-after stop).
-      tick(editor, now + 300_200);
+      // The frozen frame is a CAPTURED STRING: ticks (and the gerund
+      // rotation they drive) cannot change a word of it (codex r1 c4).
+      tick(editor, now + 1);
+      tick(editor, now + 2);
+      expect(segment(editor, "main")).toBe(frozen);
+      // TICK-FIRST ordering: an unserved frame is NOT cleared — the
+      // frozen frame must ride a poll. Serve it (the helper's mark),
+      // then the NEXT tick clears + the interval settles.
+      e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")');
+      tick(editor, now + 3);
       expect(segment(editor, "main")).toBe("null");
       expect(String(e(editor, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value)).toBe("0");
     });
@@ -213,20 +249,21 @@ describe("#319 — the graded frame sequence (capture evidence)", () => {
     const f1 = segment(editor, "main");
     expect(f1).toMatch(/pondering|reading|editing/);
     expect(f1).toContain("2 chunks");
-    // Frame 2 — more streaming (a tool round + text).
-    e(editor, toolCall("buffer-edit"));
+    // Frame 2 — more streaming (a tool round's input deltas + text).
+    e(editor, toolInputDelta());
+    e(editor, toolInputDelta());
     e(editor, delta("a time"));
     tick(editor);
     const f2 = segment(editor, "main");
-    expect(f2).toContain("4 chunks");
+    expect(f2).toContain("5 chunks");
     expect(f2).not.toBe(f1); // rotated glyph/gerund + grown count
-    // Frame 3 — the terminal FROZEN frame (✓, final counts).
+    // Frame 3 — the terminal FROZEN frame (✓, final counts) — served.
     e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
     const f3 = segment(editor, "main");
     expect(f3).toMatch(/^✓/);
-    expect(f3).toContain("4 chunks");
+    expect(f3).toContain("5 chunks");
+    e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")'); // the serve
     // Frame 4 — cleared (the next tick's frame omits the transient).
-    tick(editor);
     tick(editor);
     const f4 = segment(editor, "main");
     expect(f4).toBe("null");

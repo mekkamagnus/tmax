@@ -46,23 +46,29 @@
         ((string= k "turn-start") (setq fikra-event-turn-tools-v 0))
         ((string= k "tool-call") (setq fikra-event-turn-tools-v (+ fikra-event-turn-tools-v 1)))))))
 
-;; #319 — the STREAMING CHUNK COUNTER hook: text-delta + tool-call are
-;; THE two counted kinds (the issue's named rule — nothing else counts).
-;; Called from both emit paths beside count-tools (the same funnel
-;; precedent). Lazy require + swallow: the indicator must never kill an
-;; emit. ID = the thread the batch routes to (emit-batch-for) or the
-;; focused thread (emit-batch).
+;; #319 — the STREAMING hooks: (1) the CHUNK COUNTER counts the two
+;; DELTA kinds — text-delta + tool-input-delta (the issue's named rule:
+;; streamed deltas count; completions — tool-call, completed text — do
+;; NOT); (2) the ELAPSED clock starts at the turn's FIRST STREAMED
+;; EVENT (a superset: thought and tool-call also stream — an early
+;; thought must start the clock even though it does not count). Lazy
+;; require + swallow: the indicator must never kill an emit. ID = the
+;; thread the batch routes to (emit-batch-for) or the focused thread
+;; (emit-batch).
 (defun fikra-event-count-chunks (events id)
-  (let ((n 0))
+  (let ((n 0) (streamed nil))
     (dolist (e events)
       (let ((k (fikra-event-get-str e "kind")))
-        (if (or (string= k "text-delta") (string= k "tool-call"))
-          (setq n (+ n 1)))))
-    (if (> n 0)
+        (cond
+          ((or (string= k "text-delta") (string= k "tool-input-delta"))
+            (progn (setq n (+ n 1)) (setq streamed t)))
+          ((or (string= k "thought") (string= k "tool-call"))
+            (setq streamed t)))))
+    (if (or (> n 0) streamed)
       (condition-case nil
         (progn
           (require-module fikra/transient)
-          (fikra/transient/fikra-transient-note-chunks id n))
+          (fikra/transient/fikra-transient-note-chunks id n streamed))
         (error () nil))
       nil)))
 
@@ -339,6 +345,11 @@ round-12 approvals catch)."
                               (if (string= m "") "" (concat " · " m)))
                             " ──")) "\n"))
       ((string= kind "session") "")
+      ((string= kind "tool-input-delta")
+        ;; #319 — persisted (counted chunk kind) but INVISIBLE: the
+        ;; completed tool-call renders the row; the partials are counter
+        ;; stream, not display text.
+        "")
       ((string= kind "usage")
         ;; #319 — the honest final count: PROVIDER-REPORTED usage from the
         ;; turn-end result, persisted as a normal FAEP event so replay

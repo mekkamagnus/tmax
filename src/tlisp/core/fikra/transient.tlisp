@@ -6,6 +6,7 @@
           fikra-transient-note-running fikra-transient-note-terminal
           fikra-transient-note-chunks fikra-transient-chunks-of
           fikra-transient-elapsed-of fikra-transient-frozen-p
+          fikra-transient-mark-rendered fikra-transient-mark-rendered-for
           fikra-any-thread-running-p fikra-thread-is-running-p
           fikra-transient-viewed-segment fikra-transient-viewed-segment-for
           fikra-transient-spinner-glyph fikra-transient-gerund
@@ -48,11 +49,18 @@
 (defvar fikra-transient-starts (hashmap)
   "id → the turn's FIRST streamed event timestamp (ms; nil until then).")
 (defvar fikra-transient-frozen (hashmap)
-  "id → the terminal frame's remaining tick count (2 = fresh: the frozen
-  frame rides the next poll; the tick after clears it).")
+  "id → 0 none · 1 frozen PENDING-RENDER (a tick must not clear it
+  before a poll serves it) · 2 frozen RENDERED (the next tick clears).")
 (defvar fikra-transient-frozen-elapsed (hashmap)
   "id → the elapsed ms CAPTURED at the terminal edge (the frozen frame's
   clock stops here — later ticks must not advance it).")
+(defvar fikra-transient-frozen-seg (hashmap)
+  "id → the COMPLETE frozen segment STRING captured at the terminal edge
+  (later ticks cannot change a word of it).")
+(defvar fikra-transient-frozen-age (hashmap)
+  "id → ticks since the terminal edge while the frame sits PENDING (no
+  client served it). A headless turn (no attached poll) must not leak
+  the interval forever: ~10 ticks (2s) unserved clears it.")
 
 (defun fikra-transient-count () fikra-transient-ticks)
 
@@ -113,14 +121,27 @@ old guarded stop leaked the live interval forever (gate r2)."
         t))))
 
 (defun fikra-transient-age-frozen (ids)
+  ;; RENDER-GATED clearing (codex r1 catch 4): a pending frame (1) waits
+  ;; for its poll; a RENDERED frame (2) clears on this tick. Headless
+  ;; bound: a pending frame unserved for ~10 ticks (2s) clears anyway —
+  ;; no attached client may leak the interval forever.
   (if (null ids)
     nil
     (let ((id (car ids)) (rest (cdr ids)))
       (let ((n (hashmap-get fikra-transient-frozen id)))
-        (if (<= n 1)
-          (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 0)
-          (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id (- n 1))))
+        (cond
+          ((= n 2)
+            (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 0))
+          ((= n 1)
+            (let ((age (+ 1 (fikra-transient-pending-age id))))
+              (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-age id age)
+              (if (>= age 10)
+                (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 0))))))
       (fikra-transient-age-frozen rest))))
+
+(defun fikra-transient-pending-age (id)
+  (let ((a (hashmap-get fikra-transient-frozen-age id)))
+    (if a a 0)))
 
 (defun fikra-transient-no-live-frozen-p ()
   "t when no frozen frame remains to render (all aged to 0)."
@@ -131,14 +152,16 @@ old guarded stop leaked the live interval forever (gate r2)."
     (not live)))
 
 ;; ── the chunk/elapsed hooks (event.tlisp calls these on emit) ──────
-(defun fikra-transient-note-chunks (id n)
-  "N streaming events (text-delta + tool-call — event.tlisp applies the
-named rule) arrived for thread ID: bump its chunk counter and, on the
-turn's FIRST such event, stamp the elapsed start (the exact clock, not
-the tick-stamped now)."
-  (editor/keymaps/keymap-mutable-set! fikra-transient-chunks id
-    (+ n (fikra-transient-chunks-of id)))
-  (if (null (hashmap-get fikra-transient-starts id))
+(defun fikra-transient-note-chunks (id n streamed)
+  "A batch arrived for thread ID: N COUNTED deltas (text-delta +
+tool-input-delta — the named rule) bump the chunk counter; STREAMED (any
+content event — deltas, thought, tool-call) stamps the elapsed start on
+the turn's FIRST streamed event (codex r1 catch 2: an early thought
+must start the clock even though it does not count)."
+  (if (> n 0)
+    (editor/keymaps/keymap-mutable-set! fikra-transient-chunks id
+      (+ n (fikra-transient-chunks-of id))))
+  (if (and streamed (null (hashmap-get fikra-transient-starts id)))
     (editor/keymaps/keymap-mutable-set! fikra-transient-starts id
       (editor-time-now)))
   t)
@@ -176,10 +199,9 @@ the tick-stamped now)."
 (defun fikra-transient-segment (thread-id)
   (cond
     ((fikra-transient-frozen-p thread-id)
-      (concat "✓ " (fikra-transient-gerund) " · "
-              (number-to-string (fikra-transient-chunks-of thread-id)) " chunks · "
-              (fikra-transient-format-elapsed
-                (fikra-transient-frozen-ms-of thread-id))))
+      ;; The COMPLETE frame captured at the terminal edge — byte-stable
+      ;; across any later ticks (codex r1 catch 4).
+      (hashmap-get fikra-transient-frozen-seg thread-id))
     ((and fikra-transient-active (fikra-thread-is-running-p thread-id))
       (concat (fikra-transient-spinner-glyph) " " (fikra-transient-gerund) " · "
               (number-to-string (fikra-transient-chunks-of thread-id)) " chunks · "
@@ -221,24 +243,53 @@ never streamed)."
 
 ;; The transition hooks (thread.tlisp's status-set calls these on the
 ;; display-relevant edges; id is the transitioning thread).
-(defun fikra-transient-note-running (id)
-  "A ->running edge = a NEW TURN: reset the per-thread indicator state
-(chunks, elapsed start, frozen) and start the interval."
-  (editor/keymaps/keymap-mutable-set! fikra-transient-chunks id 0)
-  (editor/keymaps/keymap-mutable-set! fikra-transient-starts id nil)
-  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 0)
-  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-elapsed id 0)
+(defun fikra-transient-note-running (id from)
+  "A ->running edge. A NEW TURN (from idle/error/interrupted) resets the
+per-thread indicator state; the APPROVAL RESUME (from confirming — the
+same turn continues) preserves chunks + elapsed (codex r1 catch 3).
+Either way the interval must be live."
+  (if (or (string= from "idle")
+          (string= from "error")
+          (string= from "interrupted"))
+    (progn
+      (editor/keymaps/keymap-mutable-set! fikra-transient-chunks id 0)
+      (editor/keymaps/keymap-mutable-set! fikra-transient-starts id nil)
+      (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 0)
+      (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-elapsed id 0)
+      (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-seg id nil)
+      (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-age id 0)))
   (fikra-transient-start))
 
 (defun fikra-transient-note-terminal (id)
-  "A terminal edge (idle/error/interrupted): FREEZE the thread's frame
-(elapsed captured NOW — the clock stops; rendered ✓) and leave it
-rideable for the two-tick sequence; the TICK settles the global stop
-when no thread runs and every frozen frame has cleared."
+  "A terminal edge (idle/error/interrupted): capture the COMPLETE frozen
+frame — the segment STRING at this instant (glyph ✓, the gerund as it
+stands, final chunks, elapsed captured NOW — later ticks cannot change
+a word of it; codex r1 catch 4) — and mark it pending-render. The CLEAR
+is render-gated: the tick clears it only after a poll has SERVED it
+(fikra-transient-mark-rendered), so both frames ride real poll cycles
+regardless of the tick/poll race order."
   (let ((start (hashmap-get fikra-transient-starts id)))
     (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-elapsed id
       (if start (max 0 (- (editor-time-now) start)) 0)))
-  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 2))
+  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-seg id
+    (concat "✓ " (fikra-transient-gerund) " · "
+            (number-to-string (fikra-transient-chunks-of id)) " chunks · "
+            (fikra-transient-format-elapsed
+              (fikra-transient-frozen-ms-of id))))
+  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-age id 0)
+  (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 1))
+
+;; The SERVE path (serialize's withTransientRevision) calls this after a
+;; frozen segment rides a response: the NEXT tick may clear it.
+(defun fikra-transient-mark-rendered (id)
+  (if (= (hashmap-get fikra-transient-frozen id) 1)
+    (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 2))
+  t)
+
+(defun fikra-transient-mark-rendered-for (buffer-name)
+  "mark-rendered via the viewed buffer name (the helper's entry)."
+  (let ((id (fikra/thread/fikra-thread-id-of-buffer buffer-name)))
+    (if id (fikra-transient-mark-rendered id) nil)))
 
 ;; The VIEWED thread's segment (the daemon frame builder's display row):
 ;; the thread whose *Fikra* buffer the CLIENT is viewing.

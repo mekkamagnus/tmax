@@ -341,11 +341,20 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
          (dtype (if (listp delta) (fikra-afield delta "type") nil))
          (txt (if (listp delta) (fikra-afield delta "text") nil)))
     (if (and (stringp etype) (string= etype "content_block_delta")
-             (stringp dtype) (string= dtype "text_delta")
-             (stringp txt) (> (length txt) 0))
-      (progn
-        (setq fikra-claude-saw-partial t)
-        (list (list (list "kind" "text-delta") (list "text" txt))))
+             (stringp dtype))
+      (cond
+        ;; text partials → text-delta (rendered live).
+        ((and (string= dtype "text_delta") (stringp txt) (> (length txt) 0))
+          (progn
+            (setq fikra-claude-saw-partial t)
+            (list (list (list "kind" "text-delta") (list "text" txt)))))
+        ;; #319 — tool-argument partials → tool-input-delta: PERSISTED like
+        ;; text partials (same volume class), rendered "" (the completed
+        ;; tool-call renders the row), and the SECOND counted chunk kind
+        ;; (the issue's named rule counts deltas, not completions).
+        ((string= dtype "input_json_delta")
+          (list (list (list "kind" "tool-input-delta"))))
+        (t nil))
       nil)))
 
 ;; Set by fikra-norm-stream-event on the first live partial chunk; reset per
