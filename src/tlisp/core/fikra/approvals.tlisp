@@ -226,6 +226,60 @@ segment reads)."
       t
       (fikra-glob-scan s (+ i 1)))))
 
+;; r133 (codex r130 P1#5): recursive rm WITHOUT -f ("rm -r dir") —
+;; byte scans (regex star is reader-fragile, r117).
+(defun fikra-risk-has-rm-recursive (d)
+  (let ((hit (string-match "rm " d)))
+    (if (and hit (numberp hit))
+      (if (fikra-risk-flags-have-r d (+ hit 3))
+        t
+        (fikra-risk-has-rm-recursive (substring d (+ hit 3) (length d))))
+      nil)))
+
+;; The word after position K starts a dash-flag; does it carry r/R
+;; before the next space? ("rm -r", "rm -fr", "rm --recursive".)
+(defun fikra-risk-flags-have-r (d k)
+  (if (and (< k (length d)) (string= (substring d k (+ k 1)) "-"))
+    (fikra-risk-flag-chars d (+ k 1))
+    nil))
+
+(defun fikra-risk-flag-chars (d k)
+  (if (>= k (length d))
+    nil
+    (let ((c (substring d k (+ k 1))))
+      (if (string= c " ")
+        nil
+        (if (or (string= c "r") (string= c "R"))
+          t
+          (fikra-risk-flag-chars d (+ k 1)))))))
+
+;; r133: a TRUNCATING redirection (a bare ">" — not ">>", not the
+;; /dev/null sink) clobbers whatever the target holds: destructive.
+(defun fikra-risk-has-trunc-redir (d)
+  (fikra-risk-redir-scan d 0))
+
+(defun fikra-risk-redir-scan (d i)
+  (if (>= i (length d))
+    nil
+    (if (not (string= (substring d i (+ i 1)) ">"))
+      (fikra-risk-redir-scan d (+ i 1))
+      ;; ">" at i: skip ">>" (append), ">&" (fd duplication — no
+      ;; truncation), and the /dev/null sink.
+      (if (or (and (> i 0) (string= (substring d (- i 1) i) ">"))
+              (string= (substring d (+ i 1) (+ i 2)) ">")
+              (string= (substring d (+ i 1) (+ i 2)) "&")
+              (string-prefix-p "/dev/null"
+                (fikra-risk-ltrim (substring d (+ i 1) (length d)))))
+        (fikra-risk-redir-scan d (+ i 1))
+        t))))
+
+(defun fikra-risk-ltrim (s)
+  (if (> (length s) 0)
+    (if (string= (substring s 0 1) " ")
+      (fikra-risk-ltrim (substring s 1 (length s)))
+      s)
+    s))
+
 (defun fikra-approval-risk (kind detail)
   ;; Destructive first (any tool can carry it), then the tool class —
   ;; BOTH case-insensitive (the detail is downcased; "drop table" counts).
@@ -243,7 +297,11 @@ segment reads)."
             (fikra-risk-has-glob-rm d)
             (string-match "truncate -s" d)
             (string-match "> /dev/null.*rm" d)
-            (string-match "shred " d))
+            (string-match "shred " d)
+            ;; r133 (codex r130 P1#5): recursive rm without -f, and
+            ;; truncating redirection.
+            (fikra-risk-has-rm-recursive d)
+            (fikra-risk-has-trunc-redir d))
     "destructive"
     (if (or (string= (fikra-risk-down kind) "bash") (string= (fikra-risk-down kind) "shell"))
       "shell"

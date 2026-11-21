@@ -579,6 +579,65 @@ describe("ollama gate hardening (r117 — codex r116 catches)", () => {
   });
 });
 
+describe("ollama gate pattern gaps (r133 — codex r130 P1#5)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireCalls = (ed: Editor, seed: number, commands: { name: string; args: unknown }[]) => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls:
+      commands.map((c) => ({ function: { name: c.name, arguments: c.args } })) } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+
+  // Recursive rm WITHOUT -f never matched the old patterns.
+  tt("rm -r (no -f) PARKS at the gate", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "recursive no f")');
+    fireCalls(ed, 141, [{ name: "bash", args: { command: "rm -r sometree/" } }]);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+  });
+
+  // Truncating redirection clobbers state — it parks; appends and the
+  // /dev/null sink do not.
+  tt("a truncating > redirection PARKS; >> and /dev/null do not", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "clobber")');
+    fireCalls(ed, 142, [{ name: "bash", args: { command: "echo overwritten > state.txt" } }]);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    expect(String(e(ed, "(fikra/approvals/fikra-approval-risk \"bash\" \"echo x >> state.txt\")").value)).toBe("shell");
+    expect(String(e(ed, "(fikra/approvals/fikra-approval-risk \"bash\" \"make > /dev/null 2>&1\")").value)).toBe("shell");
+  });
+
+  // A symlink hop out of the tree refuses for BOTH write and read.
+  tt("an in-tree symlink pointing OUTSIDE refuses for edit and read", async () => {
+    const ed = await armed();
+    // outside/ sits OUTSIDE the working dir (a sibling tmpdir).
+    const outside = mkdtempSync(join(tmpdir(), "r133-out-"));
+    e(ed, `(shell-command "ln -s ${outside} escape-link")`);
+    e(ed, '(fikra/chat/fikra-turn-send "symlink escape")');
+    fireCalls(ed, 143, [
+      { name: "buffer_edit", args: { path: "escape-link/pwned.txt", content: "outside\n" } },
+    ]);
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("refused: path escapes the working directory");
+    expect(existsSync(join(outside, "pwned.txt"))).toBe(false);
+    // Reads through the same hop leak nothing.
+    writeFileSync(join(outside, "secret.txt"), "TOP-SECRET-CONTENT");
+    fireCalls(ed, 144, [
+      { name: "buffer_read", args: { path: "escape-link/secret.txt" } },
+    ]);
+    const acc2 = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc2).not.toContain("TOP-SECRET-CONTENT");
+    expect(acc2).toContain("escape-link/secret.txt");
+    // A LEGIT nested path still writes (no false refusals).
+    fireCalls(ed, 145, [
+      { name: "buffer_edit", args: { path: "nested/deep/ok.txt", content: "inside\n" } },
+    ]);
+    expect(existsSync(join(process.cwd(), "nested/deep/ok.txt"))).toBe(true);
+    rmSync(outside, { recursive: true, force: true });
+  });
+});
+
 describe("ollama focus-switch lifecycle (r119 — codex r118 P1)", () => {
   tt("park → switch → allow: the ORIGINATING thread settles (not stranded confirming)", async () => {
     const ed = await armed();

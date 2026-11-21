@@ -8,7 +8,8 @@
           fikra-backend-ollama-set-model fikra-backend-ollama-set-url
           fikra-backend-ollama-pending-p fikra-backend-ollama-decide
           fikra-ollama-parked-rest-get fikra-ollama-latest-id-get
-          fikra-ollama-bash-filter fikra-ollama-bash-sentinel)
+          fikra-ollama-bash-filter fikra-ollama-bash-sentinel
+          fikra-ollama-path-contained-p)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -357,11 +358,16 @@ availability gate must be synchronous; the turn itself is async)."
                  (fikra-ollama-alist-get "path" args) ""))
          (dir (fikra/thread/fikra-thread-working-dir))
          (abs (concat dir "/" path))
-         (content (condition-case nil (read-file-content abs) (error () nil))))
+         ;; r133: reads are CONTAINED too — a symlink hop must not leak
+         ;; outside files into the model's context.
+         (contained (fikra-ollama-path-contained-p dir path))
+         (content (if contained
+                    (condition-case nil (read-file-content abs) (error () nil))
+                    nil)))
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-call") (list "tool" "buffer-read")
             (list "summary" path)))
-    (if (stringp content)
+    (if (and contained (stringp content))
       (progn
         (fikra/event/fikra-event-emit
           (list (list "kind" "tool-result") (list "ok" t)
@@ -370,8 +376,12 @@ availability gate must be synchronous; the turn itself is async)."
       (progn
         (fikra/event/fikra-event-emit
           (list (list "kind" "tool-result") (list "ok" nil)
-                (list "summary" (concat "not found: " path))))
-        (concat "{\"role\":\"tool\",\"content\":\"file not found: " path "\"},")))))
+                (list "summary" (concat (if contained "not found: " "REFUSED (outside the working dir): ") path))))
+        (concat "{\"role\":\"tool\",\"content\":\""
+                (if contained
+                  (concat "file not found: " path)
+                  "refused: path escapes the working directory")
+                "\"},")))))
 
 (defun fikra-ollama-run-bash (call args)
   (let* ((cmd (if (fikra-ollama-alist-get "command" args)
@@ -603,18 +613,59 @@ availability gate must be synchronous; the turn itself is async)."
     (fikra-ollama-join-lines (cdr lines)
       (concat acc (if (> (length acc) 0) "\n") (car lines)))))
 
+;; r133 (codex r130 P1#5): resolve SYMLINKS before the containment
+;; verdict — a relative path through an in-tree symlink pointing
+;; OUTSIDE wrote/read outside the tree while passing the ../ check.
+;; Resolves the deepest EXISTING ancestor of DIR/PATH (the file itself
+;; when it exists — a symlinked target is caught), then requires it to
+;; sit under the RESOLVED working dir.
+;; r133 catch: the old (string-match "\.\./" path) was a REGEX whose
+;; stripped dots are WILDCARDS — any path with a directory component
+;; matched (a latent over-refusal). A literal ".." byte scan instead.
+(defun fikra-ollama-has-dotdot-p (s)
+  (fikra-ollama-dotdot-scan s 0))
+
+(defun fikra-ollama-dotdot-scan (s i)
+  (if (> (+ i 1) (- (length s) 1))
+    nil
+    (if (and (string= (substring s i (+ i 1)) ".")
+             (string= (substring s (+ i 1) (+ i 2)) "."))
+      t
+      (fikra-ollama-dotdot-scan s (+ i 1)))))
+
+(defun fikra-ollama-path-contained-p (dir path)
+  (if (or (<= (length path) 0)
+          (string-prefix-p "/" path)
+          (fikra-ollama-has-dotdot-p path))
+    nil
+    (let ((real-dir (condition-case nil
+                      (string-trim (shell-command
+                        (concat "realpath " (fikra/thread/fikra-thread-shq dir))))
+                      (error () dir)))
+          ;; The skeleton is HEX-BUILT: the reader does not process
+          ;; backslash escapes inside .tlisp string literals, so an
+          ;; embedded \" reached the shell literally (r133 catch).
+          (resolved (condition-case nil
+                      (string-trim (shell-command
+                        (concat "p=" (fikra/thread/fikra-thread-shq (concat dir "/" path))
+                                (hex-decode "3b207768696c65205b2021202d652022247022205d3b20646f20703d24286469726e616d652022247022293b20646f6e653b207265616c706174682022247022"))))
+                      (error () (concat dir "/" path)))))
+      ;; resolved walks up to dir ITSELF for a not-yet-existing path
+      ;; (no trailing slash) — the exact dir is contained too.
+      (if (string= resolved real-dir)
+        t
+        (string-prefix-p (concat real-dir "/") resolved)))))
+
 (defun fikra-ollama-run-edit (call args)
   (let* ((path (if (fikra-ollama-alist-get "path" args)
                  (fikra-ollama-alist-get "path" args) ""))
          (content (if (fikra-ollama-alist-get "content" args)
                     (fikra-ollama-alist-get "content" args) ""))
          (dir (fikra/thread/fikra-thread-working-dir))
-         ;; r117 (codex r116 P1#4): CONTAINMENT — a model edit may not
-         ;; escape the working dir (../ wrote outside the tree AND the
-         ;; checkpoint's coverage). Absolute paths and .. escapes refuse.
-         (contained (and (> (length path) 0)
-                         (not (string-prefix-p "/" path))
-                         (not (string-match "\.\./" path))))
+         ;; r117 (codex r116 P1#4) + r133: CONTAINMENT — a model edit
+         ;; may not escape the working dir (absolute paths, .. escapes,
+         ;; and — r133 — SYMLINK hops all refuse).
+         (contained (fikra-ollama-path-contained-p dir path))
          (abs (concat dir "/" path)))
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-call") (list "tool" "buffer-edit")
