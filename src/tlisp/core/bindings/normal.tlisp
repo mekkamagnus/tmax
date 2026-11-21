@@ -114,6 +114,8 @@
   (require-module stagehand/commit)
   ;; #287: stage/unstage/discard (same one-way shape: consumes status).
   (require-module stagehand/stage)
+  ;; #290: log/show/checkout (consumes status + diff).
+  (require-module stagehand/log)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.

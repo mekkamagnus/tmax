@@ -1,0 +1,472 @@
+(defmodule stagehand/log
+  (export stagehand-log-open stagehand-log-rerun
+          stagehand-log-next stagehand-log-prev
+          stagehand-log-quit stagehand-log-show
+          stagehand-log-checkout stagehand-log-checkout-accept
+          stagehand-log-checkout-table stagehand-show-next
+          stagehand-show-prev stagehand-show-quit
+          stagehand-log-buffer-name stagehand-show-buffer-name
+          stagehand-log-shas stagehand-log-commit-count
+          stagehand-log-sha-at-line
+          stagehand-log-filter stagehand-log-sentinel)
+
+  (require-module stagehand/status)
+  (require-module stagehand/diff)
+
+;; #290 — Stagehand T0: the LOG buffer (streaming), the SHOW view, and
+;; BRANCH CHECKOUT. `l` in the status buffer opens *Stagehand-Log*:
+;; `git log --graph --format=%h<UnitSep>%d<UnitSep>%s --color=never`
+;; streamed via make-process (the #307 generation-guard pattern — a
+;; stale run's chunks are dropped), rendering `sha  refs  subject`
+;; rows (refs dimmed) with graph-art rows passing through. RET shows
+;; the commit (faced by #289's grammar); n/p walk commits (art rows
+;; skipped); b checks out (ref precedence heads > tags > remotes via
+;; for-each-ref --points-at; no ref → detached) behind an n-first y/n
+;; confirm (the #287 lesson: empty Enter must cancel). The dirty tree
+;; is GIT's call — no preflight, no force. q closes (recency).
+
+(major-mode-register "stagehand-log" '() nil)
+(major-mode-doc "stagehand-log" "Stagehand log — n/p commits, RET show, b checkout, g re-run, q close")
+(major-mode-register "stagehand-show" '() nil)
+(major-mode-doc "stagehand-show" "Stagehand show — n/p walk commits, q back to the log")
+
+(defvar stagehand-log-generation 0
+  "The active log run's generation (g re-runs bump it; stale filters
+drop their chunks — the #307 guard).")
+(defvar stagehand-log-pid-gen (hashmap)
+  "pid → generation (the fikra-claude-processes pattern).")
+(defvar stagehand-log-shas (list)
+  "The ordered commit SHAs (nav targets + the show walk).")
+(defvar stagehand-log-line-sha (hashmap)
+  "Buffer line index → sha (commit rows only).")
+(defvar stagehand-log-partial ""
+  "The trailing incomplete chunk awaiting its newline.")
+(defvar stagehand-log-root nil
+  "The root this log ran in (stream + checkout target it).")
+(defvar stagehand-show-idx 0
+  "The current show position in stagehand-log-shas.")
+
+;; The unit separator literal is hex (the reader strips escapes).
+(defun stagehand-us () (hex-decode "1f"))
+(defun stagehand-dim () (hex-decode "1b5b326d"))
+(defun stagehand-reset () (hex-decode "1b5b306d"))
+
+(defun stagehand-log-buffer-name () "*Stagehand-Log*")
+
+(defun stagehand-show-buffer-name () "*Stagehand-Show*")
+
+;; ── the log run ─────────────────────────────────────────────────────
+(defun stagehand-log-open ()
+  "l — open/refresh the *Stagehand-Log* buffer (a FRESH streaming run;
+g does the same). Unborn → 'no commits yet'; no repo → a status."
+  (interactive)
+  (let ((root (stagehand/status/stagehand-status-root)))
+    (cond
+      ((null root) (editor-set-status "Stagehand: no repository"))
+      ((= (stagehand/status/stagehand-has-commits-p root) 0)
+        (editor-set-status "no commits yet"))
+      (t
+        (progn
+        (setq stagehand-log-root root)
+        (setq stagehand-log-generation (+ stagehand-log-generation 1))
+        (setq stagehand-log-shas (list))
+        (setq stagehand-log-line-sha (hashmap))
+        (setq stagehand-log-partial "")
+        (stagehand-log-ensure-buffer)
+        (major-mode-set "stagehand-log")
+        (buffer-set-read-only nil)
+        (stagehand-log-clear)
+        (stagehand-log-ensure-keymap)
+        (editor-set-mode "normal")
+        (let ((pid (make-process
+                     :command (list "git" "log" "--graph"
+                                    (concat "--format=%h" (stagehand-us) "%d" (stagehand-us) "%s")
+                                    "--color=never")
+                     :cwd root
+                     :filter "stagehand-log-filter-bridge"
+                     :sentinel "stagehand-log-sentinel-bridge")))
+          (keymap-mutable-set! stagehand-log-pid-gen
+            (number-to-string pid) stagehand-log-generation))
+        (editor-set-status "Stagehand: log streaming…"))))))
+
+(defun stagehand-log-rerun ()
+  "g — re-run the log."
+  (stagehand-log-open))
+
+(defun stagehand-log-filter (pid output)
+  "The streaming filter: complete lines render immediately; the
+GENERATION GUARD drops chunks from any run that is no longer current."
+  (let ((gen (hashmap-get stagehand-log-pid-gen (number-to-string pid))))
+    (if (and (numberp gen) (= gen stagehand-log-generation))
+      (progn
+        (let* ((joined (concat stagehand-log-partial output))
+             (lines (string-split joined "\n"))
+             (complete (stagehand-but-last lines))
+             (rest (if (null lines) "" (car (reverse lines)))))
+        (setq stagehand-log-partial rest)
+        (dolist (ln complete)
+          (stagehand-log-append
+            (concat (stagehand-log-render-line ln) "\n"))
+          (setq stagehand-log-line-counter (+ stagehand-log-line-counter 1)))))
+      nil)))
+
+(defun stagehand-log-sentinel (pid exit-code)
+  "The exit sentinel (generation-guarded): flush any trailing line."
+  (let ((gen (hashmap-get stagehand-log-pid-gen (number-to-string pid))))
+    (if (and (numberp gen) (= gen stagehand-log-generation))
+      (progn
+        (if (> (length stagehand-log-partial) 0)
+          (progn
+            (stagehand-log-append
+              (concat (stagehand-log-render-line stagehand-log-partial) "\n"))
+            (setq stagehand-log-line-counter (+ stagehand-log-line-counter 1))))
+        (setq stagehand-log-partial "")
+        (editor-set-status
+          (concat "Stagehand: log — "
+            (number-to-string (length stagehand-log-shas)) " commits"))))))
+
+(defun stagehand-log-render-line (line)
+  "One raw log line → its display row. A FIELD row (3 unit-sep fields)
+renders 'sha  DIM(refs)  subject' and records the sha at its buffer
+line; an ART row passes through untouched (no sha — n/p skip it)."
+  (let ((fields (string-split line (stagehand-us))))
+    (if (= (length fields) 3)
+      (let* ((sha (stagehand-sha-of (nth 0 fields)))
+             (refs (string-trim (nth 1 fields)))
+             (subject (nth 2 fields))
+             (line-idx stagehand-log-line-counter))
+        (if sha
+          (progn
+            (setq stagehand-log-shas (append stagehand-log-shas (list sha)))
+            (keymap-mutable-set! stagehand-log-line-sha
+              (number-to-string line-idx) sha)
+            (if (string= refs "")
+              (concat sha "  " subject)
+              (concat sha "  " (stagehand-dim) refs (stagehand-reset) "  " subject)))
+          line))
+      line)))
+
+(defun stagehand-sha-of (field0)
+  "The trailing hex token of a graph-prefixed sha field ('* |' glyphs
+then the sha) — nil when there is none."
+  (stagehand-sha-scan (string-split field0 " ") nil))
+
+(defun stagehand-sha-scan (tokens last-hex)
+  (if (null tokens)
+    last-hex
+    (let ((tk (car tokens)))
+      (stagehand-sha-scan (cdr tokens)
+        (if (and (> (length tk) 6) (stagehand-hex-p tk))
+          tk
+          (if (string= tk "")
+            last-hex
+            (if (stagehand-graph-glyph-p tk) last-hex nil)))))))
+
+(defun stagehand-hex-p (s)
+  ;; Index-wise scan (string-split on an EMPTY separator is not a
+  ;; viable tokenizer here).
+  (and (> (length s) 6) (stagehand-hex-range-p s 0 (length s))))
+
+(defun stagehand-hex-range-p (s i len)
+  (if (>= i len)
+    t
+    (and (stagehand-hex-char-p (substring s i (+ i 1)))
+      (stagehand-hex-range-p s (+ i 1) len))))
+
+(defun stagehand-hex-char-p (c)
+  ;; string< comparisons (ASCII ordering — >= is NUMERIC-only in
+  ;; T-Lisp); empty tokens are handled by the caller.
+  (let ((ch (substring c 0 1)))
+    (or (and (not (string< ch "0")) (string< ch ":"))
+        (and (not (string< ch "a")) (string< ch "g")))))
+
+(defun stagehand-graph-glyph-p (tk)
+  ;; The --graph art vocabulary: *, |, /, \, _, and combos.
+  (or (string= tk "*") (string= tk "|") (string= tk "/")
+      (string= tk "\\") (string= tk "_")
+      (string= tk "*|") (string= tk "|*") (string= tk "*/")
+      (string= tk "/*") (string= tk "\\|") (string= tk "|\\")))
+
+(defvar stagehand-log-line-counter 0
+  "The next buffer line index — EVERY streamed line (art included)
+occupies a buffer row, so nav line math must count them all.")
+
+;; ── navigation (commit rows only) ───────────────────────────────────
+(defun stagehand-log-next ()
+  "n — the next COMMIT row (art rows skipped; wraps)."
+  (stagehand-log-nav 1))
+
+(defun stagehand-log-prev ()
+  "p — the previous COMMIT row (art rows skipped; wraps)."
+  (stagehand-log-nav -1))
+
+(defun stagehand-log-nav (dir)
+  (let ((target (stagehand-log-next-commit-line (cursor-line) dir)))
+    (if target (cursor-move target 0)
+      (editor-set-status "Stagehand: no commits"))))
+
+(defun stagehand-log-next-commit-line (from dir)
+  (let ((n (stagehand-log-last-line)))
+    (if (= n 0)
+      nil
+      (stagehand-commit-scan from dir n))))
+
+(defun stagehand-commit-scan (line dir n)
+  ;; The first commit row strictly past LINE in DIR (wrapping).
+  (let ((cand (stagehand-scan-direction line dir n (if (> dir 0) 1 n))))
+    (if (numberp cand) cand nil)))
+
+(defun stagehand-scan-direction (line dir n fallback)
+  (let ((i (if (> dir 0) (+ line 1) (- line 1))))
+    (stagehand-scan-loop i dir n fallback)))
+
+(defun stagehand-scan-loop (i dir n fallback)
+  (cond
+    ((and (> dir 0) (> i n)) fallback)
+    ((and (< dir 0) (< i 0)) fallback)
+    ((stagehand-log-line-is-commit i) i)
+    (t (stagehand-scan-loop (+ i dir) dir n fallback))))
+
+(defun stagehand-log-line-is-commit (i)
+  (hashmap-get stagehand-log-line-sha (number-to-string i)))
+
+(defun stagehand-log-last-line ()
+  (if (null stagehand-log-shas) 0
+    (- (length stagehand-log-shas) 1)))
+
+(defun stagehand-log-commit-count ()
+  (length stagehand-log-shas))
+
+(defun stagehand-log-sha-at-line (i)
+  "The sha recorded at log buffer line I (nil on art rows)."
+  (stagehand-log-line-is-commit i))
+
+(defun stagehand-log-quit ()
+  "q — close the log buffer (recency survivor)."
+  (buffer-kill (stagehand-log-buffer-name)))
+
+;; ── the show view ───────────────────────────────────────────────────
+(defun stagehand-log-show ()
+  "RET — show the commit at point in *Stagehand-Show*, faced by #289's
+grammar; n/p walk the log's commits; q returns to the log."
+  (let* ((sha (stagehand-log-line-is-commit (cursor-line))))
+    (if sha
+      (stagehand-show-at (stagehand-index-of-sha sha))
+      (editor-set-status "Stagehand: no commit on this row"))))
+
+(defun stagehand-index-of-sha (sha)
+  (stagehand-index-scan stagehand-log-shas sha 0))
+
+(defun stagehand-index-scan (shas sha i)
+  (if (null shas)
+    nil
+    (if (string= (car shas) sha)
+      i
+      (stagehand-index-scan (cdr shas) sha (+ i 1)))))
+
+(defun stagehand-show-at (idx)
+  (if (null idx)
+    (editor-set-status "Stagehand: no commit")
+    (let* ((sha (nth idx stagehand-log-shas))
+           (res (stagehand/status/stagehand-git
+                  (concat "show --no-color " sha)
+                  stagehand-log-root)))
+      (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+        (progn
+          (setq stagehand-show-idx idx)
+          (if (not (member (stagehand-show-buffer-name) (buffer-list)))
+            (buffer-create (stagehand-show-buffer-name)))
+          (buffer-switch (stagehand-show-buffer-name))
+          (major-mode-set "stagehand-show")
+          (editor-set-mode "normal")
+          (buffer-set-read-only nil)
+          (stagehand-show-clear)
+          (dolist (pair (stagehand/diff/stagehand-diff-parse (car res)))
+            (buffer-append (concat (stagehand/diff/stagehand-diff-face-line pair) "\n")))
+          (buffer-set-read-only t)
+          (stagehand-show-ensure-keymap))
+        (editor-set-status
+          (concat "Stagehand: git show failed (" (number-to-string (nth 2 res)) ") "
+            (car (string-split (concat (nth 1 res) "\n") "\n"))))))))
+
+(defun stagehand-show-next ()
+  "n — the next commit DOWN the log list (newest-first: down is
+OLDER; clamps at the oldest = the list's end)."
+  (if (< stagehand-show-idx (- (length stagehand-log-shas) 1))
+    (stagehand-show-at (+ stagehand-show-idx 1))
+    (editor-set-status "Stagehand: oldest commit")))
+
+(defun stagehand-show-prev ()
+  "p — back UP the list (NEWER; clamps at the newest = idx 0)."
+  (if (> stagehand-show-idx 0)
+    (stagehand-show-at (- stagehand-show-idx 1))
+    (editor-set-status "Stagehand: newest commit")))
+
+(defun stagehand-show-quit ()
+  "q — back to the LOG buffer (kill FIRST — buffer-kill rebinds
+current to its survivor — then the explicit switch wins)."
+  (buffer-kill (stagehand-show-buffer-name))
+  (buffer-switch (stagehand-log-buffer-name)))
+
+;; ── checkout (the only mutation) ────────────────────────────────────
+(defun stagehand-log-checkout ()
+  "b — check out the commit at point's ref (precedence heads > tags >
+remotes; no ref → detached at the sha) behind an n-first y/n confirm."
+  (let ((sha (stagehand-log-line-is-commit (cursor-line))))
+    (if sha
+      (progn
+        (setq stagehand-checkout-sha sha)
+        (completing-read
+          (concat "Checkout " sha "? (y/n)")
+          "stagehand/log/stagehand-log-checkout-table"
+          nil t "" "stagehand-checkout-history"
+          "stagehand/log/stagehand-log-checkout-accept"))
+      (editor-set-status "Stagehand: no commit on this row"))))
+
+(defvar stagehand-checkout-sha nil
+  "The sha awaiting the checkout y/n answer.")
+
+(defun stagehand-log-checkout-table (input action)
+  "n FIRST (the #287 lesson: the minibuffer preselects the first
+candidate — a bare Enter must CANCEL, never confirm a mutation)."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "n" "display" "n" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "y" "display" "y" "annotation" "" "metadata" (hashmap)))))
+
+(defun stagehand-log-checkout-accept (answer)
+  (if (string= answer "y")
+    (let ((sha stagehand-checkout-sha))
+      (setq stagehand-checkout-sha nil)
+      (if sha (stagehand-do-checkout sha) (editor-set-status "Stagehand: no checkout pending")))
+    (progn
+      (setq stagehand-checkout-sha nil)
+      (editor-set-status "Stagehand: checkout cancelled"))))
+
+(defun stagehand-do-checkout (sha)
+  (let* ((refs (stagehand-refs-at sha))
+         (ref (stagehand-pick-ref refs))
+         ;; The SHORT name: `git checkout refs/heads/x` treats the
+         ;; fully-qualified ref as a REV and DETACHES — the branch
+         ;; name is what updates the branch.
+         (target (if ref (stagehand-short-ref ref) sha))
+         (res (shell-exec-argv (list "git" "checkout" target) stagehand-log-root)))
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      (editor-set-status
+        (if ref
+          (concat "checked out " (stagehand-short-ref ref))
+          (concat "detached at " sha)))
+      (editor-set-status
+        (concat "Stagehand: checkout failed (" (number-to-string (nth 2 res)) ") "
+          (car (string-split (concat (nth 1 res) "\n") "\n")))))))
+
+(defun stagehand-refs-at (sha)
+  (let ((out (car (shell-exec-argv
+                    (list "git" "for-each-ref" (concat "--points-at=" sha)
+                          "--format=%(refname)")
+                    stagehand-log-root))))
+    (if (string= out "") (list) (string-split out "\n"))))
+
+(defun stagehand-pick-ref (refs)
+  ;; Precedence: refs/heads/* > refs/tags/* > refs/remotes/*; within a
+  ;; class the FIRST in for-each-ref order wins.
+  (cond
+    ((stagehand-first-ref refs "refs/heads/") (stagehand-first-ref refs "refs/heads/"))
+    ((stagehand-first-ref refs "refs/tags/") (stagehand-first-ref refs "refs/tags/"))
+    ((stagehand-first-ref refs "refs/remotes/") (stagehand-first-ref refs "refs/remotes/"))
+    (t nil)))
+
+(defun stagehand-first-ref (refs prefix)
+  (if (null refs)
+    nil
+    (if (string-prefix-p prefix (car refs))
+      (car refs)
+      (stagehand-first-ref (cdr refs) prefix))))
+
+(defun stagehand-short-ref (ref)
+  (substring ref (+ (stagehand-ref-prefix-len ref) 1) (length ref)))
+
+(defun stagehand-ref-prefix-len (ref)
+  (cond
+    ((string-prefix-p "refs/heads/" ref) 10)
+    ((string-prefix-p "refs/tags/" ref) 9)
+    ((string-prefix-p "refs/remotes/" ref) 12)
+    (t 0)))
+
+;; ── plumbing ────────────────────────────────────────────────────────
+(defun stagehand-log-append (text)
+  "Append into the LOG buffer via the PROVEN temporary-switch pattern
+(fikra event.tlisp: buffer-append-to hits a stale buffer object in
+streaming contexts; switch-append-restore is verified end-to-end)."
+  (condition-case nil
+    (if (string= (buffer-current) (stagehand-log-buffer-name))
+      (buffer-append text)
+      (let ((prev (buffer-current)))
+        (buffer-switch (stagehand-log-buffer-name))
+        (buffer-append text)
+        (buffer-switch prev)))
+    (error () nil)))
+
+(defun stagehand-but-last (lst)
+  (if (or (null lst) (null (cdr lst)))
+    (list)
+    (cons (car lst) (stagehand-but-last (cdr lst)))))
+
+(defun stagehand-log-ensure-buffer ()
+  (if (not (member (stagehand-log-buffer-name) (buffer-list)))
+    (buffer-create (stagehand-log-buffer-name)))
+  (buffer-switch (stagehand-log-buffer-name)))
+
+(defun stagehand-log-clear ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l))))
+  (setq stagehand-log-line-counter 0))
+
+(defun stagehand-log-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-log-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-log"))
+        (editor/keymaps/keymap-set-key kmap "n" "(stagehand/log/stagehand-log-next)")
+        (editor/keymaps/keymap-set-key kmap "p" "(stagehand/log/stagehand-log-prev)")
+        (editor/keymaps/keymap-set-key kmap "g" "(stagehand/log/stagehand-log-rerun)")
+        (editor/keymaps/keymap-set-key kmap "q" "(stagehand/log/stagehand-log-quit)")
+        (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/log/stagehand-log-show)")
+        (editor/keymaps/keymap-set-key kmap "b" "(stagehand/log/stagehand-log-checkout)")
+        (editor/keymaps/buffer-set-keymap (stagehand-log-buffer-name) kmap))))
+  t)
+
+(defun stagehand-show-clear ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+(defun stagehand-show-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-show-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-show"))
+        (editor/keymaps/keymap-set-key kmap "n" "(stagehand/log/stagehand-show-next)")
+        (editor/keymaps/keymap-set-key kmap "p" "(stagehand/log/stagehand-show-prev)")
+        (editor/keymaps/keymap-set-key kmap "q" "(stagehand/log/stagehand-show-quit)")
+        (editor/keymaps/buffer-set-keymap (stagehand-show-buffer-name) kmap))))
+  t)
+
+(provide "stagehand-log"))
+
+;; Global bridges (top-level, OUTSIDE the module): make-process's
+;; :filter/:sentinel names eval in the GLOBAL environment, where
+;; module functions are not visible (the process-ops test pattern).
+(defun stagehand-log-filter-bridge (pid output)
+  (stagehand/log/stagehand-log-filter pid output))
+
+(defun stagehand-log-sentinel-bridge (pid exit-code)
+  (stagehand/log/stagehand-log-sentinel pid exit-code))

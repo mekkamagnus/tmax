@@ -684,6 +684,7 @@ arg; the quoting is the apostrophe-escape pattern)."
         (editor/keymaps/keymap-set-key kmap "D" "(stagehand/stage/stagehand-discard-file)")
         (editor/keymaps/keymap-set-key kmap "S" "(stagehand/stage/stagehand-stage-section)")
         (editor/keymaps/keymap-set-key kmap "U" "(stagehand/stage/stagehand-unstage-section)")
+        (editor/keymaps/keymap-set-key kmap "l" "(stagehand/log/stagehand-log-open)")
         (editor/keymaps/buffer-set-keymap (stagehand-status-buffer-name) kmap))))
   t)
 
