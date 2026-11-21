@@ -369,10 +369,22 @@ describe("#8.4 SPC a n (r100 — the mockup footer command)", () => {
     ref("nav", 1, "completion", "line1\nfeature-a\n");
     e(ed, '(require-module "fikra/diff")');
     expect(JSON.stringify(e(ed, '(key-binding "SPC a n" "normal")').value)).toContain("fikra-diff-turn-cmd-next");
+    // r101: seed a SECOND turn — the real open-then-step walk.
+    e(ed, '(fikra-thread-set-field "turn-count" 2)');
+    ref("nav", 2, "baseline", "line1\nfeature-a\n");
+    ref("nav", 2, "completion", "line1\nfeature-a\nfeature-b\n");
+    // From OUTSIDE the viewer (a scratch buffer): opens the LATEST (2).
+    e(ed, '(buffer-create "scratch-out")');
+    e(ed, '(buffer-switch "scratch-out")');
     e(ed, "(fikra/diff/fikra-diff-turn-cmd-next)");
-    expect(String(e(ed, "(buffer-text)").value)).toContain("turn 1");
-    // Inside the viewer it steps turns (the mockup's 'next turn').
+    expect(String(e(ed, "(buffer-text)").value)).toContain("turn 2");
+    // Inside the viewer, prev steps to turn 1 (the real next/prev walk).
     e(ed, "(fikra/diff/fikra-diff-turn-cmd-prev)");
-    expect(String(e(ed, "(editor-status)").value)).toContain("turn");
+    expect(String(e(ed, "(buffer-text)").value)).toContain("turn 1");
+    // Leaving the viewer and calling cmd-next again: the stale view-turn
+    // must NOT ghost-step — it re-opens the LATEST (r100 P2).
+    e(ed, '(buffer-switch "scratch-out")');
+    e(ed, "(fikra/diff/fikra-diff-turn-cmd-next)");
+    expect(String(e(ed, "(buffer-text)").value)).toContain("turn 2");
   });
 });

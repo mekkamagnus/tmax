@@ -306,13 +306,16 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
 ;; the content). r100: the mockup's SPC-a vocabulary leads (revert /
 ;; prev-turn / next-turn); the viewer's LOCAL keys follow.
 (defun fikra-diff-keys-footer ()
-  (concat "\n SPC a R revert this turn · SPC a n next turn · [ prev turn · n/N file · r revert · SPC a d live view \n"))
+  (concat "\n SPC a R turn diff · SPC a n next turn · [ prev turn · n/N file · r revert this turn · SPC a d live view \n"))
 
 ;; SPC a n / SPC a p (mockup 8.4's footer commands): step turns from
 ;; OUTSIDE the viewer too — with no completed view open, `n` opens the
 ;; LATEST completed turn first (the entry matches SPC a R's behavior).
 (defun fikra-diff-turn-cmd (delta)
-  (if (not fikra-diff-view-turn)
+  ;; r101 (codex r100 P2): the OPEN test reads the CURRENT BUFFER, not
+  ;; fikra-diff-view-turn — the defvar stays set after leaving the viewer
+  ;; and the command would step from a ghost turn.
+  (if (not (string= (buffer-name) fikra-diff-buffer-name))
     (let ((latest (fikra-last-completed-turn)))
       (if (> latest 0)
         (fikra-turn-diff-for latest)
