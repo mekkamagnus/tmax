@@ -910,3 +910,12 @@ AI: DONE
 - **r92 (`2242204`, PASS 9/10)**: discovery stamps its identity, the source check precedes every branch, C-n walks word by word. Codex live-verified first-use 7/0 + 25/25, no gaps.
 
 **8.8 closes at 9.** Named: the 40ms-class latency needs a smaller/FIM model (the honest footer already carries the real number); multiline ghosts stay out of scope (the r38 single-line mirror). Board: **59/80**.
+
+## Rounds 93-95 — the 8.6 re-grade sub-arc (8.6: 6 → 10)
+
+The standing 6 predated the screen's r24-r37 evolution (verified patch generation, the real apply--check verdict, the conflicts head, the comm-based overlap count). The arc was a re-grade plus the last mockup fidelity:
+- **r93 (`00a9a6e`, 8/10)**: the mockup's merged context row — "conflicts: none · files touched by others since fork: N (auto-merged)" with the annotation EARNED (overlap+clean only). Codex drove all three cases in a temp repo itself.
+- **r94 (`1ea0c99`, 9/10)**: the conflict case keeps ONE context row (a count summary; the raw git head rides unlabeled under the verdict — two labeled rows broke the shape); three-case regression added.
+- **r95 (`fd4bbef`, PASS 10/10)**: the clean-overlap regression made REAL and deterministic (prepend-hunk + an outside-hunk-range local append — git apply does not fuzz, proven by manual repro).
+
+**8.6 closes at 10.** Board: **64/80** (8.1 7, 8.2 7, 8.3 8, 8.4 7, 8.5 7, 8.6 10, 8.7 9, 8.8 9).
