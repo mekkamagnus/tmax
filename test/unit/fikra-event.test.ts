@@ -310,3 +310,46 @@ describe("#304: id-based ending dedup", () => {
     expect(stripAnsi(text).split("── completed ──").length - 1).toBe(2);
   });
 });
+
+const e106 = (editor: unknown, expr: string) => executeTlisp(editor as never, expr);
+
+describe("8.1 render (r106 — codex r105 catches)", () => {
+  test("tool results render MULTILINE evidence inline (3 lines + the omitted count)", async () => {
+    const editor = await createStartedEditor("");
+    e106(editor, "(require-module fikra/event)");
+    setup(editor);
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "tool-result") (list "ok" t) (list "id" "ab12") (list "summary" "src/steep/screen.ts:41:  onResize(callback)\\nsrc/client/tui-client.ts:118:  process.stdout.on(\\"resize\\")\\nsrc/core/x.ts:3:  third\\nline4\\nline5\\n")))');
+    e106(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    const text = stripAnsi(String(e106(editor, "(buffer-text)").value));
+    // The first THREE lines ride inline with the ok + id head.
+    expect(text).toContain("→ ok #ab12 src/steep/screen.ts:41");
+    expect(text).toContain("  src/client/tui-client.ts:118");
+    expect(text).toContain("  src/core/x.ts:3:  third");
+    // The omitted tail is COUNTED, not silently dropped.
+    expect(text).toContain("…+2L");
+    expect(text).not.toContain("line4");
+  });
+
+  test("turn-END rebuilds through the merge: the ckpt marker lands INLINE on the edit row", async () => {
+    const editor = await createStartedEditor("");
+    e106(editor, "(require-module fikra/event)");
+    // A turn with an edit + its async checkpoint + end. The thread focus
+    // comes FIRST: focusing re-points the event log (#222) — setup's
+    // pointer must win.
+    e106(editor, "(require-module fikra/thread)");
+    e106(editor, '(fikra-thread-focus "main")');
+    setup(editor);
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-start") (list "turn" "7") (list "backend" "claude")))');
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "id" "e1") (list "summary" "src/x.ts @118")))');
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/7")))');
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-end") (list "turn" "7") (list "status" "completed")))');
+    e106(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    const text = stripAnsi(String(e106(editor, "(buffer-text)").value));
+    // The turn-end triggered the rebuild WITH the inline merge: the marker
+    // rides the edit row (no standalone marker row left behind).
+    expect(text).toContain("buffer-edit");
+    expect(text).toMatch(/@118.*\[ckpt main\/7 ✓\]/);
+    const markerRows = text.split("\n").filter((l) => l.includes("⌘ [ckpt"));
+    expect(markerRows).toHaveLength(0);
+  });
+});

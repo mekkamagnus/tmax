@@ -342,9 +342,11 @@ round-12 approvals catch)."
                     (fikra-face "\e[32m" (concat "  → ok"))
                     (fikra-face "\e[1;31m" (concat "  → FAIL")))
                   (fikra-event-id-tag event) " "
-                  (fikra-face (if (fikra-event-get event "ok") "\e[32m" "\e[1;31m")
-                    (fikra-event-one-line (fikra-event-get-str event "summary")))
-                  "\n")))
+                  ;; r106 (codex r105 P2): the mockup shows MULTILINE bash
+                  ;; evidence inline — up to 3 lines, then the omitted count.
+                  (fikra-event-result-lines event
+                    (fikra-event-get-str event "summary")
+                    (if (fikra-event-get event "ok") "\e[32m" "\e[1;31m")))))
       ((string= kind "permission-request")
         ;; Mockup 8.3's gate as a FOCUSED PANEL (codex rounds 17: "inline
         ;; block rather than the mockup's focused panel"): a boxed frame —
@@ -406,6 +408,41 @@ round-12 approvals catch)."
 ;; chars, with an elision marker when more lines existed. A raw Bash dump
 ;; (an ls listing) must not swamp the conversation — codex UI verification:
 ;; "full directory listing dominating the chat" (tool presentation 4/10).
+;; Up to 3 evidence lines inline (the first carries the ok/FAIL + id
+;; prefix via the caller's concat head; continuations indent), then a dim
+;; "…+NL" tail line — the mockup's inline bash output shape.
+(defun fikra-event-result-lines (event s color)
+  (let* ((lines (string-split s "\n"))
+         (trimmed (if (and (> (length lines) 1) (string= (last lines) ""))
+                    (reverse (cdr (reverse lines)))
+                    lines)))
+    (concat (fikra-event-result-scan event trimmed 0 "" color))))
+
+(defun fikra-event-result-scan (event lines i out color)
+  (cond
+    ((>= i (length lines)) out)
+    ((>= i 3)
+      (concat out (fikra-face "\e[2m"
+                    (concat "  …+" (number-to-string (- (length lines) 3)) "L")) "\n"))
+    (t
+      (fikra-event-result-scan event lines (+ i 1)
+        ;; The caller's concat already carries the → ok/FAIL + id head on
+        ;; line 0 — the helper renders the LINES only (r106: rendering the
+        ;; head here too doubled it and threw the render).
+        (concat out
+          ;; Line 0 rides the caller's head line (no indent — the head's
+          ;; trailing space separates); continuations indent two.
+          (concat (if (= i 0) "" "  ")
+                  (fikra-face color (fikra-event-cap-line (nth i lines))))
+          "\n")
+        color))))
+
+;; One line capped at 100 (the tail ellipsis keeps the edge visible).
+(defun fikra-event-cap-line (s)
+  (if (> (length s) 100)
+    (concat (substring s 0 100) "…")
+    s))
+
 (defun fikra-event-one-line (s)
   (let* ((lines (string-split s "\n"))
          (first (if (> (length lines) 0) (car lines) ""))
@@ -431,6 +468,14 @@ bumps the revision the TUI poll consumes."
 ;; the user is looking at. Emitting FOR an id appends to id's own log and
 ;; renders only when id's buffer is current (switching views does not
 ;; misroute; it merely pauses live rendering for the background thread).
+;; r106: does the batch carry a turn-end event?
+(defun fikra-event-batch-has-end-p (events)
+  (if (null events)
+    nil
+    (if (string= (fikra-event-get-str (car events) "kind") "turn-end")
+      t
+      (fikra-event-batch-has-end-p (cdr events)))))
+
 (defun fikra-event-emit-batch-for (id events)
   (require-module fikra/thread)
   (fikra-event-count-tools events)
@@ -475,7 +520,12 @@ bumps the revision the TUI poll consumes."
           (progn
             (dolist (e events)
               (setq fikra-event-memory (cons e fikra-event-memory)))
-            (if (fikra-event-batch-has-tombstone-p events)
+            ;; r106 (codex r105 P1): a turn END rebuilds through the
+            ;; replay path — the INLINE ckpt merge (the marker onto its
+            ;; edit row) lands in the finished transcript, matching the
+            ;; mockup; the streaming shape stays append-only mid-turn.
+            (if (or (fikra-event-batch-has-tombstone-p events)
+                    (fikra-event-batch-has-end-p events))
               (fikra-event-rebuild-fikra-buffer))))
         t))))
 
@@ -781,13 +831,17 @@ text-deltas inside the batch join into the same line."
     (let ((ev (nth i out)))
       (if (string= (fikra-event-get-str ev "kind") "turn-start")
         (let* ((tn (fikra-event-get ev "turn"))
+               ;; r106: the turn field rides as EITHER shape (the
+               ;; backends emit numbers; replayed logs carry strings).
+               (tn-str (if (numberp tn) (number-to-string tn)
+                         (if (stringp tn) tn nil)))
                (tid (condition-case nil
                         (progn (require-module fikra/thread)
                                (let ((t0 (fikra/thread/fikra-thread-current)))
                                  (if (and t0 (> (length t0) 0)) t0 nil)))
                         (error () nil))))
-          (if (and tn tid)
-            (concat tid "/" (number-to-string tn))
+          (if (and tn-str tid (> (length tn-str) 0))
+            (concat tid "/" tn-str)
             nil))
         (fikra-inline-event-identity out (+ i 1))))))
 
