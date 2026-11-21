@@ -231,17 +231,34 @@ segment reads)."
 (defun fikra-risk-has-rm-recursive (d)
   (let ((hit (string-match "rm " d)))
     (if (and hit (numberp hit))
-      (if (fikra-risk-flags-have-r d (+ hit 3))
+      (if (fikra-risk-rm-flags-r d (+ hit 3))
         t
         (fikra-risk-has-rm-recursive (substring d (+ hit 3) (length d))))
       nil)))
 
-;; The word after position K starts a dash-flag; does it carry r/R
-;; before the next space? ("rm -r", "rm -fr", "rm --recursive".)
-(defun fikra-risk-flags-have-r (d k)
-  (if (and (< k (length d)) (string= (substring d k (+ k 1)) "-"))
-    (fikra-risk-flag-chars d (+ k 1))
-    nil))
+;; r133d (codex r133c catch): skip ANY spaces after "rm", then scan
+;; EVERY consecutive dash-flag word ("rm --verbose -r x"; multiple
+;; spaces; tabs are not split — commands are space-normal here).
+(defun fikra-risk-rm-flags-r (d k)
+  (if (>= k (length d))
+    nil
+    (if (string= (substring d k (+ k 1)) " ")
+      (fikra-risk-rm-flags-r d (+ k 1))
+      (if (string= (substring d k (+ k 1)) "-")
+        (fikra-risk-flag-word-r d (+ k 1))
+        nil))))
+
+;; The flag word's chars; r/R anywhere → t. At the word's end, CONTINUE
+;; with the next flag word ("rm -v -r x").
+(defun fikra-risk-flag-word-r (d k)
+  (if (>= k (length d))
+    nil
+    (let ((c (substring d k (+ k 1))))
+      (cond
+        ((string= c "r") t)
+        ((string= c "R") t)
+        ((string= c " ") (fikra-risk-rm-flags-r d (+ k 1)))
+        (t (fikra-risk-flag-word-r d (+ k 1)))))))
 
 (defun fikra-risk-flag-chars (d k)
   (if (>= k (length d))

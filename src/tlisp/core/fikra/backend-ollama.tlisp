@@ -654,9 +654,14 @@ availability gate must be synchronous; the turn itself is async)."
                       (error () (concat dir "/" path)))))
       ;; resolved walks up to dir ITSELF for a not-yet-existing path
       ;; (no trailing slash) — the exact dir is contained too.
-      (if (string= resolved real-dir)
-        t
-        (string-prefix-p (concat real-dir "/") resolved)))))
+      ;; r133d (codex r133c catch): the readlink FALLBACK (a dangling
+      ;; link) returns the RAW target — a lexical ".." hop inside it
+      ;; passed the prefix compare; unresolvable hops refuse.
+      (if (fikra-ollama-has-dotdot-p resolved)
+        nil
+        (if (string= resolved real-dir)
+          t
+          (string-prefix-p (concat real-dir "/") resolved))))))
 
 (defun fikra-ollama-run-edit (call args)
   (let* ((path (if (fikra-ollama-alist-get "path" args)

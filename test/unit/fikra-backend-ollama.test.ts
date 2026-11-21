@@ -652,6 +652,15 @@ describe("ollama gate pattern gaps (r133 — codex r130 P1#5)", () => {
     // r133c (codex r133b mid-verify catch): ">&1state.txt" is a FILE
     // named 1state.txt — only an ALL-DIGIT word after >& is fd-dup.
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x >&1state.txt")').value)).toBe("destructive");
+    // r133d (codex r133c catches): multi-space and multi-flag-word
+    // recursive rm classifies destructive.
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm   -r tree/")').value)).toBe("destructive");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm --verbose -r tree/")').value)).toBe("destructive");
+    // A dangling link whose RAW target hops with ".. — refuses now.
+    e(ed, '(shell-command "ln -s ../outside-hop/gone2.txt hop-link")');
+    e(ed, '(fikra/chat/fikra-turn-send "hop link")');
+    fireCalls(ed, 160, [{ name: "buffer_edit", args: { path: "hop-link", content: "HOP-ESCAPE\n" } }]);
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).toContain("refused");
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "echo x >&2")').value)).toBe("shell");
     // The dotdot family refuses through buffer_edit (no .. anywhere —
     // including embedded and trailing shapes). Each fire gets its OWN
