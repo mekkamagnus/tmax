@@ -4,7 +4,7 @@
           fikra-git-fikra-p fikra-git-unborn-p
           fikra-checkpoint-command fikra-checkpoint-tail
           fikra-checkpoint-filter fikra-checkpoint-sentinel
-          fikra-checkpoint-capture-with-path)
+          fikra-checkpoint-capture-with-path fikra-checkpoint-set-emit-owner)
 
 ;; #217 (RFC-027 §D6, Phase 2): non-invasive git checkpoints. Every turn
 ;; gets two refs (baseline/completion) built on a TEMPORARY index — the
@@ -109,6 +109,26 @@ thread's persisted root (root-shell cwd), never the daemon cwd."
     "rm -f " (fikra-checkpoint-shq tmp-index) " && "
     "echo REF:$commit || echo CAPTURE-FAILED"))
 
+(defun fikra-checkpoint-set-emit-owner (owner)
+  "r134e: callback contexts (the mediated bash's sync capture runs in
+the bash sentinel) route the sync capture's event through the
+explicit-path owner emitter — the pointer reads nil there."
+  (setq fikra-checkpoint-emit-owner owner))
+
+(defvar fikra-checkpoint-emit-owner nil
+  "r134e: set by CALLBACK contexts around a sync capture — the event
+emits through the explicit-path owner emitter instead of the pointer
+(the turn-end lesson).")
+(defvar fikra-checkpoint-invocation-n 0
+  "r134e (codex r134-final P2): a monotonic per-invocation counter —
+every tmp index name is unique per CAPTURE (same-identity overlaps —
+a re-park's second baseline, an async straggler — can never share a
+file).")
+
+(defun fikra-checkpoint-invocation ()
+  (setq fikra-checkpoint-invocation-n (+ fikra-checkpoint-invocation-n 1))
+  (number-to-string fikra-checkpoint-invocation-n))
+
 (defvar fikra-checkpoint-action-seqs (hashmap)
   "r134 (codex r130 P1#4): per-action sequence counters, keyed
 thread/turn — each mutating ACTION in a turn gets its OWN ref
@@ -170,17 +190,30 @@ events; nil when disabled or failed. Never touches turn state."
                         "/.tmax/fikra/tmp-index-" kind "-"
                         (fikra/thread/fikra-thread-field "id") "-"
                         (number-to-string (fikra/thread/fikra-thread-turn-count))
-                        suffix))
+                        suffix "-" (fikra-checkpoint-invocation)))
            (out (shell-command (fikra-checkpoint-command-for tmp ref kind))))
       (let ((sha (fikra-checkpoint-tail out)))
         (setq fikra-checkpoint-last-ref sha)
-        (fikra/event/fikra-event-emit
-          (if sha
-            (list (list "kind" "checkpoint-ready")
-                  (list "ref" ref)
-                  (list "sha" sha))
-            (list (list "kind" "checkpoint-error")
-                  (list "reason" (string-trim (substring out 0 (min 200 (length out))))))))
+        ;; r134e (codex P2): the emit is CONTEXT-aware — the pointer
+        ;; emit in normal evals (it renders); the EXPLICIT-PATH owner
+        ;; emit when a CALLBACK context set fikra-checkpoint-emit-owner
+        ;; (the mediated bash's sync capture runs inside the bash
+        ;; sentinel, where the pointer reads nil and the event drops).
+        (if fikra-checkpoint-emit-owner
+          (fikra/event/fikra-event-emit-batch-for fikra-checkpoint-emit-owner
+            (list (if sha
+                    (list (list "kind" "checkpoint-ready")
+                          (list "ref" ref)
+                          (list "sha" sha))
+                    (list (list "kind" "checkpoint-error")
+                          (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))
+          (fikra/event/fikra-event-emit
+            (if sha
+              (list (list "kind" "checkpoint-ready")
+                    (list "ref" ref)
+                    (list "sha" sha))
+              (list (list "kind" "checkpoint-error")
+                    (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))
         sha))))
 
 ;; Test seam: capture with a PATH prepend — forces REAL git failures
@@ -240,7 +273,8 @@ keys the sentinel's ref name (concurrent captures cannot race)."
            ;; reading.
            (tmp (concat (fikra/thread/fikra-thread-field "root")
                         "/.tmax/fikra/tmp-index-" kind "-"
-                        thread-id "-" (number-to-string turn-n) suffix))
+                        thread-id "-" (number-to-string turn-n) suffix "-"
+                        (fikra-checkpoint-invocation)))
            (pid (make-process
                   :command (list "sh" "-c" (fikra-checkpoint-command-for tmp ref kind))
                   :cwd (fikra/thread/fikra-thread-field "root")

@@ -547,8 +547,13 @@ availability gate must be synchronous; the turn itself is async)."
                                    ;; snapshot completes BEFORE the
                                    ;; continuation resumes (an async capture's
                                    ;; git add -A could stage a LATER edit into
-                                   ;; this action's ref).
-                                   (fikra/checkpoint/fikra-checkpoint-capture "action"))
+                                   ;; this action's ref). r134e: this runs in
+                                   ;; the SENTINEL context — the event emits
+                                   ;; owner-bound (the pointer reads nil here).
+                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner
+                                     (if home home (fikra/thread/fikra-thread-current)))
+                                   (fikra/checkpoint/fikra-checkpoint-capture "action")
+                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil))
                             (error () nil)))
                         (if (not cont)
                           (progn
