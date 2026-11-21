@@ -20,7 +20,8 @@ as-built surface and the REAL gaps, each routed to its own issue.
   line-buffered, and NOT stderr — stderr drains into the exit-tail,
   never the filter; the fikra backend's filter itself reassembles
   lines from raw chunks, the #208 serialized-filter contract); a
-  `:sentinel` callback (exit-code + pid, fired on the filter chain
+  `:sentinel` callback `(:handle, :exit-code)` — the process-table handle
+  and the exit code, fired on the filter chain
   CAPTURED AT PROCESS EXIT — a bounded drain, not a wait for all
   evals: straggler chunks keep flowing through the serialized chain
   AFTER the sentinel by design). Returns the per-editor PROCESS-TABLE
