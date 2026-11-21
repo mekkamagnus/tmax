@@ -8,7 +8,8 @@
           stagehand-log-buffer-name stagehand-show-buffer-name
           stagehand-log-shas stagehand-log-commit-count
           stagehand-log-sha-at-line
-          stagehand-log-filter stagehand-log-sentinel)
+          stagehand-log-filter stagehand-log-sentinel
+          stagehand-log-last-pid-get)
 
   (require-module stagehand/status)
   (require-module stagehand/diff)
@@ -37,8 +38,15 @@ drop their chunks — the #307 guard).")
   "pid → generation (the fikra-claude-processes pattern).")
 (defvar stagehand-log-shas (list)
   "The ordered commit SHAs (nav targets + the show walk).")
+(defvar stagehand-log-commit-lines (list)
+  "The buffer line indices of commit rows, in stream order — the nav
+  sequence (art rows never appear here, so they are structurally
+  skipped, including at the graph tail — gate r1).")
 (defvar stagehand-log-line-sha (hashmap)
   "Buffer line index → sha (commit rows only).")
+(defvar stagehand-log-last-pid nil
+  "The pid of the most recent log run (tests drive the sentinel with
+the RECORDED pid — the generation guard drops unknown pids).")
 (defvar stagehand-log-partial ""
   "The trailing incomplete chunk awaiting its newline.")
 (defvar stagehand-log-root nil
@@ -70,6 +78,7 @@ g does the same). Unborn → 'no commits yet'; no repo → a status."
         (setq stagehand-log-root root)
         (setq stagehand-log-generation (+ stagehand-log-generation 1))
         (setq stagehand-log-shas (list))
+        (setq stagehand-log-commit-lines (list))
         (setq stagehand-log-line-sha (hashmap))
         (setq stagehand-log-partial "")
         (stagehand-log-ensure-buffer)
@@ -85,6 +94,7 @@ g does the same). Unborn → 'no commits yet'; no repo → a status."
                      :cwd root
                      :filter "stagehand/log/stagehand-log-filter"
                      :sentinel "stagehand/log/stagehand-log-sentinel")))
+          (setq stagehand-log-last-pid pid)
           (keymap-mutable-set! stagehand-log-pid-gen
             (number-to-string pid) stagehand-log-generation))
         (editor-set-status "Stagehand: log streaming…"))))))
@@ -111,19 +121,32 @@ GENERATION GUARD drops chunks from any run that is no longer current."
       nil)))
 
 (defun stagehand-log-sentinel (pid exit-code)
-  "The exit sentinel (generation-guarded): flush any trailing line."
+  "The exit sentinel (generation-guarded): flush any trailing line,
+  then finalize — a NON-ZERO exit names the failure and leaves NO log
+  buffer (killed); success renders the count and locks the buffer
+  read-only (manual edits would desync the line→sha map — gate r1)."
   (let ((gen (hashmap-get stagehand-log-pid-gen (number-to-string pid))))
     (if (and (numberp gen) (= gen stagehand-log-generation))
-      (progn
-        (if (> (length stagehand-log-partial) 0)
-          (progn
-            (stagehand-log-append
-              (concat (stagehand-log-render-line stagehand-log-partial) "\n"))
-            (setq stagehand-log-line-counter (+ stagehand-log-line-counter 1))))
-        (setq stagehand-log-partial "")
-        (editor-set-status
-          (concat "Stagehand: log — "
-            (number-to-string (length stagehand-log-shas)) " commits"))))))
+      (if (and (numberp exit-code) (not (= exit-code 0)))
+        (progn
+          (setq stagehand-log-partial "")
+          (if (string= (buffer-current) (stagehand-log-buffer-name))
+            (buffer-kill (stagehand-log-buffer-name))
+            (condition-case nil (buffer-kill (stagehand-log-buffer-name)) (error () nil)))
+          (editor-set-status
+            (concat "Stagehand: git log failed (" (number-to-string exit-code) ")")))
+        (progn
+          (if (> (length stagehand-log-partial) 0)
+            (progn
+              (stagehand-log-append
+                (concat (stagehand-log-render-line stagehand-log-partial) "\n"))
+              (setq stagehand-log-line-counter (+ stagehand-log-line-counter 1))))
+          (setq stagehand-log-partial "")
+          (if (string= (buffer-current) (stagehand-log-buffer-name))
+            (buffer-set-read-only t))
+          (editor-set-status
+            (concat "Stagehand: log — "
+              (number-to-string (length stagehand-log-shas)) " commits")))))))
 
 (defun stagehand-log-render-line (line)
   "One raw log line → its display row. A FIELD row (3 unit-sep fields)
@@ -138,6 +161,8 @@ line; an ART row passes through untouched (no sha — n/p skip it)."
         (if sha
           (progn
             (setq stagehand-log-shas (append stagehand-log-shas (list sha)))
+            (setq stagehand-log-commit-lines
+              (append stagehand-log-commit-lines (list line-idx)))
             (keymap-mutable-set! stagehand-log-line-sha
               (number-to-string line-idx) sha)
             (if (string= refs "")
@@ -201,41 +226,45 @@ occupies a buffer row, so nav line math must count them all.")
   (stagehand-log-nav -1))
 
 (defun stagehand-log-nav (dir)
-  (let ((target (stagehand-log-next-commit-line (cursor-line) dir)))
-    (if target (cursor-move target 0)
-      (editor-set-status "Stagehand: no commits"))))
+  ;; Position-based: the cursor's line maps to a POSITION in the
+  ;; commit-lines sequence (art rows are not positions — a cursor on
+  ;; an art row uses the position of the commit BEFORE it, matching
+  ;; the row's visual grouping). n wraps to the first commit; p to
+  ;; the last.
+  (let ((lines stagehand-log-commit-lines))
+    (if (null lines)
+      (editor-set-status "Stagehand: no commits")
+      (let* ((cur (cursor-line))
+             (pos (stagehand-pos-of-line lines cur 0)))
+        (cursor-move (nth (stagehand-wrap-pos (+ pos dir) (length lines)) lines) 0)))))
 
-(defun stagehand-log-next-commit-line (from dir)
-  (let ((n (stagehand-log-last-line)))
-    (if (= n 0)
-      nil
-      (stagehand-commit-scan from dir n))))
+(defun stagehand-pos-of-line (lines cur i)
+  ;; The position whose commit line is the last one <= CUR (0 when
+  ;; the cursor sits above the first commit).
+  (if (or (null lines) (> (car lines) cur))
+    0
+    (stagehand-pos-scan lines cur 0)))
 
-(defun stagehand-commit-scan (line dir n)
-  ;; The first commit row strictly past LINE in DIR (wrapping).
-  (let ((cand (stagehand-scan-direction line dir n (if (> dir 0) 1 n))))
-    (if (numberp cand) cand nil)))
+(defun stagehand-pos-scan (lines cur i)
+  (if (or (null (cdr lines)) (> (car (cdr lines)) cur))
+    i
+    (stagehand-pos-scan (cdr lines) cur (+ i 1))))
 
-(defun stagehand-scan-direction (line dir n fallback)
-  (let ((i (if (> dir 0) (+ line 1) (- line 1))))
-    (stagehand-scan-loop i dir n fallback)))
-
-(defun stagehand-scan-loop (i dir n fallback)
+(defun stagehand-wrap-pos (i n)
   (cond
-    ((and (> dir 0) (> i n)) fallback)
-    ((and (< dir 0) (< i 0)) fallback)
-    ((stagehand-log-line-is-commit i) i)
-    (t (stagehand-scan-loop (+ i dir) dir n fallback))))
+    ((< i 0) (- n 1))
+    ((>= i n) 0)
+    (t i)))
 
 (defun stagehand-log-line-is-commit (i)
   (hashmap-get stagehand-log-line-sha (number-to-string i)))
 
-(defun stagehand-log-last-line ()
-  (if (null stagehand-log-shas) 0
-    (- (length stagehand-log-shas) 1)))
-
 (defun stagehand-log-commit-count ()
   (length stagehand-log-shas))
+
+(defun stagehand-log-last-pid-get ()
+  "The most recent log run's pid (a VALUE getter)."
+  stagehand-log-last-pid)
 
 (defun stagehand-log-sha-at-line (i)
   "The sha recorded at log buffer line I (nil on art rows)."

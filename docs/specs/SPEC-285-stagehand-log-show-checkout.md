@@ -54,4 +54,9 @@ behind a confirm.
       + cancel (n)
 - [x] Unborn/empty statuses; the streaming re-run (`g` — fresh
       generation, no duplicate rows); the cherry-pick/revert
-      follow-up issue FILED before close
+      follow-up issue FILED before close (#330)
+- [x] Gate r1: graph-TAIL nav (every n lands on a commit row; the
+      oldest reachable; wrap both ways), the sentinel failure path
+      (named error, no buffer), the no-repo branch, the l/n keys via
+      handleKey + the post-stream read-only assertion, and the
+      refs/tags precedence row

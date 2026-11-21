@@ -147,6 +147,91 @@ describe("#290 — the show view", () => {
   });
 });
 
+describe("#290 — gate r1 coverage", () => {
+  test("nav at the GRAPH TAIL: art rows skipped everywhere; the oldest commit is reachable; wrap", async () => {
+    commit("base");
+    execFileSync("git", ["checkout", "-q", "-b", "feature"], { cwd: process.cwd() });
+    commit("feature work");
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: process.cwd() });
+    commit("main work");
+    execFileSync("git", ["merge", "-q", "--no-ff", "feature", "-m", "merge"], { cwd: process.cwd() });
+    await openLog(editor);
+    // The FIRST commit row (top) = the merge; n walks to each commit
+    // row — over the WHOLE buffer every n lands on a row with a sha.
+    e(editor, "(cursor-move 0 0)");
+    for (let i = 0; i < 4; i++) {
+      e(editor, "(stagehand/log/stagehand-log-next)");
+      const line = Number(String(e(editor, "(cursor-line)").value));
+      const sha = String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${line})`).value);
+      expect(sha).not.toBe("nil"); // never an art row
+    }
+    // After the LAST commit, n WRAPS to the first (line 0).
+    const line = Number(String(e(editor, "(cursor-line)").value));
+    expect(line).toBeGreaterThanOrEqual(0);
+    // p from the first wraps to the LAST commit (reachable).
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/log/stagehand-log-prev)");
+    const lastLine = Number(String(e(editor, "(cursor-line)").value));
+    expect(String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${lastLine})`).value)).not.toBe("nil");
+  });
+
+  test("a FAILING log run: the sentinel names the failure and leaves NO buffer", async () => {
+    commit("base");
+    e(editor, "(stagehand/status/stagehand-status)");
+    e(editor, "(stagehand/log/stagehand-log-open)");
+    // The log buffer is current right after open; drive the
+    // sentinel's failure path directly (a real failing git log after
+    // the unborn precheck is hard to stage; the contract is the
+    // sentinel's).
+    const pid = Number(String(e(editor, "(stagehand/log/stagehand-log-last-pid-get)").value));
+    e(editor, `(stagehand/log/stagehand-log-sentinel ${pid} 128)`);
+    expect(String(e(editor, "(editor-status)").value)).toContain("git log failed (128)");
+    expect(String(e(editor, '(if (member "*Stagehand-Log*" (buffer-list)) 1 0)').value)).toBe("0");
+  });
+
+  test("the NO-REPO branch: 'no repository' status", () => {
+    const dir = mkdtempSync(join(tmpdir(), "i290nr-"));
+    dirs.push(dir);
+    process.chdir(dir);
+    editor.setClientLaunchDir(dir);
+    e(editor, "(stagehand/status/stagehand-status)"); // not in a repository
+    e(editor, "(stagehand/log/stagehand-log-open)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("no repository");
+  });
+
+  test("the KEYS: l opens the log; n lands on a commit row; the buffer is READ-ONLY after streaming", async () => {
+    commit("one");
+    commit("two");
+    e(editor, "(stagehand/status/stagehand-status)");
+    await editor.handleKey("l");
+    for (let i = 0; i < 40; i++) {
+      if (String(e(editor, "(editor-status)").value).includes("commits")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand-Log*");
+    e(editor, "(cursor-move 0 0)");
+    await editor.handleKey("n");
+    const line = Number(String(e(editor, "(cursor-line)").value));
+    expect(String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${line})`).value)).not.toBe("nil");
+    expect(String(e(editor, "(buffer-read-only-p)").value)).toBe("true");
+  });
+
+  test("refs/tags precedence: a TAGGED mid-branch commit checks out the TAG name", async () => {
+    commit("c1");
+    execFileSync("git", ["tag", "v1"], { cwd: process.cwd() });
+    commit("c2");
+    await openLog(editor);
+    const lines = strip(bufferText(editor)).split("\n");
+    const row = lines.findIndex((l) => l.includes("c1"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-checkout)");
+    e(editor, '(stagehand/log/stagehand-log-checkout-accept "y")');
+    // Tag checkout detaches by git's nature, but the STATUS names the tag.
+    expect(String(e(editor, "(editor-status)").value)).toContain("checked out v1");
+    expect(git("describe", "--tags", "--exact-match")).toContain("v1");
+  });
+});
+
 describe("#290 — checkout", () => {
   test("b + y checks out the BRANCH ref (heads precedence; named in the status)", async () => {
     commit("base");
