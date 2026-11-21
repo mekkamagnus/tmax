@@ -650,7 +650,7 @@ availability gate must be synchronous; the turn itself is async)."
             (concat fikra-ollama-parked-acc
                     "{\"role\":\"tool\",\"content\":\"user rejected this command; do not retry it\"},"))
           (fikra-ollama-settle-home home-thread)
-          (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
+          (if (string= (symbol-name (fikra-ollama-resume-rest-for home-thread)) "done")
             (fikra-ollama-chat fikra-ollama-pending-message)
             nil))
         (progn
@@ -681,7 +681,7 @@ availability gate must be synchronous; the turn itself is async)."
                   (concat fikra-ollama-parked-acc approved))
                 ;; r120-r121: the remainder resumes; a RE-PARK holds the
                 ;; next model request until ITS decision.
-                (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
+                (if (string= (symbol-name (fikra-ollama-resume-rest-for home-thread)) "done")
                   (fikra-ollama-chat fikra-ollama-pending-message)
                   nil)))))))))
 
@@ -689,6 +689,18 @@ availability gate must be synchronous; the turn itself is async)."
 ;; a SECOND destructive call parks again — the rest re-rides).
 ;; Returns 'done or 'reparked (r121, codex r120 P1: the decision paths
 ;; must NOT re-fire the model while a second action still parks).
+;; r123 (codex r122 P1): the resumed remainder runs with the HOME
+;; thread focused when focus moved — every resumed call (bash, read,
+;; edit) resolves the ORIGINATING dir, not the focused one.
+(defun fikra-ollama-resume-rest-for (home-thread)
+  (if (and home-thread (not (string= home-thread (fikra/thread/fikra-thread-current))))
+    (let ((prev (fikra/thread/fikra-thread-current)))
+      (fikra/thread/fikra-thread-focus home-thread)
+      (let ((r (fikra-ollama-resume-rest)))
+        (fikra/thread/fikra-thread-focus prev)
+        r))
+    (fikra-ollama-resume-rest)))
+
 (defun fikra-ollama-resume-rest ()
   (let* ((rest fikra-ollama-parked-rest)
          (acc fikra-ollama-parked-acc))

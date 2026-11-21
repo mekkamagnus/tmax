@@ -580,3 +580,27 @@ describe("ollama multi-park + pre-park results (r121 — codex r120 catches)", (
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
   });
 });
+
+describe("ollama resumed-remainder dir binding (r123 — codex r122 P1)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  test("calls resumed after a focus switch run in the ORIGINATING dir", async () => {
+    const ed = await armed();
+    e(ed, "(require-module fikra/threads)");
+    // A second thread with its own root.
+    e(ed, '(fikra/chat/fikra-turn-send "park then read")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 151 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command: "rm -rf h/" } } },
+      { function: { name: "bash", arguments: { command: "pwd" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 151 "${r}")`);
+    e(ed, `(fikra-http-complete 151 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    const homeDir = String(e(ed, "(fikra/thread/fikra-thread-working-dir)").value);
+    // Switch away; allow — the resumed `pwd` must report the HOME dir.
+    e(ed, '(fikra/thread/fikra-thread-focus "away")');
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain(homeDir.replace(/\/$/, ""));
+    expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
+  });
+});
