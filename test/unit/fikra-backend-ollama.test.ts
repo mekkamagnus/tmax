@@ -604,3 +604,27 @@ describe("ollama resumed-remainder dir binding (r123 — codex r122 P1)", () => 
     expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
   });
 });
+
+describe("ollama next-round ownership (r124 — codex r123 P1)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  test("the NEXT model request after a switched-away decision stamps the ORIGINATING thread", async () => {
+    const ed = await armed();
+    e(ed, "(require-module fikra/threads)");
+    e(ed, '(fikra/chat/fikra-turn-send "park then continue")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 161 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command: "rm -rf n/" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 161 "${r}")`);
+    e(ed, `(fikra-http-complete 161 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    // Switch away; allow — the continuation (resume + the re-fire) runs
+    // home-bound; the fired request's thread map entry names HOME.
+    e(ed, '(fikra/thread/fikra-thread-focus "away")');
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    // The next request fired (running on home); its thread stamp is home.
+    // Direct: the home thread is running (the re-fire began there).
+    e(ed, '(fikra/thread/fikra-thread-focus "main")');
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("main");
+  });
+});

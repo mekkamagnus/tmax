@@ -650,9 +650,7 @@ availability gate must be synchronous; the turn itself is async)."
             (concat fikra-ollama-parked-acc
                     "{\"role\":\"tool\",\"content\":\"user rejected this command; do not retry it\"},"))
           (fikra-ollama-settle-home home-thread)
-          (if (string= (symbol-name (fikra-ollama-resume-rest-for home-thread)) "done")
-            (fikra-ollama-chat fikra-ollama-pending-message)
-            nil))
+          (fikra-ollama-continue-home home-thread))
         (progn
           (fikra/event/fikra-event-emit
             (list (list "kind" "permission-allowed")))
@@ -681,9 +679,7 @@ availability gate must be synchronous; the turn itself is async)."
                   (concat fikra-ollama-parked-acc approved))
                 ;; r120-r121: the remainder resumes; a RE-PARK holds the
                 ;; next model request until ITS decision.
-                (if (string= (symbol-name (fikra-ollama-resume-rest-for home-thread)) "done")
-                  (fikra-ollama-chat fikra-ollama-pending-message)
-                  nil)))))))))
+                (fikra-ollama-continue-home home-thread)))))))))
 
 ;; r120: run the parked reply's remaining calls (their results append;
 ;; a SECOND destructive call parks again — the rest re-rides).
@@ -700,6 +696,26 @@ availability gate must be synchronous; the turn itself is async)."
         (fikra/thread/fikra-thread-focus prev)
         r))
     (fikra-ollama-resume-rest)))
+
+;; r124 (codex r123 P1): the CONTINUATION — the resumption AND the next
+;; model request — runs home-bound (the re-fire stamps the request with
+;; the focused thread; a switched-away decision would route the
+;; continuing turn to the wrong thread).
+(defun fikra-ollama-continue-home (home-thread)
+  (let ((moved (and home-thread
+                    (not (string= home-thread (fikra/thread/fikra-thread-current))))))
+    (if moved
+      (let ((prev (fikra/thread/fikra-thread-current)))
+        (fikra/thread/fikra-thread-focus home-thread)
+        (let ((r (fikra-ollama-continue)))
+          (fikra/thread/fikra-thread-focus prev)
+          r))
+      (fikra-ollama-continue))))
+
+(defun fikra-ollama-continue ()
+  (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
+    (progn (fikra-ollama-chat fikra-ollama-pending-message) 'fired)
+    'held))
 
 (defun fikra-ollama-resume-rest ()
   (let* ((rest fikra-ollama-parked-rest)
