@@ -360,12 +360,11 @@ round-12 approvals catch)."
       ((string= kind "text-delta")
         (fikra-event-get-str event "text"))
       ((string= kind "thought")
-        ;; The face wraps ONLY the prefix (matching the incremental fold's
-        ;; fragment-appending shape — byte parity between live growth and
-        ;; the merged replay; codex r2 c4).
-        (concat (fikra-face "\e[2m" "· ") (fikra-thought-render (fikra-event-get-str event "text")) "\n"))
-      ((string= kind "thought-status")
-        (concat (fikra-face "\e[2m" (concat "· " (fikra-event-get-str event "status"))) "\n"))
+        ;; The face wraps the WHOLE line (the dim thinking look; codex
+        ;; r3 c2). Live parity holds because final states arrive via
+        ;; REBUILDS (collapse markers + the turn-end rebuild) — both
+        ;; replay-shaped.
+        (concat (fikra-face "\e[2m" (concat "· " (fikra-thought-render (fikra-event-get-str event "text")))) "\n"))
       ((string= kind "thought-collapse")
         ;; The live rebuild trigger — renders "" (the replay merge
         ;; pre-pass removes markers entirely).
@@ -624,8 +623,14 @@ text-deltas inside the batch join into the same line."
       (if (or (fikra-event-batch-has-tombstone-p events)
               (fikra-event-batch-has-final-p events)
               (fikra-event-batch-has-kind-p events "thought-collapse"))
-        (if (string= (buffer-current) (fikra/thread/fikra-thread-buffer-name))
-          (fikra-event-rebuild-fikra-buffer))
+        (progn
+          ;; Thread the run state even on rebuild batches (the discarded
+          ;; text is fine — the rebuild replaces the buffer — but the
+          ;; global open-state must track the batch's LAST event or the
+          ;; next block's fragments fold against a stale run).
+          (condition-case nil (fikra-event-render-batch events) (error () nil))
+          (if (string= (buffer-current) (fikra/thread/fikra-thread-buffer-name))
+            (fikra-event-rebuild-fikra-buffer)))
         (let ((text (fikra-event-render-batch events)))
           (if (and (> (length text) 0)
                    (string= (buffer-current) (fikra/thread/fikra-thread-buffer-name)))
@@ -658,10 +663,6 @@ text-deltas inside the batch join into the same line."
 ;; Rebuild the *Fikra* buffer from the log (must be current when called).
 (defun fikra-event-rebuild-fikra-buffer ()
   (require-module fikra/thread)
-  ;; #320 (codex r1 c5): a REPLAY resets collapse to the length-derived
-  ;; default — the toggles survive only inside the TAB handler's rebuild.
-  (if (not fikra-thought-keep-toggles)
-    (setq fikra-thought-toggles (list)))
   (let ((was-ro (buffer-read-only-p))
         (text (fikra-event-replay)))
     (buffer-set-read-only nil)
@@ -690,9 +691,6 @@ text-deltas inside the batch join into the same line."
   "TOGGLED thought first-lines (display-only; never persisted, never a
 replay-parity input — the byte-parity compare runs under DEFAULT
 collapse; a rebuild RESETS to lengths unless toggled).")
-(defvar fikra-thought-keep-toggles nil
-  "t only inside the TAB handler's rebuild — every OTHER replay resets
-the toggles to the length-derived default (codex r1 c5).")
 
 (defun fikra-thought-line-count (s)
   (length (string-split s "\n")))
@@ -763,12 +761,10 @@ default, inverted by a live TAB toggle on its first line."
                 (substring raw 2 (length raw))
                 raw)))
     (let ((key (fikra-thought-tab-key-of line)))
-      (if key
+      (if (and (>= (length raw) 2) (string= (substring raw 0 2) "· "))
         (progn
           (fikra-thought-toggle-at key)
-          (setq fikra-thought-keep-toggles t)
-          (condition-case nil (fikra-event-rebuild-fikra-buffer) (error () nil))
-          (setq fikra-thought-keep-toggles nil)
+          (fikra-event-rebuild-fikra-buffer)
           (editor-set-status "Fikra: thought toggled"))
         (editor-set-status "Fikra: not a thought line")))))
 
@@ -861,7 +857,7 @@ default, inverted by a live TAB toggle on its first line."
                       (if run-open ""
                         (concat (if (not (string= open "")) "\n" "")
                                 (fikra-face "\e[2m" "· ")))
-                      (fikra-event-get-str (car events) "text"))
+                      (fikra-face "\e[2m" (fikra-event-get-str (car events) "text")))
               (concat "thought:" blk))))
         (t
           (fikra-event-render-fold (cdr events)

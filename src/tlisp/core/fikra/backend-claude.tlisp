@@ -427,8 +427,6 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
       (fikra-norm-blocks (cdr blocks)
         (if event (cons event out) out)))))
 
-(defun fikra-norm-block-index () fikra-norm-block-idx)
-
 ;; user → tool-result events.
 (defun fikra-norm-user (obj)
   (let ((msg (fikra-afield obj "message")))

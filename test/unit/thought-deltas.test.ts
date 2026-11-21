@@ -7,9 +7,9 @@ import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor
 
 /**
  * @file thought-deltas.test.ts
- * @description #320 — thinking deltas into THOUGHT EVENTS. The block-
- * indexed accumulator (ordered delivery: redelivery drop, contiguous
- * ride as fragments, gap buffer + 2s timeout close), the growing-line
+ * @description #320 — thinking deltas into THOUGHT EVENTS. The ordered
+ * accumulator (same-raw appends, new-raw opens, older drops; message-
+ * scoped state), the growing-line
  * render with collapse (>3 lines or >200 chars → first line + `… [N
  * lines — TAB to expand]`; auto-collapse markers rebuild), TAB toggle,
  * and replay parity (byte-compare live-final vs replayed under DEFAULT
@@ -239,12 +239,61 @@ describe("#320 — replay parity + the stream shapes", () => {
 
   test("THOUGHT→TEXT transition parity: exact live-final vs replayed bytes (ANSI included)", () => {
     e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     e(editor, emit(delta(0, "brief")));
     e(editor, emit(textEv("answer")));
+    // Production final states pass through the TURN-END rebuild — parity
+    // compares that state against a fresh replay (codex r3: whole-line
+    // dim; live growth is per-fragment until the rebuild).
+    e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")');
+    e(editor, "(fikra/transient/fikra-transient-tick (editor-time-now))");
     const live = bufferText(editor);
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
     expect(bufferText(editor)).toBe(live); // BYTE parity, faces included
     expect(strip(live)).toContain("· brief\nassistant › answer");
+  });
+
+  test("MULTI-BLOCK message suppression holds through the whole completed message (codex r3 c1)", () => {
+    e(editor, "(require-module fikra/backend-claude)");
+    // Streamed thinking at raw 0 AND raw 2 (a text block took 1).
+    e(editor, emit(delta(0, "block zero")));
+    e(editor, emit(delta(2, "block two")));
+    // The completed message carries BOTH — both suppressed (the reset
+    // defers to the message's end).
+    const complete = '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"block zero"},{"type":"text","text":"x"},{"type":"thinking","thinking":"block two"}]}}';
+    const out = String(e(editor, `(length (fikra/thought/fikra-thought-feed "main" (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(complete)}"))))`).value);
+    expect(out).toBe("1"); // only the text block rides
+  });
+
+  test("the thought CONTENT is dim (the whole line, not just the prefix)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(delta(0, "deep thought")));
+    e(editor, '(fikra/thread/fikra-thread-turn-begin)');
+    e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")');
+    e(editor, "(fikra/transient/fikra-transient-tick (editor-time-now))");
+    const raw = bufferText(editor);
+    expect(raw).toContain("\u001b[2m· deep thought\u001b[0m"); // one face, whole line
+  });
+
+  test("EXPAND survives the next streaming fragment (marker rebuilds keep toggles; codex r3 c3)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    // A block that crosses the threshold mid-stream.
+    e(editor, emit(delta(0, "a\nb\nc")));
+    e(editor, emit(delta(0, "\nd"))); // crosses → collapsed
+    let t = strip(bufferText(editor));
+    expect(t).toContain("TAB to expand");
+    // Expand via the REAL TAB command.
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/event/fikra-thought-tab)");
+    t = strip(bufferText(editor));
+    expect(t).toContain("a\nb\nc\nd");
+    // The NEXT fragment's marker rebuild PRESERVES the expansion.
+    e(editor, emit(delta(0, "\ne")));
+    t = strip(bufferText(editor));
+    expect(t).toContain("a\nb\nc\nd\ne");
+    expect(t).not.toContain("TAB to expand");
   });
 
   test("the log carries fragments + markers; dedupe holds on RE-REPLAY", () => {
