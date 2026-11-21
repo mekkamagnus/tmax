@@ -81,10 +81,12 @@ codex r1) the index-only removal `git rm --cached` serves."
 
 (defun stagehand-unstage-argv (pair)
   ;; restore --staged resolves HEAD — unborn repos need rm --cached
-  ;; (index-only, worktree preserved).
+  ;; (index-only, worktree preserved). -f skips the safety refusal
+  ;; when the index differs from BOTH the worktree and the (absent)
+  ;; HEAD — the codex r2 AM repro: --cached keeps the worktree safe.
   (let ((paths (stagehand-literal-paths (stagehand-row-paths pair))))
     (if (= (stagehand/status/stagehand-has-commits-p (stagehand-root)) 0)
-      (cons "rm" (cons "--cached" (cons "--" paths)))
+      (cons "rm" (cons "--cached" (cons "-f" (cons "--" paths))))
       (cons "restore" (cons "--staged" (cons "--" paths))))))
 
 (defun stagehand-discard-file ()
@@ -107,12 +109,14 @@ content is preserved."
 
 ;; ── the destructive confirm (async y/n completing-read) ─────────────
 (defun stagehand-discard-table (input action)
-  "The y/n completion table (the kill-buffer-yes-no pattern)."
+  "The y/n completion table — n FIRST: the minibuffer preselects the
+  FIRST candidate, so an empty Enter delivers 'n' (cancel), never a
+  destructive 'y' (codex r2 reproduced D+bare-Enter discarding)."
   (if (string= action "metadata")
     (hashmap "category" "plain")
     (list
-      (hashmap "value" "y" "display" "y" "annotation" "" "metadata" (hashmap))
-      (hashmap "value" "n" "display" "n" "annotation" "" "metadata" (hashmap)))))
+      (hashmap "value" "n" "display" "n" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "y" "display" "y" "annotation" "" "metadata" (hashmap)))))
 
 (defun stagehand-discard-confirm (path)
   ;; completing-read is ASYNC — the discard defers to the accept

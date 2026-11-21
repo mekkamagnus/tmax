@@ -39,6 +39,36 @@ afterAll(() => {
 });
 
 describe("#287 — unborn unstage", () => {
+  test("the AM SPLIT row unstages on an unborn repo (rm --cached -f; worktree survives) + header-wide U", () => {
+    writeFileSync(join(process.cwd(), "n.txt"), "staged content\n");
+    execFileSync("git", ["add", "n.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "n.txt"), "modified after staging\n"); // the AM row
+    executeTlisp(editor, "(stagehand/status/stagehand-status)");
+    // The AM row appears in BOTH sections — target the STAGED copy
+    // (the row directly under the Staged header).
+    const lines = strip(bufferText(editor)).split("\n");
+    const sHdr = lines.findIndex((l) => l.startsWith("Staged ("));
+    const row = sHdr + 1;
+    expect(lines[row]).toContain("n.txt");
+    executeTlisp(editor, `(cursor-move ${row} 0)`);
+    executeTlisp(editor, "(stagehand/stage/stagehand-unstage-file)");
+    expect(git("diff", "--cached", "--name-only")).toBe("");
+    expect(file("n.txt")).toBe("modified after staging\n"); // worktree SURVIVES
+    // And header-wide U on a second AM file.
+    writeFileSync(join(process.cwd(), "m.txt"), "m1\n");
+    execFileSync("git", ["add", "m.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "m.txt"), "m2\n");
+    executeTlisp(editor, "(stagehand/status/stagehand-status-refresh)") ;
+    executeTlisp(editor, "(stagehand/status/stagehand-status)");
+    const lines2 = strip(bufferText(editor)).split("\n");
+    const hdr = lines2.findIndex((l) => l.startsWith("Staged ("));
+    executeTlisp(editor, `(cursor-move ${hdr} 0)`);
+    executeTlisp(editor, "(stagehand/stage/stagehand-unstage-section)");
+    expect(git("diff", "--cached", "--name-only")).toBe("");
+    expect(file("m.txt")).toBe("m2\n");
+    expect(String(executeTlisp(editor, "(editor-status)").value)).toContain("applied 1 of 1 visited");
+  });
+
   test("u works on an UNBORN repo (rm --cached; worktree preserved)", () => {
     writeFileSync(join(process.cwd(), "n.txt"), "content\n");
     execFileSync("git", ["add", "n.txt"], { cwd: process.cwd() });

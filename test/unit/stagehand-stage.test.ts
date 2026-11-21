@@ -348,6 +348,17 @@ describe("#287 — gate r1 coverage", () => {
     expect(file("f.txt")).toBe("v3\n");
   });
 
+  test("BARE ENTER on the discard confirm CANCELS (the preselect is n — codex r2)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    statusOf();
+    cursorTo(" M f.txt");
+    await editor.handleKey("D");
+    await editor.handleKey("Enter"); // NO answer typed — must cancel
+    expect(file("f.txt")).toBe("v2\n"); // worktree UNCHANGED
+  });
+
   test("the REAL C-g minibuffer cancel is a no-op (pending goes stale)", async () => {
     writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
     commit("base");

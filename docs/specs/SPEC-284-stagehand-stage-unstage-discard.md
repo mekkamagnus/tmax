@@ -16,8 +16,10 @@ invocations and index-preserving discards.
   on the array; optional cwd; returns the byte-faithful
   `(stdout stderr exit)` triple like `shell-exec`). `stagehand-git-argv`
   conses `"git"` onto the args — spaces, leading dashes, and unicode
-  are structurally safe with `--` before every path (the #287 safety
-  contract's structural form; no quoting, no `:(literal)` needed).
+  are structurally safe with `--` before every path (no shell, no
+  quoting). PATHSPEC MAGIC still applies to argv paths (codex r1/r2:
+  a ':(glob)*.txt' filename globbed siblings) — every path also
+  rides `:(literal)`.
 - **Per-row matrix**: `s` on Untracked/Unstaged → `git add -- path`;
   `u` on Staged → `git restore --staged -- path` (a staged RENAME
   contributes BOTH paths to ONE invocation — index + worktree of both
