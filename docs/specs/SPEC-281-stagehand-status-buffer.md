@@ -36,7 +36,18 @@ buffer's keymap.
   keyed by SECTION NAME in a hashmap — survives refresh (g re-parses in
   place). The rendered buffer is fold-aware (a folded section shows its
   header only). n/p move over the VISIBLE rows with explicit wrap
-  (T-Lisp `mod` keeps negative remainders — `(mod -1 n)` is -1).
+  (T-Lisp `mod` keeps negative remainders — `(mod -1 n)` is -1); the
+  current row is derived FROM THE CURSOR (j/k moves stay in sync), and
+  fold-toggle/refresh PRESERVE the cursor's row (place-cursor clamps
+  when a re-render shrank the rows).
+- **Row identity** (codex r1): RET opens the PARSED path via a
+  rendered-row → path table rebuilt at every render — never re-derived
+  from presentation text (a file literally named `notes (from
+  Alice).txt` opens correctly). Repo state commits only on a SUCCESSFUL
+  read (a failed re-open leaves the displayed status's root, rows, and
+  RET addressing intact). Rename/copy origin consumption checks EITHER
+  porcelain column (git emits index-side R/C only today, but a
+  worktree-side record must not corrupt the following rows).
 - **Keys**: buffer-local keymap (the fikra-diff pattern: `keymap-init`
   + `buffer-set-keymap`, the #206 chain's innermost tier) with Tab,
   n, p, g, q, Enter — spellings are the HANDLER's normalized names
@@ -65,7 +76,10 @@ buffer's keymap.
       persistence across refresh
 - [x] n/p/TAB/g/q/RET behaviors tested — via exported functions AND
       real `handleKey` dispatch (SPC g opens; the buffer-local map
-      fires; q restores recency)
+      fires; q restores recency); j/k-then-n continuity and
+      fold-preserves-position tested (codex r1); the `X (from Y).txt`
+      RET case and the failed-re-open root integrity tested (codex r1);
+      worktree-side R/C origin consumption tested (codex r1)
 - [x] The keymap-prefix-p refinement regression-tested in
       `test/unit/keymap-local.test.ts` (all 8 prior #206 rows still
       green)

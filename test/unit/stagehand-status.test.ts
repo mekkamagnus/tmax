@@ -99,6 +99,14 @@ describe("#286 — the porcelain -z parsing matrix", () => {
     expect(rows).toContain("-dashy.txt");
   });
 
+  test("a WORKTREE-SIDE rename record consumes its origin field (either column)", () => {
+    // git emits R/C in the index column today, but a worktree-side
+    // record must not leave its origin to be mis-parsed as a record.
+    const z = [" R wt.txt", "wt-orig.txt", " M mod.txt"].join("\0") + "\0";
+    const n = Number(String(e(editor, `(length (stagehand/status/stagehand-status-parse ${Z(z)}))`).value));
+    expect(n).toBe(2); // the origin was CONSUMED, mod.txt still parses
+  });
+
   test("an EMPTY -z stream → four empty sections", () => {
     const n = String(e(editor, `(length (stagehand/status/stagehand-status-sections (stagehand/status/stagehand-status-parse ${Z("")})))`).value);
     expect(n).toBe("4");
@@ -260,6 +268,54 @@ describe("#286 — folding + navigation", () => {
     expect(String(e(editor, "(buffer-current)").value)).toContain("Stagehand");
     e(editor, "(stagehand/status/stagehand-status-quit)");
     expect(String(e(editor, "(buffer-current)").value)).toContain("hello");
+  });
+
+  test("a file literally named 'X (from Y).txt' opens THE right file on RET (codex r1 #1)", () => {
+    const tricky = "notes (from Alice).txt";
+    writeFileSync(join(process.cwd(), tricky), "tricky content\n");
+    statusOf(editor);
+    const line = () => Number(String(e(editor, "(cursor-line)").value));
+    e(editor, "(cursor-move 3 0)"); // row 1 = the tricky file
+    e(editor, "(stagehand/status/stagehand-status-open-file)");
+    expect(strip(bufferText(editor))).toContain("tricky content");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("notes (from Alice)");
+    expect(line()).toBeGreaterThanOrEqual(0); // no crash; opened
+  });
+
+  test("a FAILED re-open keeps the displayed status's root (codex r1 #2)", () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "a\n");
+    statusOf(editor); // success — root committed
+    const rootA = String(e(editor, "(stagehand/status/stagehand-status-root)").value);
+    expect(rootA).toContain(execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: process.cwd() }).toString().trim());
+    // Corrupt the repo; a re-open FAILS — the root must NOT flip.
+    writeFileSync(join(process.cwd(), ".git", "HEAD"), "garbage\n");
+    e(editor, "(stagehand/status/stagehand-status)");
+    expect(String(e(editor, "(stagehand/status/stagehand-status-root)").value)).toBe(rootA);
+    expect(String(e(editor, "(editor-status)").value)).toContain("git status failed");
+  });
+
+  test("n/p follow j/k cursor moves; folding KEEPS the cursor on the toggled header (codex r1 #3)", () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "a\n");
+    writeFileSync(join(process.cwd(), "b.txt"), "b\n");
+    writeFileSync(join(process.cwd(), "c.txt"), "c\n");
+    execFileSync("git", ["add", "c.txt"], { cwd: process.cwd() });
+    statusOf(editor);
+    const line = () => Number(String(e(editor, "(cursor-line)").value));
+    // Layout: 2 U-hdr | 3 a | 4 b | 5 Unstaged-hdr | 6 S-hdr | 7 c | 8 G | 9 C.
+    // j-style move to line 4 (?? b.txt), then n continues FROM THERE.
+    e(editor, "(cursor-move 4 0)");
+    e(editor, "(stagehand/status/stagehand-status-next)");
+    expect(line()).toBe(5); // Unstaged header — n resumed at the cursor
+    // Fold Staged AT its header (line 6): its file row vanishes and the
+    // cursor STAYS on the toggled header — no reset to the first section.
+    e(editor, "(cursor-move 6 0)");
+    e(editor, "(stagehand/status/stagehand-status-fold-toggle)");
+    expect(line()).toBe(6);
+    expect(statusText(editor)).not.toContain("A  c.txt");
+    // Unfold: the row returns, position still on the header.
+    e(editor, "(stagehand/status/stagehand-status-fold-toggle)");
+    expect(line()).toBe(6);
+    expect(statusText(editor)).toContain("A  c.txt");
   });
 
   test("the KEYS: SPC g opens; n/p/TAB/g/q/RET dispatch in the buffer", async () => {

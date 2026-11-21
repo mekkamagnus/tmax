@@ -36,6 +36,11 @@ surviving sections (keyed by name).")
 
 (defun stagehand-status-buffer-name () "*Stagehand*")
 
+(defun stagehand-status-root ()
+  "The root this buffer's parse came from (nil before the first
+successful render — a failed read never commits a root)."
+  stagehand-root)
+
 ;; ── parsing ─────────────────────────────────────────────────────────
 ;; The porcelain -z record stream: "XY <path>" NUL, renames
 ;; "XY <new>\0<orig>" (TWO NUL fields). Split on the NUL and re-join
@@ -61,12 +66,20 @@ surviving sections (keyed by name).")
             nil)
           (let ((code (substring f 0 2))
                 (rest (substring f 3 (length f))))
-            (if (or (string= (substring code 0 1) "R")
-                    (string= (substring code 0 1) "C"))
-              ;; Rename/copy: the origin is the NEXT NUL field.
+            (if (stagehand-record-origin-p code)
+              ;; Rename/copy: the origin is the NEXT NUL field (check
+              ;; EITHER column — git only emits index-side R/C today, but
+              ;; a worktree-side record must not leave its origin to be
+              ;; mis-parsed as another record).
               (stagehand-parse-scan (cdr fields) out (list "pending" code rest))
               (stagehand-parse-scan (cdr fields)
                 (cons (list code rest nil) out) nil))))))))
+
+(defun stagehand-record-origin-p (code)
+  (or (string= (substring code 0 1) "R")
+      (string= (substring code 0 1) "C")
+      (string= (substring code 1 2) "R")
+      (string= (substring code 1 2) "C")))
 
 (defun stagehand-status-sections (entries)
   "The parsed entries → ((section-name (rows...)) ...) in display
@@ -173,6 +186,9 @@ variant, navigation math uses the complete set)."
   (let ((row (stagehand-row-at-cursor)))
     (if (stagehand-header-row-p row)
       (let ((name (stagehand-section-name-of row)))
+        ;; Sync the counter to the ACTUAL cursor before re-render so the
+        ;; position survives the fold (j/k moves count too).
+        (setq stagehand-cursor-row (stagehand-current-index))
         (keymap-mutable-set! stagehand-folded name
           (if (stagehand-status-folded-p name) nil t))
         (stagehand-status-rerender))
@@ -188,14 +204,21 @@ variant, navigation math uses the complete set)."
   (stagehand-nav -1))
 
 (defun stagehand-nav (dir)
+  ;; Derive the current row FROM THE CURSOR (j/k moves stay in sync with
+  ;; the n/p counter — they are the same position now), then wrap.
   (let ((n (length (stagehand-visible-rows))))
     (if (= n 0)
       nil
       (progn
-        ;; Explicit wrap (mod keeps remainders: -1 mod n = -1 here).
         (setq stagehand-cursor-row
-          (stagehand-wrap (+ stagehand-cursor-row dir) n))
+          (stagehand-wrap (+ (stagehand-current-index) dir) n))
         (stagehand-place-cursor)))))
+
+(defun stagehand-current-index ()
+  ;; The visible-row index under the cursor (0 when outside the rows).
+  (let ((idx (- (cursor-line) (stagehand-header-line-count)))
+        (n (length (stagehand-visible-rows))))
+    (if (or (< idx 0) (>= idx n)) 0 idx)))
 
 (defun stagehand-wrap (i n)
   (cond
@@ -209,16 +232,14 @@ stay — they are the unfold affordance)."
   (stagehand-blocks-of (stagehand-current-sections) t))
 
 (defun stagehand-place-cursor ()
-  (let ((line (stagehand-visible-line-of stagehand-cursor-row)))
-    (if line (cursor-move line 0))))
-
-(defun stagehand-visible-line-of (visible-idx)
-  ;; The buffer's header block occupies the first N lines; the visible
-  ;; rows follow. Count the header lines from the live buffer.
-  (let ((hdr (stagehand-header-line-count)))
-    (if (> (length (stagehand-visible-rows)) visible-idx)
-      (+ hdr visible-idx)
-      nil)))
+  ;; CLAMP to the visible rows: a preserved index that outlived a
+  ;; re-render (refresh shrank a section) lands on the last row, not
+  ;; beyond the buffer.
+  (let ((n (length (stagehand-visible-rows))))
+    (if (> n 0)
+      (progn
+        (setq stagehand-cursor-row (min stagehand-cursor-row (- n 1)))
+        (cursor-move (+ (stagehand-header-line-count) stagehand-cursor-row) 0)))))
 
 (defun stagehand-header-line-count () 2)
 
@@ -253,6 +274,35 @@ stay — they are the unfold affordance)."
     (string= (substring s i (+ i (length pat))) pat)))
 
 ;; ── actions ─────────────────────────────────────────────────────────
+;; Row identity: the buffer shows RENDERED rows, but RET must open the
+;; PARSED path — a file literally named "notes (from Alice).txt" must
+;; not be mangled by presentation text. stagehand-row-paths maps each
+;; rendered file row to its parsed path (rebuilt at every render).
+(defvar stagehand-row-paths (list)
+  "Rendered file row → parsed path (the RET lookup table).")
+
+(defun stagehand-row-path-alist (entries)
+  (if (null entries)
+    (list)
+    (let* ((e (car entries))
+           (c (car e))
+           (p (car (cdr e)))
+           (r (car (cdr (cdr e)))))
+      (cons (list (stagehand-render-row c p r) p)
+        (stagehand-row-path-alist (cdr entries))))))
+
+(defun stagehand-path-of-row (row)
+  ;; The PARSED path for a rendered row (nil for headers/unknowns) —
+  ;; never re-derived from the display string.
+  (stagehand-path-scan stagehand-row-paths row))
+
+(defun stagehand-path-scan (alist row)
+  (if (null alist)
+    nil
+    (if (string= (car (car alist)) row)
+      (car (cdr (car alist)))
+      (stagehand-path-scan (cdr alist) row))))
+
 (defun stagehand-status-open-file ()
   "RET on a file row: open the file at the repo root (the grep-hit
 landing pattern)."
@@ -263,12 +313,6 @@ landing pattern)."
           (find-file (concat stagehand-root "/" path))
           (editor-set-status "Stagehand: no file on this row")))
       (editor-set-status "Stagehand: no file on this row"))))
-
-(defun stagehand-path-of-row (row)
-  ;; "<code> <path> (from <orig>)" → the path (strip the rename tail).
-  (let* ((rest (substring row 3 (length row)))
-         (cut (stagehand-index-of-str rest " (from ")))
-    (if cut (substring rest 0 cut) rest)))
 
 (defun stagehand-status-quit ()
   "q — close the buffer. buffer-kill's Editor path picks the
@@ -290,7 +334,7 @@ repository (fresh root detection every invocation)."
     (if (null root)
       (editor-set-status "Stagehand: not in a repository")
       (progn
-        (setq stagehand-root root)
+        ;; A FRESH open starts at the top; refresh (g) preserves.
         (setq stagehand-cursor-row 0)
         (stagehand-status-render root)))))
 
@@ -328,11 +372,16 @@ arg; the quoting is the apostrophe-escape pattern)."
           (err (car (cdr res)))
           (exit (car (cdr (cdr res)))))
     (if (and (numberp exit) (> exit 0))
+      ;; Failure: NO state commits — a displayed status for repository A
+      ;; must keep its root (RET/refresh keep addressing A, not a root
+      ;; whose read just failed).
       (editor-set-status
         (concat "Stagehand: git status failed (" (number-to-string exit)
                 ") " (stagehand-first-line err)))
       (let ((entries (stagehand-status-parse out)))
+        (setq stagehand-root root)
         (setq stagehand-last-parse entries)
+        (setq stagehand-row-paths (stagehand-row-path-alist entries))
         (stagehand-render-buffer root entries)))))
 
 (defun stagehand-first-line (s)
@@ -362,7 +411,9 @@ arg; the quoting is the apostrophe-escape pattern)."
       (buffer-append "nothing to commit, working tree clean\n"))
     (buffer-set-read-only t)
     (stagehand-ensure-keymap)
-    (setq stagehand-cursor-row 0)
+    ;; No cursor reset here: a FRESH open resets at the entry point;
+    ;; fold-toggle and refresh (g) PRESERVE the row (place-cursor
+    ;; clamps when a re-render shrank the visible rows).
     (stagehand-place-cursor)))
 
 (defun stagehand-head-line (root branch upstream)
