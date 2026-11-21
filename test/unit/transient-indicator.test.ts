@@ -8,8 +8,9 @@ import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor
 /**
  * @file transient-indicator.test.ts
  * @description #319 — the animated working indicator on #318's transient
- * layer: the HONEST chunk counter (text-delta + tool-call — the named
- * rule, nothing else), elapsed from the turn's FIRST streamed event
+ * layer: the HONEST chunk counter (the two DELTA kinds — text-delta +
+ * tool-input-delta — the named rule; completions never count), elapsed
+ * from the turn's FIRST streamed event
  * (daemon-side: attach/reconnect read the same state), the fixed gerund
  * list cycling on tick, the deterministic frozen→clear terminal sequence
  * at EVERY terminal kind (done/error/interrupted), and the
@@ -226,6 +227,21 @@ describe("#319 — the frozen→clear terminal sequence at EVERY terminal kind",
     tick(editor);
     expect(segment(editor, "main")).toBe("null");
   });
+  test("the HEADLESS bound: an unserved frame clears after ~10 ticks (no client leaks the interval)", () => {
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    silence(editor);
+    e(editor, delta("x"));
+    tick(editor);
+    e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
+    expect(segment(editor, "main")).toMatch(/^✓/);
+    // Nine unserved ticks: still pending.
+    for (let i = 0; i < 9; i++) tick(editor);
+    expect(segment(editor, "main")).toMatch(/^✓/);
+    // The tenth: the bound clears it and the interval settles.
+    tick(editor);
+    expect(segment(editor, "main")).toBe("null");
+    expect(String(e(editor, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value)).toBe("0");
+  });
 });
 
 describe("#319 — the usage final line (provider-reported, persisted)", () => {
@@ -235,8 +251,14 @@ describe("#319 — the usage final line (provider-reported, persisted)", () => {
     const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
     const normExpr = (json: string) => `(json-encode (car (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex(json)}"))))`;
     const withUsage = String(e(editor, normExpr('{"type":"result","usage":{"input_tokens":230,"output_tokens":1004}}')).value);
-    expect(withUsage).toContain("usage");
-    expect(withUsage).toContain("1234");
+    expect(withUsage).toContain("\"kind\":\"usage\"");
+    expect(withUsage).toContain("\"tokens\":\"1234\""); // exact — no 1234.0 drift
+    // THE WIRE SEAM (gate r2): the CLI's streamed tool-argument partials
+    // (input_json_delta) map to tool-input-delta events — the counted kind.
+    const normStream = (json: string) => `(mapcar (lambda (ev) (json-encode ev)) (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${Buffer.from("PLACEHOLDER", "utf8").toString("hex")}")))`;
+    void normStream;
+    const partial = String(e(editor, `(json-encode (car (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${Buffer.from('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"abc"}}}', "utf8").toString("hex")}"))))`).value);
+    expect(partial).toContain("tool-input-delta");
     // Absent usage → nil (no event, no line).
     const noUsage = String(e(editor, `(if (fikra/backend-claude/fikra-backend-claude-normalize (hex-decode "${hex('{"type":"result","subtype":"error_max_turns"}')}")) 1 0)`).value);
     expect(noUsage).toBe("0");

@@ -111,8 +111,8 @@ old guarded stop leaked the live interval forever (gate r2)."
     (progn
       (setq fikra-transient-ticks (+ 1 fikra-transient-ticks))
       (setq fikra-transient-rev (+ 1 fikra-transient-rev))
-      ;; #319: age EVERY frozen frame — a fresh one (2) rides the next
-      ;; poll untouched; the tick after clears it (0 → gone).
+      ;; #319: age every frozen frame — a PENDING one (1) waits for its
+      ;; poll; a RENDERED one (2) clears on this tick.
       (fikra-transient-age-frozen (hashmap-keys fikra-transient-frozen))
       ;; Auto-stop: the interval stops one tick AFTER the last running
       ;; thread's terminal (the frozen→clear frames must ride REAL poll
