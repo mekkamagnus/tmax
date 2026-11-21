@@ -60,8 +60,15 @@ describe("#286 — the porcelain -z parsing matrix", () => {
       "A  added.txt",
       "R  renamed.txt",
       "orig.txt",
+      "C  copied.txt",
+      "orig2.txt",
       "UU both.txt",
       "DD del-both.txt",
+      "AU au.txt",
+      "UD ud.txt",
+      "UA ua.txt",
+      "DU du.txt",
+      "AA aa.txt",
     ].join("\0") + "\0";
     expect(rowsOf(editor, hex(z))).toContain("renamed.txt (from orig.txt)");
     // Untracked in section 1; modified/deleted/added/renamed in 2+3; the
@@ -71,9 +78,17 @@ describe("#286 — the porcelain -z parsing matrix", () => {
     expect(secRows(editor, hex(z), 2)).toContain("deleted.txt");
     expect(secRows(editor, hex(z), 2)).toContain("added.txt");
     expect(secRows(editor, hex(z), 2)).toContain("renamed.txt (from orig.txt)");
+    // Copy pairs ride the same next-NUL-field shape as renames.
+    expect(secRows(editor, hex(z), 2)).toContain("C  copied.txt (from orig2.txt)");
+    // ALL seven conflict codes land in the fourth section.
     const conf = secRows(editor, hex(z), 3);
     expect(conf).toContain("both.txt");
     expect(conf).toContain("del-both.txt");
+    expect(conf).toContain("AU au.txt");
+    expect(conf).toContain("UD ud.txt");
+    expect(conf).toContain("UA ua.txt");
+    expect(conf).toContain("DU du.txt");
+    expect(conf).toContain("AA aa.txt");
   });
 
   test("odd names (spaces, unicode, leading dash) are structurally safe", () => {
@@ -141,6 +156,8 @@ describe("#286 — the live buffer (temp repos)", () => {
     e(editor, "(stagehand/status/stagehand-status)");
     const after = String(e(editor, "(buffer-current)").value);
     expect(before).toBe(after); // no buffer switch
+    // The spec-normative status message.
+    expect(String(e(editor, "(editor-status)").value)).toContain("not in a repository");
   });
 
   test("GIT FAILURE → the status names the exit + stderr; no buffer", () => {
@@ -151,6 +168,10 @@ describe("#286 — the live buffer (temp repos)", () => {
     const after = String(e(editor, "(buffer-current)").value);
     expect(after).toBe(before);
     expect(after).not.toContain("Stagehand");
+    // The spec-normative failure text: exit + first stderr line.
+    const st = String(e(editor, "(editor-status)").value);
+    expect(st).toContain("git status failed");
+    expect(st).toContain("fatal:");
   });
 
   test("the CONFLICTED repo: the fourth section carries UU rows", () => {

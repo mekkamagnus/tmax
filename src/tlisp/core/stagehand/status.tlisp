@@ -351,7 +351,7 @@ arg; the quoting is the apostrophe-escape pattern)."
     (stagehand-clear-buffer)
     ;; The header block (2 lines).
     (buffer-append (concat "Stagehand: " root "\n"))
-    (buffer-append (concat (stagehand-head-line branch upstream) "\n"))
+    (buffer-append (concat (stagehand-head-line root branch upstream) "\n"))
     ;; The sections, FOLD-AWARE: a folded section renders its header
     ;; only (the buffer IS the fold display; TAB re-renders through
     ;; here, refresh preserves the fold map by section name).
@@ -365,22 +365,22 @@ arg; the quoting is the apostrophe-escape pattern)."
     (setq stagehand-cursor-row 0)
     (stagehand-place-cursor)))
 
-(defun stagehand-head-line (branch upstream)
+(defun stagehand-head-line (root branch upstream)
   ;; branch = `symbolic-ref --short HEAD` — it RESOLVES on unborn repos
   ;; (so "" means detached, not unborn). No commits + a branch → unborn.
   (cond
-    ((and (not (string= branch "")) (= (stagehand-has-commits-p) 0))
+    ((and (not (string= branch "")) (= (stagehand-has-commits-p root) 0))
       (concat "unborn: " branch))
     ((string= branch "")
       (concat "HEAD detached at "
-              (stagehand-git-line "rev-parse --short HEAD" stagehand-root)))
+              (stagehand-git-line "rev-parse --short HEAD" root)))
     ((string= upstream "")
       (concat branch " no upstream"))
     (t branch)))
 
-(defun stagehand-has-commits-p ()
+(defun stagehand-has-commits-p (root)
   ;; 1 when HEAD resolves (a commit exists); 0 unborn.
-  (let ((res (stagehand-git "rev-parse --verify HEAD" stagehand-root)))
+  (let ((res (stagehand-git "rev-parse --verify HEAD" root)))
     (if (= (car (cdr (cdr res))) 0) 1 0)))
 
 (defun stagehand-all-empty-p (sections)
