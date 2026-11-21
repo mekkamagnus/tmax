@@ -567,6 +567,12 @@ describe("ollama multi-park + pre-park results (r121 — codex r120 catches)", (
     const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
     expect(acc).toContain("BEFOREPARK");
     expect(acc).toContain("AFTERPARK");
+    // r122 (codex r121 P1): ORDER — the tool messages appear in CALL
+    // order (the approved result joins the acc at its position).
+    const before = acc.indexOf("BEFOREPARK");
+    const after = acc.indexOf("AFTERPARK");
+    expect(before).toBeGreaterThan(-1);
+    expect(after).toBeGreaterThan(before);
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 142 "live")');
     const reply = hex(JSON.stringify({ message: { role: "assistant", content: "all done" } }));
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 142 "${reply}")`);

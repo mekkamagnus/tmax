@@ -643,8 +643,11 @@ availability gate must be synchronous; the turn itself is async)."
         (progn
           (fikra/event/fikra-event-emit
             (list (list "kind" "permission-denied")))
-          (setq fikra-ollama-messages
-            (concat fikra-ollama-messages
+          ;; r122: ORDER — the lesson joins the SAVED acc at the
+          ;; rejected call's position (the decision never appends to
+          ;; messages out of order).
+          (setq fikra-ollama-parked-acc
+            (concat fikra-ollama-parked-acc
                     "{\"role\":\"tool\",\"content\":\"user rejected this command; do not retry it\"},"))
           (fikra-ollama-settle-home home-thread)
           (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
@@ -669,14 +672,18 @@ availability gate must be synchronous; the turn itself is async)."
                           (or (fikra/thread/fikra-thread-working-dir-of home-thread)
                               (fikra/thread/fikra-thread-working-dir))
                           (fikra/thread/fikra-thread-working-dir)))))
-              (setq fikra-ollama-messages
-                (concat fikra-ollama-messages
-                        (fikra-ollama-run-bash-now cmd dir)))
-              ;; r120-r121: the remainder resumes; a RE-PARK holds the
-              ;; next model request until ITS decision.
-              (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
-                (fikra-ollama-chat fikra-ollama-pending-message)
-                nil))))))))
+              ;; r122 (codex r121 P1): ORDER — the approved call's
+              ;; result joins the SAVED acc (its position in the reply),
+              ;; then the remainder appends; the decision never appends
+              ;; out of order again.
+              (let ((approved (fikra-ollama-run-bash-now cmd dir)))
+                (setq fikra-ollama-parked-acc
+                  (concat fikra-ollama-parked-acc approved))
+                ;; r120-r121: the remainder resumes; a RE-PARK holds the
+                ;; next model request until ITS decision.
+                (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
+                  (fikra-ollama-chat fikra-ollama-pending-message)
+                  nil)))))))))
 
 ;; r120: run the parked reply's remaining calls (their results append;
 ;; a SECOND destructive call parks again — the rest re-rides).
