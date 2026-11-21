@@ -9,6 +9,7 @@
           fikra-thread-set-session-id fikra-thread-save fikra-thread-field
           fikra-thread-set-field
           fikra-thread-context-dir fikra-root-from-context fikra-thread-dirname
+          fikra-thread-working-dir-of
           fikra-thread-root-shell fikra-thread-shq)
 
 ;; #213 (RFC-027 §D3/§D7, Phase 1 — MINIMAL subset): one implicit "main"
@@ -125,6 +126,21 @@ never the daemon cwd, never an independent re-resolution)."
 (defun fikra-thread-working-dir ()
   (let ((wt (fikra-thread-field "worktree")))
     (if wt wt (fikra-thread-field "root"))))
+
+;; r117: another thread's working dir WITHOUT focusing it (the native
+;; gate executes parked decisions against their ORIGINATING thread).
+(defun fikra-thread-working-dir-of (id)
+  (let ((root (fikra-thread-field-root-of id)))
+    (if (not root)
+      nil
+      (let* ((live (hashmap-get fikra-threads id))
+             (wt (if live
+                   (hashmap-get live "worktree")
+                   (condition-case nil
+                     (fikra-alist-get "worktree"
+                       (fikra-thread-load-row id))
+                     (error () nil)))))
+        (if wt wt root)))))
 
 (defun fikra-thread-in-worktree-p ()
   (if (fikra-thread-field "worktree") t nil))

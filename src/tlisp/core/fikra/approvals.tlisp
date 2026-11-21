@@ -210,6 +210,22 @@ segment reads)."
             (fikra-approval-target-words (cdr words) word)
             (fikra-approval-target-words (cdr words) w)))))))
 
+;; "rm <glob>" (rm *.txt / rm build/*) — a byte scan; the regex '*'
+;; escape is reader-fragile (the r117 catch: the reader strips the
+;; backslash and the engine sees a bare '*').
+(defun fikra-risk-has-glob-rm (d)
+  (let ((i (string-match "rm " d)))
+    (if (and i (numberp i))
+      (fikra-glob-scan (substring d (+ i 3) (length d)) 0)
+      nil)))
+
+(defun fikra-glob-scan (s i)
+  (if (>= i (length s))
+    nil
+    (if (string= (substring s i (+ i 1)) "*")
+      t
+      (fikra-glob-scan s (+ i 1)))))
+
 (defun fikra-approval-risk (kind detail)
   ;; Destructive first (any tool can carry it), then the tool class —
   ;; BOTH case-insensitive (the detail is downcased; "drop table" counts).
@@ -218,7 +234,16 @@ segment reads)."
             (string-match "rm -fr" d)
             (string-match "git push --force" d)
             (string-match "git reset --hard" d)
-            (string-match "drop table" d))
+            (string-match "drop table" d)
+            ;; r117 (codex r116 P1#3): the deletion-class evasions —
+            ;; find -delete, xargs rm, rm without -f on a glob, and the
+            ;; truncate/clobber family.
+            (string-match "find .*-delete" d)
+            (string-match "xargs rm" d)
+            (fikra-risk-has-glob-rm d)
+            (string-match "truncate -s" d)
+            (string-match "> /dev/null.*rm" d)
+            (string-match "shred " d))
     "destructive"
     (if (or (string= (fikra-risk-down kind) "bash") (string= (fikra-risk-down kind) "shell"))
       "shell"

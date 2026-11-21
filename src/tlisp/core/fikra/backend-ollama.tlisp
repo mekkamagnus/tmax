@@ -6,7 +6,8 @@
           fikra-backend-ollama-seed fikra-ollama-history-messages
           fikra-ollama-messages-get fikra-ollama-tools-json
           fikra-backend-ollama-set-model
-          fikra-backend-ollama-pending-p fikra-backend-ollama-decide)
+          fikra-backend-ollama-pending-p fikra-backend-ollama-decide
+          fikra-backend-ollama-decide-inner)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -47,6 +48,10 @@ on its own thread, never whatever is focused at land time).")
   "The turn's accumulated messages-array body (history + user, then each
 tool round's assistant tool_call + tool results — the loop's working
 context; rebuilt per turn).")
+(defvar fikra-ollama-parked-thread nil
+  "The thread the parked call BELONGS to (r117: the decision resolves
+against the originating thread's working dir — a focus switch must not
+redirect the execution).")
 (defvar fikra-ollama-parked-call nil
   "The tool_call PARKED at the L2 gate awaiting the user's a/r/A (the
 destructive-bash mediation; the loop resumes on the decision).")
@@ -188,6 +193,9 @@ availability gate must be synchronous; the turn itself is async)."
             (fikra-ollama-calls-json tool-calls 0 "")
             "]},")) 
   (let ((results (fikra-ollama-run-calls tool-calls 0 "")))
+    (if (eq results 'parked)
+      nil
+      (progn
     (setq fikra-ollama-messages
       (concat fikra-ollama-messages results))
     (if (>= fikra-ollama-round fikra-ollama-max-rounds)
@@ -198,7 +206,7 @@ availability gate must be synchronous; the turn itself is async)."
                 (list "speaker" "assistant")
                 (list "text" "(tool round cap reached — stopping the loop)")))
         (fikra/thread/fikra-thread-turn-end "completed"))
-      (fikra-ollama-chat fikra-ollama-pending-message))))
+      (fikra-ollama-chat fikra-ollama-pending-message))))))
 
 ;; The tool_calls array re-embedded as JSON (the raw arguments string
 ;; must survive verbatim — re-parsing loses its exact shape).
@@ -218,11 +226,17 @@ availability gate must be synchronous; the turn itself is async)."
                 "\",\"arguments\":" (condition-case nil (json-encode args) (error () "{}"))
                 "}}")))))
 
+;; r117 (codex r116 P1#2): a PARKED call STOPS the round — later calls
+;; in the same reply must not run while the first waits at the gate (the
+;; adversarial rm -rf + touch sequence executed the touch).
 (defun fikra-ollama-run-calls (calls i acc)
   (if (>= i (length calls))
     acc
-    (fikra-ollama-run-calls calls (+ i 1)
-      (concat acc (fikra-ollama-run-tool (nth i calls))))))
+    (let ((res (fikra-ollama-run-tool (nth i calls))))
+      (if (eq res 'parked)
+        'parked
+        (fikra-ollama-run-calls calls (+ i 1)
+          (concat acc res))))))
 
 ;; One tool_call: execute, emit the ⚙ row + the result row, return the
 ;; tool-result MESSAGE json fragment.
@@ -335,10 +349,23 @@ availability gate must be synchronous; the turn itself is async)."
          (content (if (fikra-ollama-alist-get "content" args)
                     (fikra-ollama-alist-get "content" args) ""))
          (dir (fikra/thread/fikra-thread-working-dir))
+         ;; r117 (codex r116 P1#4): CONTAINMENT — a model edit may not
+         ;; escape the working dir (../ wrote outside the tree AND the
+         ;; checkpoint's coverage). Absolute paths and .. escapes refuse.
+         (contained (and (> (length path) 0)
+                         (not (string-prefix-p "/" path))
+                         (not (string-match "\.\./" path))))
          (abs (concat dir "/" path)))
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-call") (list "tool" "buffer-edit")
             (list "summary" (concat path " @" (number-to-string (length content))))))
+    (if (not contained)
+      (progn
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "tool-result") (list "ok" nil)
+                (list "summary" (concat "REFUSED: path escapes the working dir: " path))))
+        (concat "{\"role\":\"tool\",\"content\":\"refused: path escapes the working directory\"},"))
+      (progn
     (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                          (fikra/thread/fikra-thread-dirname abs))))
     (write-file-content abs content)
@@ -350,7 +377,7 @@ availability gate must be synchronous; the turn itself is async)."
     (condition-case nil
       (progn (require-module fikra/checkpoint)
              (fikra/checkpoint/fikra-checkpoint-capture-async "completion"))
-      (error () nil))
+      (error () nil))))
     (fikra/event/fikra-event-emit
       (list (list "kind" "tool-result") (list "ok" t)
             (list "summary" (concat "wrote " path))))
@@ -526,8 +553,19 @@ availability gate must be synchronous; the turn itself is async)."
   (if fikra-ollama-parked-call t nil))
 
 (defun fikra-backend-ollama-decide (decision)
-  (let ((call fikra-ollama-parked-call))
+  ;; r117 (codex r116 P1#1): the SAME interactive resolve-guard as every
+  ;; other decide seam — a direct eval of this exported fn must not
+  ;; self-approve.
+  (require-module fikra/approvals)
+  (if (not (fikra/approvals/fikra-approval-resolve-guard))
+    nil
+    (fikra-backend-ollama-decide-inner decision)))
+
+(defun fikra-backend-ollama-decide-inner (decision)
+  (let* ((call fikra-ollama-parked-call)
+         (home-thread fikra-ollama-parked-thread))
     (setq fikra-ollama-parked-call nil)
+    (setq fikra-ollama-parked-thread nil)
     (if (not call)
       nil
       (if (string= decision "n")
@@ -551,10 +589,19 @@ availability gate must be synchronous; the turn itself is async)."
                          (condition-case nil (json-read-from-string (if args-raw args-raw "{}")) (error () ()))))
                  (cmd (if (fikra-ollama-alist-get "command" args)
                         (fikra-ollama-alist-get "command" args) "")))
-            (setq fikra-ollama-messages
-              (concat fikra-ollama-messages
-                      (fikra-ollama-run-bash-now cmd (fikra/thread/fikra-thread-working-dir))))
-            (fikra-ollama-chat fikra-ollama-pending-message)))))))
+            ;; r117: execute against the ORIGINATING thread (a focus
+            ;; switch must not redirect the command).
+            (let ((dir (if (and home-thread
+                                (string= home-thread (fikra/thread/fikra-thread-current)))
+                        (fikra/thread/fikra-thread-working-dir)
+                        (if home-thread
+                          (or (fikra/thread/fikra-thread-working-dir-of home-thread)
+                              (fikra/thread/fikra-thread-working-dir))
+                          (fikra/thread/fikra-thread-working-dir)))))
+              (setq fikra-ollama-messages
+                (concat fikra-ollama-messages
+                        (fikra-ollama-run-bash-now cmd dir)))
+              (fikra-ollama-chat fikra-ollama-pending-message))))))))
 
 (defun fikra-backend-ollama-abort ()
   ;; The async request cannot be cancelled (the http primitive has no
