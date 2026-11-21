@@ -388,11 +388,12 @@ availability gate must be synchronous; the turn itself is async)."
         (fikra/event/fikra-event-emit
           (list (list "kind" "tool-result") (list "ok" nil)
                 (list "summary" (concat (if contained "not found: " "REFUSED (outside the working dir): ") path))))
-        (concat "{\"role\":\"tool\",\"content\":\""
-                (if contained
-                  (concat "file not found: " path)
-                  "refused: path escapes the working directory")
-                "\"},")))))
+        (concat "{\"role\":\"tool\",\"content\":"
+                (fikra-ollama-json-string
+                  (if contained
+                    (concat "file not found: " path)
+                    "refused: path escapes the working directory"))
+                "},")))))
 
 (defun fikra-ollama-run-bash (call args)
   (let* ((cmd (if (fikra-ollama-alist-get "command" args)
@@ -733,53 +734,64 @@ availability gate must be synchronous; the turn itself is async)."
          ;; may not escape the working dir (absolute paths, .. escapes,
          ;; and — r133 — SYMLINK hops all refuse).
          (contained (fikra-ollama-path-contained-p dir path))
-         (abs (concat dir "/" path)))
-    ;; r135 (codex r130 P2): the INLINE change evidence — the old vs new
-    ;; first lines render +/- under the ⚙ row (the mockup's edit row).
-    ;; r135b (codex catch): CONTAINED edits only — a refused edit must
-    ;; not display the additions it never wrote.
-    (let ((old-content (if contained
-                         (condition-case nil (read-file-content abs) (error () nil))
-                         nil)))
-      (fikra/event/fikra-event-emit
-        (list (list "kind" "tool-call") (list "tool" "buffer-edit")
-              (list "summary" (concat path " @" (number-to-string (length content))))
-              (list "preview"
-                (if contained
-                  (concat (if (and old-content (stringp old-content) (> (length old-content) 0))
-                            (fikra-ollama-preview-lines "-" old-content) "")
-                          (fikra-ollama-preview-lines "+" content))
-                  "")))))
+         (abs (concat dir "/" path))
+         ;; r135: the OLD content for the INLINE diff evidence.
+         (old-content (if contained
+                        (condition-case nil (read-file-content abs) (error () nil))
+                        nil)))
     (if (not contained)
       (progn
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "tool-call") (list "tool" "buffer-edit")
+                (list "summary" (concat path " @" (number-to-string (length content))))))
         (fikra/event/fikra-event-emit
           (list (list "kind" "tool-result") (list "ok" nil)
                 (list "summary" (concat "REFUSED: path escapes the working dir: " path))))
         (concat "{\"role\":\"tool\",\"content\":\"refused: path escapes the working directory\"},"))
       (progn
-    (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
-                                         (fikra/thread/fikra-thread-dirname abs))))
-    (write-file-content abs content)
-    ;; r116+r134: the PER-ACTION checkpoint — the edit lands its OWN ref
-    ;; (<turn>-aN) BEFORE the loop continues (the mockup's 'each mutating
-    ;; action lands a checkpoint ref'). r134b (codex r134 P1): SYNC —
-    ;; the write and its snapshot are one step, so the snapshot holds
-    ;; EXACTLY this edit's state (an async capture's `git add -A` raced
-    ;; the NEXT edit into the frame) and the checkpoint-ready event
-    ;; order matches the edit order (the inline merge can no longer
-    ;; attach a late marker to the wrong edit row).
-    (condition-case nil
-      (progn (require-module fikra/checkpoint)
-             (fikra/checkpoint/fikra-checkpoint-capture "action"))
-      (error () nil))
-      (fikra/event/fikra-event-emit
-        (list (list "kind" "tool-result") (list "ok" t)
-              (list "summary" (concat "wrote " path))))
-      (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "wrote " path)) "},")))))
+        (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
+                                             (fikra/thread/fikra-thread-dirname abs))))
+        (let ((written (condition-case nil
+                        (progn (write-file-content abs content) t)
+                        (error () nil))))
+          ;; r135c (codex catch): the GEAR row + its preview emit AFTER
+          ;; the verified write — a FAILED write (the path is a
+          ;; directory, a permission failure) must not display
+          ;; additions that never landed.
+          (fikra/event/fikra-event-emit
+            (list (list "kind" "tool-call") (list "tool" "buffer-edit")
+                  (list "summary" (concat path " @" (number-to-string (length content))))
+                  (list "preview"
+                    (if written
+                      (concat (if (and old-content (stringp old-content) (> (length old-content) 0))
+                                (fikra-ollama-preview-lines "-" old-content) "")
+                              (fikra-ollama-preview-lines "+" content))
+                      ""))))
+          (if (not written)
+            (progn
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "tool-result") (list "ok" nil)
+                      (list "summary" (concat "WRITE FAILED: " path))))
+              (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "write failed: " path)) "},"))
+            (progn
+              ;; r116+r134: the PER-ACTION checkpoint — the edit lands its
+              ;; OWN ref (<turn>-aN); SYNC (r134b): the write and its
+              ;; snapshot are one step.
+              (condition-case nil
+                (progn (require-module fikra/checkpoint)
+                       (fikra/checkpoint/fikra-checkpoint-capture "action"))
+                (error () nil))
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "tool-result") (list "ok" t)
+                      (list "summary" (concat "wrote " path))))
+              (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "wrote " path)) "},"))))))))
 
+;; r135c (codex catch): the fragment must be VALID JSON — the content
+;; string was never closed, and the tool name rode in unescaped.
 (defun fikra-ollama-tool-skip (call fname)
-  (concat "{\"role\":\"tool\",\"content\":\"unknown tool: "
-          (if fname fname "?") "},"))
+  (concat "{\"role\":\"tool\",\"content\":"
+          (fikra-ollama-json-string (concat "unknown tool: " (if fname fname "?")))
+          "},"))
 
 ;; Events arrive OLDEST-FIRST; the history is every COMPLETED turn —
 ;; everything up to and including the LAST turn-end (the in-flight
@@ -838,6 +850,10 @@ availability gate must be synchronous; the turn itself is async)."
           ((string= c (hex-decode "0a")) (concat acc bs "n"))
           ((string= c (hex-decode "09")) (concat acc bs "t"))
           ((string= c (hex-decode "0d")) (concat acc bs "r"))
+          ;; r135c (codex catch): the remaining plausible control bytes.
+          ((string= c (hex-decode "08")) (concat acc bs "b"))
+          ((string= c (hex-decode "0c")) (concat acc bs "f"))
+          ((string= c (hex-decode "1b")) (concat acc bs "u001b"))
           (t (concat acc c)))))))
 
 ;; The http filter: stamp ownership + accumulate the body. A TAGS request
