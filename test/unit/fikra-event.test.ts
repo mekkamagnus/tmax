@@ -339,16 +339,40 @@ describe("8.1 render (r106 — codex r105 catches)", () => {
     e106(editor, "(require-module fikra/thread)");
     e106(editor, '(fikra-thread-focus "main")');
     setup(editor);
+    // The hook rebuilds only when *Fikra* is CURRENT at emit time (the
+    // daemon reality — the user is in the chat); be in it.
+    e106(editor, '(buffer-create "*Fikra*")');
+    e106(editor, '(buffer-switch "*Fikra*")');
     e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-start") (list "turn" "7") (list "backend" "claude")))');
     e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "id" "e1") (list "summary" "src/x.ts @118")))');
     e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/7")))');
     e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-end") (list "turn" "7") (list "status" "completed")))');
-    e106(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    // NO explicit rebuild — the turn-end's OWN hook must produce the
+    // merged shape (codex r106 P2: the explicit call masked the hook).
     const text = stripAnsi(String(e106(editor, "(buffer-text)").value));
     // The turn-end triggered the rebuild WITH the inline merge: the marker
     // rides the edit row (no standalone marker row left behind).
     expect(text).toContain("buffer-edit");
     expect(text).toMatch(/@118.*\[ckpt main\/7 ✓\]/);
+    const markerRows = text.split("\n").filter((l) => l.includes("⌘ [ckpt"));
+    expect(markerRows).toHaveLength(0);
+  });
+
+  test("the ASYNC completion order (checkpoint AFTER turn-end) merges too", async () => {
+    const editor = await createStartedEditor("");
+    e106(editor, "(require-module fikra/event)");
+    e106(editor, "(require-module fikra/thread)");
+    e106(editor, '(fikra-thread-focus "main")');
+    setup(editor);
+    e106(editor, '(buffer-create "*Fikra*")');
+    e106(editor, '(buffer-switch "*Fikra*")');
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-start") (list "turn" "8") (list "backend" "claude")))');
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "id" "e8") (list "summary" "src/y.ts @9")))');
+    // The completion capture is async — it lands AFTER the turn-end.
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-end") (list "turn" "8") (list "status" "completed")))');
+    e106(editor, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/8")))');
+    const text = stripAnsi(String(e106(editor, "(buffer-text)").value));
+    expect(text).toMatch(/@9.*\[ckpt main\/8 ✓\]/);
     const markerRows = text.split("\n").filter((l) => l.includes("⌘ [ckpt"));
     expect(markerRows).toHaveLength(0);
   });

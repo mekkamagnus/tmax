@@ -512,13 +512,21 @@ bumps the revision the TUI poll consumes."
 ;; the user is looking at. Emitting FOR an id appends to id's own log and
 ;; renders only when id's buffer is current (switching views does not
 ;; misroute; it merely pauses live rendering for the background thread).
-;; r106: does the batch carry a turn-end event?
-(defun fikra-event-batch-has-end-p (events)
+;; r107: does the batch carry a FINAL event — turn-end OR
+;; checkpoint-ready? The completion capture is ASYNC and lands after the
+;; turn-end (codex r106 P1: a turn-end-only rebuild preceded the marker
+;; and the merge missed); a late checkpoint-ready re-rebuilds and the
+;; marker lands inline.
+(defun fikra-event-batch-has-final-p (events)
   (if (null events)
     nil
-    (if (string= (fikra-event-get-str (car events) "kind") "turn-end")
-      t
-      (fikra-event-batch-has-end-p (cdr events)))))
+    (let ((k (fikra-event-get-str (car events) "kind")))
+      (if (or (string= k "turn-end") (string= k "checkpoint-ready"))
+        t
+        (fikra-event-batch-has-final-p (cdr events))))))
+
+(defun fikra-event-batch-has-end-p (events)
+  (fikra-event-batch-has-final-p events))
 
 (defun fikra-event-emit-batch-for (id events)
   (require-module fikra/thread)
@@ -597,7 +605,8 @@ text-deltas inside the batch join into the same line."
       ;; replay instead. Otherwise render incrementally. Read-only state is
       ;; saved/restored around the mutation (a user who made the buffer
       ;; writable keeps it writable).
-      (if (fikra-event-batch-has-tombstone-p events)
+      (if (or (fikra-event-batch-has-tombstone-p events)
+              (fikra-event-batch-has-final-p events))
         (if (string= (buffer-current) (fikra/thread/fikra-thread-buffer-name))
           (fikra-event-rebuild-fikra-buffer))
         (let ((text (fikra-event-render-batch events)))
