@@ -53,9 +53,10 @@ const coreModulePaths = (coreRoot: string, moduleName: string): string[] => {
   // core/commands/buffers.tlisp). `std/` modules resolve the same way so a
   // single physical file (e.g. core/monads.tlisp) is the source of truth for
   // both the editor and standalone profiles when run from source.
-  // `fikra/` modules resolve as a subdirectory of coreRoot (#158) — the
-  // prefix is NOT stripped (unlike editor/) because the path IS the dir name.
-  if (moduleName.startsWith("fikra/")) {
+  // `fikra/` and `stagehand/` modules resolve as subdirectories of
+  // coreRoot (#158, #286) — the prefix is NOT stripped (unlike editor/)
+  // because the path IS the dir name.
+  if (moduleName.startsWith("fikra/") || moduleName.startsWith("stagehand/")) {
     return [moduleName]
       .map((candidate) => safeResolve(coreRoot, candidate))
       .filter((candidate): candidate is string => candidate !== null);

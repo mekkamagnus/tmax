@@ -1,0 +1,454 @@
+(defmodule stagehand/status
+  (export stagehand-status stagehand-status-buffer-name
+          stagehand-status-refresh stagehand-status-parse
+          stagehand-status-sections stagehand-status-fold-toggle
+          stagehand-status-next stagehand-status-prev
+          stagehand-status-open-file stagehand-status-quit
+          stagehand-status-folded-p stagehand-status-root
+          stagehand-status-rows-of stagehand-visible-rows)
+
+;; #286 — Stagehand T0: the *Stagehand* STATUS BUFFER. Foldable sections
+;; (Untracked / Unstaged / Staged / Conflicted), row navigation, refresh.
+;; THIS issue owns buffer creation, repo selection, parsing, rendering,
+;; folding, navigation, refresh, and the error states. The MUTATION keys
+;; (s/u/d, c c...) arrive with #287/#288 and bind into this buffer.
+;;
+;; Parsing: `git status --porcelain=v1 -z` (NUL-delimited — filenames
+;; with spaces/quotes/leading dashes/unicode are structurally safe;
+;; renames R carry "orig -> new" rendered as "new (from orig)").
+;; Sections: ?? → Untracked; worktree-side codes → Unstaged; index-side
+;; → Staged; the conflicted set (DD AU UD UA DU AA UU) → Conflicted.
+;;
+;; Repo selection: FRESH detection at every invocation (no cached root
+;; — the project-detect-root pattern). Not a repo → status, no buffer.
+;; Git failure → status names exit + stderr; no buffer. Unborn → the
+;; buffer renders with a `unborn: <branch>` header. Empty → three empty
+;; sections + `nothing to commit, working tree clean`. Detached →
+;; `HEAD detached at <sha>`; no upstream → the suffix.
+
+(defvar stagehand-root nil
+  "The root this buffer's parse came from (refresh re-runs in place).")
+(defvar stagehand-folded (hashmap)
+  "Section name → t/nil — fold state, persisted across refresh for
+surviving sections (keyed by name).")
+(defvar stagehand-cursor-row 0
+  "The selected row (line index into the buffer).")
+
+(defun stagehand-status-buffer-name () "*Stagehand*")
+
+;; ── parsing ─────────────────────────────────────────────────────────
+;; The porcelain -z record stream: "XY <path>" NUL, renames
+;; "XY <new>\0<orig>" (TWO NUL fields). Split on the NUL and re-join
+;; rename pairs structurally (never by string-search in a path).
+(defun stagehand-status-parse (zout)
+  "The porcelain -z stream → ((code path rename-from) ...) alist."
+  (stagehand-parse-scan (string-split zout (hex-decode "00")) (list) nil))
+
+(defun stagehand-parse-scan (fields out pending-rename)
+  ;; pending-rename: a rename's ORIGIN field follows its record.
+  (if (null fields)
+    (reverse out)
+    (let ((f (car fields)))
+      (if (or (null f) (string= f ""))
+        (stagehand-parse-scan (cdr fields) out pending-rename)
+        (if pending-rename
+          ;; This field IS the pending rename's origin.
+          (stagehand-parse-scan (cdr fields)
+            (cons (list (car (cdr pending-rename))    ;; code
+                        (car (cdr (cdr pending-rename))) ;; path
+                        f)                              ;; rename-from
+              out)
+            nil)
+          (let ((code (substring f 0 2))
+                (rest (substring f 3 (length f))))
+            (if (or (string= (substring code 0 1) "R")
+                    (string= (substring code 0 1) "C"))
+              ;; Rename/copy: the origin is the NEXT NUL field.
+              (stagehand-parse-scan (cdr fields) out (list "pending" code rest))
+              (stagehand-parse-scan (cdr fields)
+                (cons (list code rest nil) out) nil))))))))
+
+(defun stagehand-status-sections (entries)
+  "The parsed entries → ((section-name (rows...)) ...) in display
+order: Untracked, Unstaged, Staged, Conflicted."
+  (list
+    (list "Untracked" (stagehand-rows-for entries "??" "untracked"))
+    (list "Unstaged" (stagehand-worktree-rows entries))
+    (list "Staged" (stagehand-index-rows entries))
+    (list "Conflicted" (stagehand-conflicted-rows entries))))
+
+(defun stagehand-rows-for (entries code kind)
+  (stagehand-rows-scan entries code kind (list)))
+
+(defun stagehand-rows-scan (entries code kind out)
+  (if (null entries)
+    (reverse out)
+    (let* ((e (car entries))
+           (c (car e))
+           (path (car (cdr e)))
+           (ren (car (cdr (cdr e)))))
+      (stagehand-rows-scan (cdr entries) code kind
+        (if (stagehand-code-matches-p c code kind)
+          (cons (stagehand-render-row c path ren) out)
+          out)))))
+
+(defun stagehand-code-matches-p (c code kind)
+  (cond
+    ((string= kind "untracked")
+      (string= (substring c 0 1) "?"))
+    ((string= kind "worktree")
+      ;; The worktree side (column 2) non-space, non-?, non-conflict.
+      (let ((w (substring c 1 2)))
+        (and (not (string= w " "))
+             (not (string= w "?"))
+             (not (stagehand-conflict-code-p c)))))
+    ((string= kind "index")
+      ;; The index side (column 1) non-space, non-?, non-conflict.
+      (let ((i (substring c 0 1)))
+        (and (not (string= i " "))
+             (not (string= i "?"))
+             (not (stagehand-conflict-code-p c))
+             ;; Untracked has no index side — exclude ??.
+             (not (string= c "??")))))
+    (t nil)))
+
+(defun stagehand-conflict-code-p (c)
+  (or (string= c "DD") (string= c "AU") (string= c "UD")
+      (string= c "UA") (string= c "DU") (string= c "AA")
+      (string= c "UU")))
+
+(defun stagehand-conflicted-rows (entries)
+  (stagehand-conflict-scan entries (list)))
+
+(defun stagehand-conflict-scan (entries out)
+  (if (null entries)
+    (reverse out)
+    (let* ((e (car entries))
+           (c (car e))
+           (path (car (cdr e)))
+           (ren (car (cdr (cdr e)))))
+      (stagehand-conflict-scan (cdr entries)
+        (if (stagehand-conflict-code-p c)
+          (cons (stagehand-render-row c path ren) out)
+          out)))))
+
+(defun stagehand-worktree-rows (entries)
+  (stagehand-rows-for entries "" "worktree"))
+
+(defun stagehand-index-rows (entries)
+  (stagehand-rows-for entries "" "index"))
+
+(defun stagehand-render-row (code path rename-from)
+  ;; Renames render "new (from orig)".
+  (concat code " "
+          path
+          (if rename-from (concat " (from " rename-from ")") "")))
+
+(defun stagehand-status-rows-of (sections)
+  "The flat display rows: header + rows per section (ALL rows —
+folding is not applied here; the rendered buffer uses the fold-aware
+variant, navigation math uses the complete set)."
+  (stagehand-blocks-of sections nil))
+
+(defun stagehand-blocks-of (sections respect-fold)
+  ;; header + rows per section, in order; RESPECT-FOLD drops a folded
+  ;; section's file rows (the header stays — the unfold affordance).
+  (if (null sections)
+    (list)
+    (let* ((name (car (car sections)))
+           (rows (car (cdr (car sections))))
+           (hdr (concat name " (" (number-to-string (length rows)) ")")))
+      (append
+        (if (and respect-fold (stagehand-status-folded-p name))
+          (list hdr)
+          (cons hdr rows))
+        (stagehand-blocks-of (cdr sections) respect-fold)))))
+
+;; ── fold state ──────────────────────────────────────────────────────
+(defun stagehand-status-folded-p (section-name)
+  (if (hashmap-get stagehand-folded section-name) t nil))
+
+(defun stagehand-status-fold-toggle ()
+  "TAB at a header: toggle the section's fold (persisted by name)."
+  (let ((row (stagehand-row-at-cursor)))
+    (if (stagehand-header-row-p row)
+      (let ((name (stagehand-section-name-of row)))
+        (keymap-mutable-set! stagehand-folded name
+          (if (stagehand-status-folded-p name) nil t))
+        (stagehand-status-rerender))
+      (editor-set-status "Stagehand: TAB folds section headers"))))
+
+;; ── navigation ──────────────────────────────────────────────────────
+(defun stagehand-status-next ()
+  "n — the next VISIBLE row (wraps; skips folded sections' rows)."
+  (stagehand-nav 1))
+
+(defun stagehand-status-prev ()
+  "p — the previous VISIBLE row (wraps; skips folded sections' rows)."
+  (stagehand-nav -1))
+
+(defun stagehand-nav (dir)
+  (let ((n (length (stagehand-visible-rows))))
+    (if (= n 0)
+      nil
+      (progn
+        ;; Explicit wrap (mod keeps remainders: -1 mod n = -1 here).
+        (setq stagehand-cursor-row
+          (stagehand-wrap (+ stagehand-cursor-row dir) n))
+        (stagehand-place-cursor)))))
+
+(defun stagehand-wrap (i n)
+  (cond
+    ((< i 0) (- n 1))
+    ((>= i n) 0)
+    (t i)))
+
+(defun stagehand-visible-rows ()
+  "The display rows with folded sections' FILE rows excluded (headers
+stay — they are the unfold affordance)."
+  (stagehand-blocks-of (stagehand-current-sections) t))
+
+(defun stagehand-place-cursor ()
+  (let ((line (stagehand-visible-line-of stagehand-cursor-row)))
+    (if line (cursor-move line 0))))
+
+(defun stagehand-visible-line-of (visible-idx)
+  ;; The buffer's header block occupies the first N lines; the visible
+  ;; rows follow. Count the header lines from the live buffer.
+  (let ((hdr (stagehand-header-line-count)))
+    (if (> (length (stagehand-visible-rows)) visible-idx)
+      (+ hdr visible-idx)
+      nil)))
+
+(defun stagehand-header-line-count () 2)
+
+(defun stagehand-row-at-cursor ()
+  (nth (- (cursor-line) (stagehand-header-line-count))
+    (stagehand-visible-rows)))
+
+(defun stagehand-header-row-p (row)
+  (and row
+       (or (string-prefix-p "Untracked (" row)
+           (string-prefix-p "Unstaged (" row)
+           (string-prefix-p "Staged (" row)
+           (string-prefix-p "Conflicted (" row))))
+
+(defun stagehand-section-name-of (header-row)
+  (substring header-row 0
+    (stagehand-index-of-str header-row " (")))
+
+(defun stagehand-index-of-str (s pat)
+  (stagehand-idx-scan s pat 0 (length s)))
+
+(defun stagehand-idx-scan (s pat i len)
+  (if (>= i len)
+    nil
+    (if (stagehand-starts-with-p s pat i)
+      i
+      (stagehand-idx-scan s pat (+ i 1) len))))
+
+(defun stagehand-starts-with-p (s pat i)
+  (if (> (+ i (length pat)) (length s))
+    nil
+    (string= (substring s i (+ i (length pat))) pat)))
+
+;; ── actions ─────────────────────────────────────────────────────────
+(defun stagehand-status-open-file ()
+  "RET on a file row: open the file at the repo root (the grep-hit
+landing pattern)."
+  (let ((row (stagehand-row-at-cursor)))
+    (if (and row (not (stagehand-header-row-p row)))
+      (let ((path (stagehand-path-of-row row)))
+        (if path
+          (find-file (concat stagehand-root "/" path))
+          (editor-set-status "Stagehand: no file on this row")))
+      (editor-set-status "Stagehand: no file on this row"))))
+
+(defun stagehand-path-of-row (row)
+  ;; "<code> <path> (from <orig>)" → the path (strip the rename tail).
+  (let* ((rest (substring row 3 (length row)))
+         (cut (stagehand-index-of-str rest " (from ")))
+    (if cut (substring rest 0 cut) rest)))
+
+(defun stagehand-status-quit ()
+  "q — close the buffer. buffer-kill's Editor path picks the
+recency-correct survivor (the #307 pattern) — no manual restore."
+  (buffer-kill (stagehand-status-buffer-name)))
+
+(defun stagehand-status-refresh ()
+  "g — re-parse in place (fold state preserved by section name)."
+  (if stagehand-root
+    (stagehand-status-render stagehand-root)
+    (editor-set-status "Stagehand: no status to refresh")))
+
+;; ── the entry point ────────────────────────────────────────────────
+(defun stagehand-status ()
+  "Open/refresh the *Stagehand* status buffer for the current
+repository (fresh root detection every invocation)."
+  (interactive)
+  (let ((root (project-detect-root (or (buffer-filename) "."))))
+    (if (null root)
+      (editor-set-status "Stagehand: not in a repository")
+      (progn
+        (setq stagehand-root root)
+        (setq stagehand-cursor-row 0)
+        (stagehand-status-render root)))))
+
+(defun stagehand-current-sections ()
+  ;; stagehand-last-parse is a DEFVAR (a list value), not a function.
+  (stagehand-status-sections stagehand-last-parse))
+
+(defvar stagehand-last-parse (list)
+  "The last parse's entries (refresh + navigation read this).")
+
+(defun stagehand-git (args root)
+  "Run `git <args>` at ROOT via shell-exec → (stdout stderr exit).
+The cwd rides a quoted `cd <root> &&` prefix (shell-exec has no cwd
+arg; the quoting is the apostrophe-escape pattern)."
+  (shell-exec (concat "cd " (stagehand-shq root) " && git " args)))
+
+(defun stagehand-shq (s)
+  ;; Single-quote with apostrophe escaping (the fikra-shq pattern).
+  (concat "'" (stagehand-shq-scan s) "'"))
+
+(defun stagehand-shq-scan (s)
+  (let ((parts (string-split s "'")))
+    (stagehand-join parts "'\\''")))
+
+(defun stagehand-join (parts sep)
+  (if (null parts)
+    ""
+    (if (null (cdr parts))
+      (car parts)
+      (concat (car parts) sep (stagehand-join (cdr parts) sep)))))
+
+(defun stagehand-status-render (root)
+  (let* ((res (stagehand-git "status --porcelain=v1 -z" root))
+          (out (car res))
+          (err (car (cdr res)))
+          (exit (car (cdr (cdr res)))))
+    (if (and (numberp exit) (> exit 0))
+      (editor-set-status
+        (concat "Stagehand: git status failed (" (number-to-string exit)
+                ") " (stagehand-first-line err)))
+      (let ((entries (stagehand-status-parse out)))
+        (setq stagehand-last-parse entries)
+        (stagehand-render-buffer root entries)))))
+
+(defun stagehand-first-line (s)
+  (let ((l (car (string-split (concat (or s "") "\n") "\n"))))
+    (if (and l (> (length l) 0)) l "")))
+
+(defun stagehand-render-buffer (root entries)
+  (let ((sections (stagehand-status-sections entries))
+        (branch (stagehand-git-line "symbolic-ref --short HEAD" root))
+        (upstream (stagehand-git-line
+                    "rev-parse --abbrev-ref --symbolic-full-name @{u}" root)))
+    (stagehand-ensure-buffer)
+    (major-mode-set "stagehand-status")
+    (editor-set-mode "normal")
+    (buffer-set-read-only nil)
+    (stagehand-clear-buffer)
+    ;; The header block (2 lines).
+    (buffer-append (concat "Stagehand: " root "\n"))
+    (buffer-append (concat (stagehand-head-line branch upstream) "\n"))
+    ;; The sections, FOLD-AWARE: a folded section renders its header
+    ;; only (the buffer IS the fold display; TAB re-renders through
+    ;; here, refresh preserves the fold map by section name).
+    (dolist (r (stagehand-blocks-of sections t))
+      (buffer-append (concat r "\n")))
+    ;; The empty-repo tail.
+    (if (stagehand-all-empty-p sections)
+      (buffer-append "nothing to commit, working tree clean\n"))
+    (buffer-set-read-only t)
+    (stagehand-ensure-keymap)
+    (setq stagehand-cursor-row 0)
+    (stagehand-place-cursor)))
+
+(defun stagehand-head-line (branch upstream)
+  ;; branch = `symbolic-ref --short HEAD` — it RESOLVES on unborn repos
+  ;; (so "" means detached, not unborn). No commits + a branch → unborn.
+  (cond
+    ((and (not (string= branch "")) (= (stagehand-has-commits-p) 0))
+      (concat "unborn: " branch))
+    ((string= branch "")
+      (concat "HEAD detached at "
+              (stagehand-git-line "rev-parse --short HEAD" stagehand-root)))
+    ((string= upstream "")
+      (concat branch " no upstream"))
+    (t branch)))
+
+(defun stagehand-has-commits-p ()
+  ;; 1 when HEAD resolves (a commit exists); 0 unborn.
+  (let ((res (stagehand-git "rev-parse --verify HEAD" stagehand-root)))
+    (if (= (car (cdr (cdr res))) 0) 1 0)))
+
+(defun stagehand-all-empty-p (sections)
+  (stagehand-all-empty-scan sections t))
+
+(defun stagehand-all-empty-scan (sections acc)
+  (if (null sections)
+    acc
+    (stagehand-all-empty-scan (cdr sections)
+      (and acc (= (length (car (cdr (car sections)))) 0)))))
+
+(defun stagehand-ensure-buffer ()
+  ;; Create-then-switch (the fikra idiom): buffer-switch errors on a
+  ;; missing buffer.
+  (if (not (string= (buffer-current) (stagehand-status-buffer-name)))
+    (progn
+      (if (not (member (stagehand-status-buffer-name) (buffer-list)))
+        (buffer-create (stagehand-status-buffer-name)))
+      (buffer-switch (stagehand-status-buffer-name)))))
+
+(defun stagehand-clear-buffer ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  ;; A 1-line remnant row: clear its content.
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+(defun stagehand-git-line (git-args root)
+  "Run `git <args>` at ROOT; the first stdout line ('' on failure)."
+  (let* ((res (stagehand-git git-args root))
+         (out (car res))
+         (exit (car (cdr (cdr res)))))
+    (if (and (numberp exit) (= exit 0))
+      (string-trim (stagehand-first-line out))
+      "")))
+
+(defun stagehand-status-rerender ()
+  (if stagehand-root
+    (stagehand-render-buffer stagehand-root stagehand-last-parse)))
+
+;; ── the mode + dispatch ────────────────────────────────────────────
+;; Buffer-local keys via a *Stagehand* keymap (the fikra-diff pattern:
+;; keymap-init + buffer-set-keymap, innermost tier of the #206 chain —
+;; full bindings shadow the global map, including outer prefixes like
+;; vim's `g` after the #286 keymap-prefix-p refinement). SPC g is the
+;; global dispatch. The per-section MUTATION keys (s/u/d, c c on file
+;; rows) arrive with #287/#288 and bind into this keymap — absent here.
+(major-mode-register "stagehand-status" '() nil)
+(major-mode-doc "stagehand-status" "Stagehand git status — TAB folds a section, n/p navigate (wrap), g refreshes (fold state survives), RET opens the file at point, q closes")
+(key-bind "SPC g" "(stagehand/status/stagehand-status)" "normal")
+
+(defun stagehand-ensure-keymap ()
+  ;; Key spellings are the HANDLER's normalized names ("Enter"/"Tab" —
+  ;; what normalizeKey produces from the raw bytes), not the "RET"/"TAB"
+  ;; spellings some older keymap entries use.
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-status-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-status"))
+        (editor/keymaps/keymap-set-key kmap "Tab" "(stagehand/status/stagehand-status-fold-toggle)")
+        (editor/keymaps/keymap-set-key kmap "n" "(stagehand/status/stagehand-status-next)")
+        (editor/keymaps/keymap-set-key kmap "p" "(stagehand/status/stagehand-status-prev)")
+        (editor/keymaps/keymap-set-key kmap "g" "(stagehand/status/stagehand-status-refresh)")
+        (editor/keymaps/keymap-set-key kmap "q" "(stagehand/status/stagehand-status-quit)")
+        (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/status/stagehand-status-open-file)")
+        (editor/keymaps/buffer-set-keymap (stagehand-status-buffer-name) kmap))))
+  t)
+
+(provide "stagehand-status"))

@@ -54,6 +54,19 @@ describe("#206 buffer-local keymaps — lookup chain", () => {
     expect(String(executeTlisp(editor, '(keymap-prefix-p (current-keymap) "g")').value)).toBe("true");
   });
 
+  test("#286: a buffer-local FULL binding of an outer-prefixed key FIRES (Emacs shadowing)", async () => {
+    const editor = await createStartedEditor("");
+    // `g` is a mode-level PREFIX (g g, g i, g X...). A buffer-local FULL
+    // binding of `g` must shadow the outer prefix and dispatch directly —
+    // the #206 any-level-prefix rule made such bindings unreachable.
+    bindLocal(editor, "test", "g", "(editor-set-status \"local-g\")");
+    expect(String(executeTlisp(editor, '(keymap-prefix-p (current-keymap) "g")').value)).toBe("null");
+    expect(String(executeTlisp(editor, '(keymap-ref (current-keymap) "g")').value)).toContain("local-g");
+    // And with the local map gone, the mode prefix is reachable again.
+    executeTlisp(editor, '(buffer-set-keymap "test" (keymap-init "empty"))');
+    expect(String(executeTlisp(editor, '(keymap-prefix-p (current-keymap) "g")').value)).toBe("true");
+  });
+
   test("which-key candidates merge across levels, innermost winning on collision", async () => {
     const editor = await createStartedEditor("");
     // g is a mode prefix with sub-bindings (g g etc.); add a local sub-binding.

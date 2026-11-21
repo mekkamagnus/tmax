@@ -107,6 +107,8 @@
   (require-module editor/commands/post-newline)
   ;; #158: Wire Fikra AI assistant into startup.
   (require-module fikra/mode)
+  ;; #286: Stagehand git status buffer (SPC g dispatch).
+  (require-module stagehand/status)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.

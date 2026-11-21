@@ -165,22 +165,31 @@ create nested prefix entries in prefix-table."
           nil)))))
 
 (defun keymap-prefix-p (kmap key)
-  "Return t if KEY is a prefix in KMAP's prefix-table OR any ancestor's
-(#206): a partial sequence that is a prefix at ANY level keeps waiting for
-the next key — a buffer-local binding must not shadow a mode-level prefix
-mid-sequence."
+  "Return t if KEY is a prefix at the innermost chain level that knows
+KEY at all (#206, refined by #286): walk innermost-first; the first
+level with EITHER a full binding or a prefix entry for KEY decides — a
+buffer-local FULL binding shadows an outer level's prefix (the Emacs
+rule), while a partial sequence that is a prefix at the deciding level
+still waits for the next key. (#206's original any-level-prefix rule
+made a local full binding of an outer-prefixed key — e.g. `g` in a
+special buffer — unreachable.)"
   (if (or (null kmap) (not (hashmapp kmap)))
     nil
-    (let ((here (let ((pt (hashmap-get kmap "prefix-table")))
-                  (if (hashmapp pt)
-                    (hashmapp (keymap-walk-prefix pt (string-split key " ")))
-                    nil))))
-      (if here
-        t
-        (let ((parent (hashmap-get kmap "parent")))
-          (if (hashmapp parent)
-            (keymap-prefix-p parent key)
-            nil))))))
+    (let* ((pt (hashmap-get kmap "prefix-table"))
+           (prefix-here (if (hashmapp pt)
+                          (hashmapp (keymap-walk-prefix pt (string-split key " ")))
+                          nil))
+           (bindings (hashmap-get kmap "bindings"))
+           (full-here (if (hashmapp bindings)
+                        (hashmap-get bindings key)
+                        nil)))
+      (cond
+        (full-here nil)
+        (prefix-here t)
+        (t (let ((parent (hashmap-get kmap "parent")))
+             (if (hashmapp parent)
+               (keymap-prefix-p parent key)
+               nil)))))))
 
 (defun keymap-bindings-list (kmap)
   "Return all bindings in KMAP as ((key command) ...). Chain-aware (#206):
