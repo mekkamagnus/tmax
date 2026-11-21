@@ -114,24 +114,6 @@ export function makeRowsOfDisplay(
   };
 }
 
-export function makeFoldAwareRowsOf(
-  getRawLine: (ln: number) => string,
-  cw: number,
-  foldRanges?: Map<number, number>,
-): (ln: number) => number {
-  const hidden = new Set<number>();
-  const starts = new Set<number>();
-  if (foldRanges) {
-    for (const [foldStart, foldEnd] of foldRanges) {
-      starts.add(foldStart);
-      for (let ln = foldStart + 1; ln <= foldEnd; ln++) hidden.add(ln);
-    }
-  }
-  return (ln: number) =>
-    hidden.has(ln) ? 0
-    : starts.has(ln) ? 1 // the renderer emits ONE "... [N lines]" row
-    : Math.max(1, wrapLine(getRawLine(ln), cw).length);
-}
 
 export function advanceWrappedTop(
   getRawLine: (ln: number) => string,
