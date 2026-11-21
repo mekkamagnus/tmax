@@ -228,28 +228,52 @@ segment reads)."
 
 ;; r133 (codex r130 P1#5): recursive rm WITHOUT -f ("rm -r dir") —
 ;; byte scans (regex star is reader-fragile, r117).
+;; r133e (codex r133d catch): byte-wise "rm" + WHITESPACE finder (a
+;; tab after rm escaped the literal "rm " match), scanning every word
+;; after it — operand-order flags included ("rm tree -r" is recursive
+;; on GNU) — until a command separator (; | &).
 (defun fikra-risk-has-rm-recursive (d)
-  (let ((hit (string-match "rm " d)))
-    (if (and hit (numberp hit))
-      (if (fikra-risk-rm-flags-r d (+ hit 3))
-        t
-        (fikra-risk-has-rm-recursive (substring d (+ hit 3) (length d))))
-      nil)))
+  (fikra-risk-rm-find d 0))
 
-;; r133d (codex r133c catch): skip ANY spaces after "rm", then scan
-;; EVERY consecutive dash-flag word ("rm --verbose -r x"; multiple
-;; spaces; tabs are not split — commands are space-normal here).
-(defun fikra-risk-rm-flags-r (d k)
+(defun fikra-risk-rm-find (d i)
+  (if (> (+ i 2) (- (length d) 1))
+    nil
+    (if (and (string= (substring d i (+ i 1)) "r")
+             (string= (substring d (+ i 1) (+ i 2)) "m")
+             (fikra-risk-ws-p d (+ i 2)))
+      (if (fikra-risk-rm-words-r d (+ i 3))
+        t
+        (fikra-risk-rm-find d (+ i 1)))
+      (fikra-risk-rm-find d (+ i 1)))))
+
+;; Space OR tab (a literal tab byte — the reader leaves escapes alone).
+(defun fikra-risk-ws-p (d k)
   (if (>= k (length d))
     nil
-    (if (string= (substring d k (+ k 1)) " ")
-      (fikra-risk-rm-flags-r d (+ k 1))
-      (if (string= (substring d k (+ k 1)) "-")
-        (fikra-risk-flag-word-r d (+ k 1))
-        nil))))
+    (let ((c (substring d k (+ k 1))))
+      (or (string= c " ") (string= c "	")))))
+;; Between words: separators end the command; dash-words are flags;
+;; any other word is skipped (operand order does not matter).
+(defun fikra-risk-rm-words-r (d k)
+  (if (>= k (length d))
+    nil
+    (let ((c (substring d k (+ k 1))))
+      (cond
+        ((or (string= c ";") (string= c "|") (string= c "&")) nil)
+        ((fikra-risk-ws-p d k) (fikra-risk-rm-words-r d (+ k 1)))
+        ((string= c "-") (fikra-risk-flag-word-r d (+ k 1)))
+        (t (fikra-risk-skip-word-r d (+ k 1)))))))
 
-;; The flag word's chars; r/R anywhere → t. At the word's end, CONTINUE
-;; with the next flag word ("rm -v -r x").
+(defun fikra-risk-skip-word-r (d k)
+  (if (>= k (length d))
+    nil
+    (let ((c (substring d k (+ k 1))))
+      (cond
+        ((or (string= c ";") (string= c "|") (string= c "&")) nil)
+        ((fikra-risk-ws-p d k) (fikra-risk-rm-words-r d (+ k 1)))
+        (t (fikra-risk-skip-word-r d (+ k 1)))))))
+
+;; Inside a flag word: r/R anywhere → t; word end → next word.
 (defun fikra-risk-flag-word-r (d k)
   (if (>= k (length d))
     nil
@@ -257,7 +281,8 @@ segment reads)."
       (cond
         ((string= c "r") t)
         ((string= c "R") t)
-        ((string= c " ") (fikra-risk-rm-flags-r d (+ k 1)))
+        ((or (string= c ";") (string= c "|") (string= c "&")) nil)
+        ((fikra-risk-ws-p d k) (fikra-risk-rm-words-r d (+ k 1)))
         (t (fikra-risk-flag-word-r d (+ k 1)))))))
 
 (defun fikra-risk-flag-chars (d k)

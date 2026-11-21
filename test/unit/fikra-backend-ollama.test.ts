@@ -656,6 +656,12 @@ describe("ollama gate pattern gaps (r133 — codex r130 P1#5)", () => {
     // recursive rm classifies destructive.
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm   -r tree/")').value)).toBe("destructive");
     expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm --verbose -r tree/")').value)).toBe("destructive");
+    // r133e (codex r133d catch): a TAB after rm; operand-order flags;
+    // command separators end the scan.
+    const tabCmd = Buffer.from("rm\t-r tree/", "utf8").toString("hex");
+    expect(String(e(ed, `(fikra/approvals/fikra-approval-risk "bash" (hex-decode "${tabCmd}"))`).value)).toBe("destructive");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm tree -r")').value)).toBe("destructive");
+    expect(String(e(ed, '(fikra/approvals/fikra-approval-risk "bash" "rm x; grep -r pat")').value)).toBe("shell");
     // A dangling link whose RAW target hops with ".. — refuses now.
     e(ed, '(shell-command "ln -s ../outside-hop/gone2.txt hop-link")');
     e(ed, '(fikra/chat/fikra-turn-send "hop link")');
