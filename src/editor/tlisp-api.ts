@@ -1802,7 +1802,18 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
 
               await proc.exited;
               await filterChain;
-              const exitCode = proc.exitCode ?? 0;
+              // #293 gate r1: Bun's exitCode is NULL on signal death —
+              // `?? 0` turned every SIGINT/SIGTERM/SIGKILL into exit 0
+              // (a C-c'd push reported success with the remote
+              // untouched). Signal deaths report the conventional
+              // 128+signum so consumers see an honest failure.
+              const SIG_NUMS: Record<string, number> = {
+                SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGABRT: 6, SIGKILL: 9,
+                SIGALRM: 14, SIGTERM: 15,
+              };
+              const sigName = (proc as { signalCode?: string | null }).signalCode;
+              const signum = sigName ? (SIG_NUMS[sigName] ?? 0) : 0;
+              const exitCode = proc.exitCode ?? (signum > 0 ? 128 + signum : 0);
               ctx.logProgram?.('process', {
                 level: exitCode === 0 ? 'info' : 'error',
                 text: `◀ pid ${pid} exited: ${exitCode}`,

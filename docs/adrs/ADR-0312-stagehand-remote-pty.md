@@ -40,6 +40,18 @@ tmax runs on Bun; a primitive whose output never arrives is unusable.
 
 ## Consequences
 
+- **Gate r1 corrections**: Bun's `exitCode` is NULL on signal death —
+  `?? 0` reported FALSE SUCCESS for every interrupted run (fixed:
+  128+signum via a signal-NAME map — `Number("INT")` is NaN, the
+  first parse attempt silently failed); the popup keymap binds every
+  printable ASCII char to the verbatim dispatcher (a hex-built char
+  table — the reader strips escapes); C-c is bound in the status
+  buffer too; the ladder's 1s waits are press-held (a fresh press
+  after the wait escalates); success closes the popup in place;
+  post-mortem buffers go read-only.
+- The PTY allocates script(1)'s DEFAULT size in v1 (the ADR earlier
+  claimed the popup's dimensions — corrected; live resize and
+  dimension plumbing are recorded follow-ups).
 - Credential prompts work: the remote's terminal prompts render in
   the popup and typed input reaches them verbatim.
 - The CRLF in PTY output is preserved as-is (it is what a terminal

@@ -27,16 +27,28 @@ streaming into a popup the user can type at.
   live; otherwise spawn `git push|pull` at the project root with
   `:pty t`, streaming into the `*Stagehand-Remote*` popup (the
   capture geometry: `split-window-below`, focus down, switch). Input:
-  the exported `stagehand-remote-input` writes keys VERBATIM via
-  `process-write` (Enter → a newline); the editor interprets nothing.
+  the popup keymap binds EVERY printable ASCII char to the verbatim
+  dispatcher (`stagehand-remote-input-key` → `process-write`; Enter →
+  a newline) — the editor interprets nothing while the popup is
+  focused (gate r1: the promised generic dispatch exists).
+- **Honest exits (gate r1)**: Bun's `exitCode` is null on signal
+  death — `?? 0` turned every ladder kill into exit 0 (a C-c'd push
+  reported `pushed` with the remote untouched). Signal deaths now
+  report 128+signum (name→number mapped); the sentinel distinguishes
+  `interrupted (130|137|143)` from `failed (N)`; success CLOSES the
+  popup in place (no lingering popup on a finished run); post-mortem
+  buffers go read-only.
 - **Cancellation — C-c ONLY**, the escalation ladder, each step a
-  FRESH press (no automatic escalation; the user is the trigger):
-  1st → SIGINT; still alive + 2nd → SIGTERM; 3rd → SIGKILL. Delivered
-  via the existing `signal` op (the issue's `process-signal` name
-  maps onto it — the r131b group-kill semantics serve). **No
-  worktree-untouched guarantee** — git owns the interrupt outcome;
-  the observable contract: `interrupted`-family status, process dead,
-  the popup retained post-mortem.
+  FRESH press AFTER a 1s bounded wait (a press within 1s of the last
+  is held off with a status — gate r1: the waits exist): 1st →
+  SIGINT; still alive + 2nd → SIGTERM; 3rd → SIGKILL. Delivered via
+  the existing `signal` op (the issue's `process-signal` name maps
+  onto it — the r131b group-kill semantics serve). C-c is bound BOTH
+  in the popup and in the status buffer (termination outside the
+  popup follows the same ladder). **No worktree-untouched guarantee**
+  — git owns the interrupt outcome; the observable contract:
+  `interrupted (128+n)` status, process dead, the output retained
+  post-mortem until q.
 - **`q` closes AFTER exit only**: during a run `q` is PTY input
   (verbatim to the remote; the popup does NOT close — tested). exit 0
   → `pushed`/`pulled` + the status-buffer refresh; exit ≠ 0 → the
@@ -49,8 +61,13 @@ streaming into a popup the user can type at.
 - [x] `:pty t`: TTY visibility ([ -t 0 ] true), bidirectional IO
       (stdin forwarded + verified by the child), signals via the
       trap-logging fixture (INT + TERM observed; KILL ends it), and
-      the three-press ladder (SIGINT aborts a sleeping push; the
-      remote untouched — asserted on the remote's actual refs)
+      the ladder (SIGINT aborts a sleeping push; the remote untouched
+      — asserted on the remote's actual refs; the exit reports
+      128+signum — the honest-interrupt regression)
+- [x] Gate r1: every printable ASCII char routes verbatim through the
+      popup keymap (the bindings asserted); C-c in the status buffer
+      reaches the ladder; the 1s hold-off; success closes the popup
+      in place; post-mortem read-only
 - [x] Push/pull against a LOCAL BARE remote (file://): streaming into
       the popup, exit 0 → pushed/pulled + refresh (the remote's refs
       verified), exit ≠ 0 (a diverged remote) → post-mortem retained

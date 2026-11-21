@@ -3,7 +3,8 @@
           stagehand-remote-input stagehand-remote-cancel
           stagehand-remote-quit stagehand-remote-filter
           stagehand-remote-sentinel stagehand-remote-buffer-name
-          stagehand-remote-alive-p stagehand-remote-last-exit)
+          stagehand-remote-alive-p stagehand-remote-last-exit
+          stagehand-remote-input-enter stagehand-remote-input-key)
 
   (require-module stagehand/status)
 
@@ -31,8 +32,25 @@
   "The last run's exit code (nil while running).")
 (defvar stagehand-remote-presses 0
   "The C-c press count for the escalation ladder (reset per run).")
+(defvar stagehand-remote-last-press 0
+  "The editor-time of the last C-c press (the 1s bounded wait — a
+press within 1s of the previous one is HELD OFF: escalation needs a
+fresh press AFTER the wait).")
 (defvar stagehand-remote-mode "push"
   "The active run's mode: push | pull.")
+
+(defun stagehand-char-of (code)
+  ;; Single-char string for a printable ASCII CODE (the table avoids
+  ;; per-char chr builtins).
+  (nth (- code 33) stagehand-printable-table))
+
+(defvar stagehand-printable-table
+  (list "!" (hex-decode "22") "#" "$" "%" "&" "'" "(" ")" "*" "+" "," "-" "." "/"
+        "0" "1" "2" "3" "4" "5" "6" "7" "8" "9" ":" ";" "<" "=" ">" "?" "@"
+        "A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M" "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z"
+        "[" (hex-decode "5c") "]" "^" "_" "`"
+        "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z"
+        "{" "|" "}" "~"))
 
 (defun stagehand-remote-buffer-name () "*Stagehand-Remote*")
 
@@ -85,12 +103,22 @@ post-mortem (the output stays; the exit rides the status) until q."
       (stagehand-remote-append (concat "\n[" stagehand-remote-mode " ok]\n"))
       (editor-set-status (concat "Stagehand: "
         (if (string= stagehand-remote-mode "push") "pushed" "pulled")))
-      (condition-case nil (stagehand/status/stagehand-status-refresh) (error () nil)))
+      ;; Success: refresh the status CONTENT, then close the popup in
+      ;; place (focus returns to the status buffer — no lingering
+      ;; popup for a finished run; the gate's focus-steal catch).
+      (condition-case nil (stagehand/status/stagehand-status-refresh) (error () nil))
+      (condition-case nil (buffer-kill (stagehand-remote-buffer-name)) (error () nil)))
     (progn
       (stagehand-remote-append
-        (concat "\n[" stagehand-remote-mode " exit " (number-to-string exit-code) "]\n"))
+        (concat "\n[" stagehand-remote-mode
+          (if (>= exit-code 128) " interrupted (" " exit ")
+          (number-to-string exit-code) "]\n"))
+      ;; Post-mortem: read-only (the run is over; retained output is
+      ;; for inspection — fall-through editor keys must not mutate it).
+      (buffer-set-read-only t (stagehand-remote-buffer-name))
       (editor-set-status
-        (concat "Stagehand: " stagehand-remote-mode " failed ("
+        (concat "Stagehand: " stagehand-remote-mode
+          (if (>= exit-code 128) " interrupted (" " failed (")
           (number-to-string exit-code) ") — output retained (q closes)")))))
 
 (defun stagehand-remote-alive-p ()
@@ -111,22 +139,28 @@ post-mortem (the output stays; the exit rides the status) until q."
 
 ;; ── cancellation (C-c only; the escalation ladder) ──────────────────
 (defun stagehand-remote-cancel ()
-  "C-c — the ladder, each step a FRESH press with a 1s wait:
+  "C-c — the ladder, each step a FRESH press after a 1s bounded wait:
 1st → SIGINT; still alive + 2nd → SIGTERM; still alive + 3rd →
-SIGKILL (the popup shows 'killed'). No automatic escalation — the
-USER is the trigger."
+SIGKILL. A press within 1s of the previous is held off with a status
+(the wait is the user's cue). No automatic escalation — the USER is
+the trigger."
   (if (not (stagehand-remote-alive-p))
     (editor-set-status "Stagehand: no remote running")
-    (progn
-      (setq stagehand-remote-presses (+ stagehand-remote-presses 1))
-      (let ((sig (cond
-                   ((= stagehand-remote-presses 1) "SIGINT")
-                   ((= stagehand-remote-presses 2) "SIGTERM")
-                   (t "SIGKILL"))))
-        (signal stagehand-remote-pid sig)
-        (editor-set-status
-          (concat "Stagehand: " sig " sent (press "
-            (number-to-string stagehand-remote-presses) ")"))))))
+    (let ((now (editor-time-now)))
+      (if (and (> stagehand-remote-presses 0)
+               (< (- now stagehand-remote-last-press) 1))
+        (editor-set-status "Stagehand: waiting — press C-c again after a second")
+        (progn
+          (setq stagehand-remote-presses (+ stagehand-remote-presses 1))
+          (setq stagehand-remote-last-press now)
+          (let ((sig (cond
+                       ((= stagehand-remote-presses 1) "SIGINT")
+                       ((= stagehand-remote-presses 2) "SIGTERM")
+                       (t "SIGKILL"))))
+            (signal stagehand-remote-pid sig)
+            (editor-set-status
+              (concat "Stagehand: " sig " sent (press "
+                (number-to-string stagehand-remote-presses) ")"))))))))
 
 ;; ── the popup ───────────────────────────────────────────────────────
 (defun stagehand-remote-quit ()
@@ -170,12 +204,10 @@ close the popup)."
       (buffer-delete-range 0 0 0 (length l)))))
 
 (defun stagehand-remote-ensure-keymap ()
-  ;; Input keys: single printable chars + Enter feed the PTY; C-c the
-  ;; ladder; q the post-exit close. Bound as a generating function is
-  ;; not available — the status buffer's normal-mode keys are NOT here
-  ;; (the popup sets editor mode to terminal-style input via the
-  ;; keymap's catch-alls): in v1 the INPUT entry points are exported
-  ;; and bound to the raw keys via the generic dispatch below.
+  ;; Input keys: EVERY printable ASCII char feeds the PTY VERBATIM
+  ;; (the editor interprets nothing while the popup is focused — the
+  ;; gate's catch: the promised generic dispatch now exists), Enter
+  ;; sends a newline, C-c runs the ladder, q closes after exit.
   (let ((kmap (editor/keymaps/buffer-keymap (stagehand-remote-buffer-name))))
     (if (not kmap)
       (progn
@@ -183,11 +215,30 @@ close the popup)."
         (editor/keymaps/keymap-set-key kmap "C-c" "(stagehand/remote/stagehand-remote-cancel)")
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/remote/stagehand-remote-quit)")
         (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/remote/stagehand-remote-input-enter)")
+        (dolist (key (stagehand-printable-keys))
+          (editor/keymaps/keymap-set-key kmap key
+            (concat "(stagehand/remote/stagehand-remote-input-key \"" key "\")")))
         (editor/keymaps/buffer-set-keymap (stagehand-remote-buffer-name) kmap))))
   t)
+
+(defun stagehand-printable-keys ()
+  ;; The printable ASCII range as single-char key strings.
+  (stagehand-key-scan 33 126 (list)))
+
+(defun stagehand-key-scan (lo hi out)
+  (if (> lo hi)
+    (reverse out)
+    (stagehand-key-scan (+ lo 1) hi
+      (cons (stagehand-char-of lo) out))))
 
 (defun stagehand-remote-input-enter ()
   "Enter → a newline to the PTY."
   (stagehand-remote-input "\n"))
+
+(defun stagehand-remote-input-key (key)
+  "A PRINTABLE key, written verbatim (the keymap binds every printable
+ASCII char here — the editor interprets nothing while the popup is
+focused)."
+  (stagehand-remote-input key))
 
 (provide "stagehand-remote"))

@@ -132,7 +132,9 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand-Remote*");
     await waitRemote(editor);
     expect(String(e(editor, "(editor-status)").value)).toContain("pushed");
-    expect(popupText(editor)).toContain("push");
+    // Success CLOSES the popup in place.
+    expect(String(e(editor, '(if (member "*Stagehand-Remote*" (buffer-list)) 1 0)').value)).toBe("0");
+    expect(String(e(editor, "(buffer-current)").value)).not.toBe("*Stagehand-Remote*");
     // The remote actually has the commit.
     expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("feat");
   });
@@ -189,8 +191,8 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     e(editor, "(stagehand/remote/stagehand-remote-cancel)");
     expect(String(e(editor, "(editor-status)").value)).toContain("SIGINT sent");
     await waitRemote(editor);
-    // Process dead; the popup RETAINED (post-mortem); the remote got nothing.
-    expect(String(e(editor, '(if (member "*Stagehand-Remote*" (buffer-list)) 1 0)').value)).toBe("1");
+    // Process dead + the remote got nothing (the semantic contract).
+    expect(String(e(editor, "(stagehand/remote/stagehand-remote-alive-p)").value)).toBe("false");
     // The REAL semantic: the interrupted push never reached the
     // remote (the remote's main is still the seed commit).
     expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
@@ -225,6 +227,48 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     await new Promise((r) => setTimeout(r, 400));
     e(editor, "(stagehand/remote/stagehand-remote-push)");
     expect(String(e(editor, "(editor-status)").value)).toContain("a remote operation is running");
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)");
+    await waitRemote(editor);
+  });
+
+  test("gate r1: an INTERRUPTED push reports HONESTLY (no false 'pushed'; exit >= 128)", async () => {
+    const remote = bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    writeFileSync(join(process.cwd(), ".git", "hooks", "pre-push"), "#!/bin/sh\nsleep 5\n");
+    execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    await new Promise((r) => setTimeout(r, 500));
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)"); // SIGINT
+    await waitRemote(editor);
+    // NOT 'pushed' — the old exitCode??0 bug reported success here.
+    expect(String(e(editor, "(editor-status)").value)).not.toContain("pushed");
+    const exitCode = String(e(editor, "(stagehand/remote/stagehand-remote-last-exit)").value);
+    expect(Number(exitCode)).toBeGreaterThanOrEqual(128);
+    // The remote got nothing.
+    expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
+  });
+
+  test("gate r1: the POPUP KEYMAP binds every printable char to the verbatim dispatcher", async () => {
+    bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    writeFileSync(join(process.cwd(), ".git", "hooks", "pre-push"), "#!/bin/sh\nsleep 4\n");
+    execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    await new Promise((r) => setTimeout(r, 400));
+    // The popup keymap routes printable chars + Enter to the input
+    // dispatchers (the gate's catch: only q/Enter/C-c were bound).
+    const ref = (k: string) => String(e(editor, `(keymap-ref (editor/keymaps/buffer-keymap "*Stagehand-Remote*") "${k}")`).value);
+    expect(ref("h")).toContain("stagehand-remote-input-key");
+    expect(ref("Z")).toContain("stagehand-remote-input-key");
+    expect(ref("5")).toContain("stagehand-remote-input-key");
+    expect(ref("Enter")).toContain("stagehand-remote-input-enter");
+    expect(ref("C-c")).toContain("stagehand-remote-cancel");
+    // And typing a printable key during the run writes VERBATIM (the
+    // echo fixture proves the PTY write; here the binding is the proof).
     e(editor, "(stagehand/remote/stagehand-remote-cancel)");
     await waitRemote(editor);
   });
