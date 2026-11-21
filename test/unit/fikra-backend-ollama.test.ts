@@ -822,6 +822,44 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
   });
 });
 
+  // r135b (codex r135 catches): control chars escape (the file literal
+  // "\n" never matched a real newline — multi-line content rode raw
+  // into the JSON); refused edits show no + lines; the cap guards the
+  // decision re-fire.
+  tt("control characters escape in the reconstructed message", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "multiline")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "line1\nline2\ttabbed\rcr",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "echo M-ESC" } } }] } }));
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 197 "live")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 197 "${r}")`);
+    e(ed, `(fikra-http-complete 197 200 "${hex("{}")}")`);
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("\\nline2");
+    expect(acc).toContain("\\ttabbed");
+    expect(acc).toContain("\\rcr");
+    // The message must be VALID JSON when the re-fire builds the body:
+    // extract the assistant message fragment and JSON-parse it.
+    const frag = acc.slice(acc.indexOf('{"role":"assistant"'), acc.indexOf('"tool_calls"'));
+    expect(() => JSON.parse(frag.slice(0, -1) + "}")).not.toThrow();
+  });
+
+  tt("a REFUSED edit shows no + preview lines", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "escape")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "buffer_edit",
+        arguments: { path: "../escape135.txt", content: "NEVER\nWRITTEN\n" } } }] } }));
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 198 "live")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 198 "${r}")`);
+    e(ed, `(fikra-http-complete 198 200 "${hex("{}")}")`);
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text).toContain("REFUSED");
+    expect(text).not.toContain("+ NEVER");
+    expect(text).not.toContain("+ WRITTEN");
+    expect(existsSync(join(process.cwd(), "..", "escape135.txt"))).toBe(false);
+  });
+
 describe("ollama focus-switch lifecycle (r119 — codex r118 P1)", () => {
   tt("park → switch → allow: the ORIGINATING thread settles (not stranded confirming)", async () => {
     const ed = await armed();

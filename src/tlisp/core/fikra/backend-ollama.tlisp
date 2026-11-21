@@ -735,8 +735,9 @@ availability gate must be synchronous; the turn itself is async)."
          (contained (fikra-ollama-path-contained-p dir path))
          (abs (concat dir "/" path)))
     ;; r135 (codex r130 P2): the INLINE change evidence — the old vs new
-    ;; first lines render +/- under the ⚙ row (the mockup's edit row;
-    ;; the preview is known at call time: old read, new in the args).
+    ;; first lines render +/- under the ⚙ row (the mockup's edit row).
+    ;; r135b (codex catch): CONTAINED edits only — a refused edit must
+    ;; not display the additions it never wrote.
     (let ((old-content (if contained
                          (condition-case nil (read-file-content abs) (error () nil))
                          nil)))
@@ -744,9 +745,11 @@ availability gate must be synchronous; the turn itself is async)."
         (list (list "kind" "tool-call") (list "tool" "buffer-edit")
               (list "summary" (concat path " @" (number-to-string (length content))))
               (list "preview"
-                (concat (if (and old-content (stringp old-content) (> (length old-content) 0))
-                          (fikra-ollama-preview-lines "-" old-content) "")
-                        (fikra-ollama-preview-lines "+" content))))))
+                (if contained
+                  (concat (if (and old-content (stringp old-content) (> (length old-content) 0))
+                            (fikra-ollama-preview-lines "-" old-content) "")
+                          (fikra-ollama-preview-lines "+" content))
+                  "")))))
     (if (not contained)
       (progn
         (fikra/event/fikra-event-emit
@@ -827,7 +830,14 @@ availability gate must be synchronous; the turn itself is async)."
         (cond
           ((string= c "\"") (concat acc bs (hex-decode "22")))
           ((string= c bs) (concat acc bs bs))
-          ((string= c "\n") (concat acc bs "n"))
+          ;; r135b (codex catch + a latent bug): the control characters
+          ;; are HEX-BUILT — the file literal "\n" is backslash-n (the
+          ;; reader leaves escapes intact), which NEVER matched a real
+          ;; newline: multi-line content rode raw into the JSON. Tab
+          ;; and CR join (raw control chars make the request invalid).
+          ((string= c (hex-decode "0a")) (concat acc bs "n"))
+          ((string= c (hex-decode "09")) (concat acc bs "t"))
+          ((string= c (hex-decode "0d")) (concat acc bs "r"))
           (t (concat acc c)))))))
 
 ;; The http filter: stamp ownership + accumulate the body. A TAGS request
@@ -1072,7 +1082,19 @@ availability gate must be synchronous; the turn itself is async)."
 
 (defun fikra-ollama-continue ()
   (if (string= (symbol-name (fikra-ollama-resume-rest)) "done")
-    (progn (fikra-ollama-chat fikra-ollama-pending-message) 'fired)
+    ;; r135b (codex catch): the cap guards EVERY re-fire (a park in the
+    ;; last round continued without it — an extra model request past
+    ;; the cap).
+    (if (>= fikra-ollama-round fikra-ollama-max-rounds)
+      (progn
+        (setq fikra-ollama-pending-message nil)
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "text-delta")
+                (list "speaker" "assistant")
+                (list "text" "(tool round cap reached — stopping the loop)")))
+        (fikra/thread/fikra-thread-turn-end "completed")
+        'capped)
+      (progn (fikra-ollama-chat fikra-ollama-pending-message) 'fired))
     'held))
 
 (defun fikra-ollama-resume-rest ()
