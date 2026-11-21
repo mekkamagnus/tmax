@@ -916,22 +916,29 @@ availability gate must be synchronous; the turn itself is async)."
       ;; (a reply-handling error used to leak the focus and strand the
       ;; turn) and settles honestly — the bash sentinel's pattern.
       (let ((prev (fikra/thread/fikra-thread-current)))
-        (fikra/thread/fikra-thread-focus thread-id)
-        (let ((r (condition-case nil
-                  (fikra-ollama-handle-reply status body)
-                  (error (m)
-                    (condition-case nil
-                      (progn
-                        (editor-set-status (concat "Fikra-ollama: reply failed — " m))
-                        (if fikra-ollama-pending-message
-                          (progn (setq fikra-ollama-pending-message nil)
-                                 (fikra/thread/fikra-thread-turn-end "error"))))
-                      (error () nil))
-                    'reply-error))))
-          (condition-case nil
-            (fikra/thread/fikra-thread-focus prev)
-            (error () nil))
-          r)))))))
+        ;; r136b (codex catch): the focus call itself is guarded; and the
+        ;; settle keys on the thread STATUS (the success path clears the
+        ;; pending marker BEFORE its render — a throw there left the
+        ;; turn "running" with nothing pending to key on).
+        (let ((focused (condition-case nil
+                        (progn (fikra/thread/fikra-thread-focus thread-id) t)
+                        (error () nil))))
+          (let ((r (condition-case nil
+                    (fikra-ollama-handle-reply status body)
+                    (error (m)
+                      (condition-case nil
+                        (progn
+                          (editor-set-status (concat "Fikra-ollama: reply failed — " m))
+                          (setq fikra-ollama-pending-message nil)
+                          (if (string= (fikra/thread/fikra-thread-status) "running")
+                            (fikra/thread/fikra-thread-turn-end "error")))
+                        (error () nil))
+                      'reply-error))))
+            (if focused
+              (condition-case nil
+                (fikra/thread/fikra-thread-focus prev)
+                (error () nil)))
+            r))))))))
 
 ;; The reply handling, thread-local (runs with the FIRING thread
 ;; focused; the guards already ran).

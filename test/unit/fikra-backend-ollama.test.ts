@@ -839,7 +839,9 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       try {
         const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
         const last = lines[lines.length - 1];
-        if (lines.length > 0 && last) { body = JSON.parse(last); break; }
+        // Wait for THIS turn's body (earlier tests' bodies ride the same
+        // file — a stale accept broke the user-message assert).
+        if (last && last.includes("wire check")) { body = JSON.parse(last); break; }
       } catch { /* not yet / partial */ }
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -847,7 +849,11 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     const b = body as { model?: string; messages?: { role: string }[]; tools?: unknown[] };
     expect(b.model).toBe("test:fake");
     expect(b.messages?.[0]?.role).toBe("system");
-    expect(b.messages?.some((m) => m.role === "user" && false)).toBe(false);
+    // THIS turn's user message rides the body (r136b: the old assert was
+    // a tautology; and filter to THIS request — earlier bodies belong to
+    // earlier turns).
+    const msgs = (body as { messages: { role: string; content: string }[] }).messages;
+    expect(msgs.some((m) => m.role === "user" && m.content.includes("wire check"))).toBe(true);
     expect(Array.isArray(b.tools)).toBe(true);
   });
 

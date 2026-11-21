@@ -396,6 +396,15 @@ segment reads)."
           acc
           (concat acc c))))))
 
+;; r136b (codex r136 catch): shell EXPANSION constructs gate — a static
+;; scan cannot expand variables (rm${IFS}-r${IFS}d removed a directory
+;; ungated), so parameter/command substitution parks for the human to
+;; judge. Conservative by design (echo $HOME gates too).
+(defun fikra-risk-has-expansion (d)
+  (or (string-contains-p (hex-decode "247b") d)
+      (string-contains-p (hex-decode "2428") d)
+      (string-contains-p (hex-decode "24494653") d)))
+
 (defun fikra-approval-risk (kind detail)
   ;; Destructive first (any tool can carry it), then the tool class —
   ;; BOTH case-insensitive (the detail is downcased; "drop table" counts).
@@ -417,7 +426,8 @@ segment reads)."
             ;; r133 (codex r130 P1#5): recursive rm without -f, and
             ;; truncating redirection.
             (fikra-risk-has-rm-recursive d)
-            (fikra-risk-has-trunc-redir d))
+            (fikra-risk-has-trunc-redir d)
+            (fikra-risk-has-expansion d))
     "destructive"
     (if (or (string= (fikra-risk-down kind) "bash") (string= (fikra-risk-down kind) "shell"))
       "shell"
