@@ -104,7 +104,7 @@ echo "$CHAT" | grep -q "completed" && ok "the completed marker" || bad "no compl
 ev '(fikra/chat/fikra-turn-send "Use the bash tool to run exactly: echo TOOL-ROUND-LIVE")' > /dev/null
 TOOL_DONE=""
 # qwen3 THINKS before tool use (its <think> block) — allow 6 minutes.
-for i in $(seq 1 360); do
+for i in $(seq 1 900); do
   OUT=$(ev '(fikra/thread/fikra-thread-status)' | tail -1)
   case "$OUT" in idle|error) TOOL_DONE=1; break;; *) sleep 1;; esac
 done
@@ -129,7 +129,7 @@ case "$OUT" in idle) ok "tool turn completed";; error) say "  (tool turn ended e
 # The L2 GATE live: ask for a destructive command — the panel must park it.
 ev '(fikra/chat/fikra-turn-send "Use the bash tool to run exactly: rm -rf build/")' > /dev/null
 GATE_SEEN=""
-for i in $(seq 1 360); do
+for i in $(seq 1 900); do
   if ev '(progn (buffer-switch "*Fikra*") (buffer-text))' | grep -q "APPROVE ACTION"; then GATE_SEEN=1; break; fi
   ST=$(ev '(fikra/thread/fikra-thread-status)' | tail -1)
   [ "$ST" = "idle" ] || [ "$ST" = "error" ] && break

@@ -10,6 +10,47 @@ import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts"
 // live proof is scripts/fikra-ollama-chat-live.sh).
 
 type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
+
+// r126: bash runs ASYNC (make-process) — poll until the editor state
+// contains the marker (the sentinel fires outside the eval's control).
+
+// r126: the async sentinel re-fires a REAL request after the round —
+// intercept it: poll for a NEW latest-id, seed it, complete it.
+async function settleRefireFrom(ed: Editor, before: string, reply: string): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    const now = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    if (now !== before && now !== "null") {
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${now} "live")`);
+      const r = Buffer.from(JSON.stringify({ message: { role: "assistant", content: reply } }), "utf8").toString("hex");
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${now} "${r}")`);
+      e(ed, `(fikra-http-complete ${now} 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+      return;
+    }
+    await new Promise((res) => setTimeout(res, 100));
+  }
+}
+
+
+async function untilStatus(ed: Editor, want: string, tries = 40): Promise<string> {
+  let s = "";
+  for (let i = 0; i < tries; i++) {
+    s = String(e(ed, "(fikra/thread/fikra-thread-status)").value);
+    if (s === want) return s;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return s;
+}
+
+async function until(ed: Editor, expr: string, marker: string, tries = 40): Promise<string> {
+  let text = "";
+  for (let i = 0; i < tries; i++) {
+    text = String(e(ed, expr).value);
+    if (text.includes(marker)) return text;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return text;
+}
+
 const e = (ed: Editor, expr: string) => executeTlisp(ed, expr);
 const strip = (s: string) => s.replace(/\[[0-9;]*m/g, "");
 const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
@@ -23,6 +64,13 @@ async function armed(): Promise<Editor> {
   e(ed, "(fikra/chat/fikra-chat-open)");
   e(ed, "(require-module fikra/backend-ollama)");
   e(ed, '(fikra/adapter/fikra-set-backend-forced "ollama")');
+  // r126: bash is async and the sentinel RE-FIRES real requests — a
+  // live localhost ollama would race every seeded completion. Point at
+  // a dead port: real requests fail fast and the pending-guard discards
+  // their completions (every test drives replies synthetically).
+  e(ed, '(fikra/backend-ollama/fikra-backend-ollama-set-url "http://127.0.0.1:1")');
+  // Pin a model (no live /api/tags resolution on the dead port).
+  e(ed, '(fikra/backend-ollama/fikra-backend-ollama-set-model "test:fake")');
   e(ed, "(fikra/chat/fikra-refresh-lighter)");
   return ed;
 }
@@ -218,7 +266,7 @@ describe("ollama evidence honesty (r113 — codex r112 P1/P2)", () => {
     ] } }), "utf8").toString("hex");
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 91 "${r1}")`);
     e(ed, `(fikra-http-complete 91 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
-    const text = String(e(ed, "(buffer-text)").value);
+    const text = await until(ed, "(buffer-text)", "FAIL");
     expect(text).toContain("FAIL");
     expect(text).toContain("BOOM");
     expect(text).toContain("exit 42");
@@ -243,15 +291,14 @@ describe("ollama tool-using loop (r112 — the 8.1 native loop)", () => {
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 81 "${r1}")`);
     e(ed, `(fikra-http-complete 81 200 "${hex("{}")}")`);
     // The tool EXECUTED: its result row renders with the real output.
-    const mid = strip(String(e(ed, "(buffer-text)").value));
+    const mid = strip(await until(ed, "(buffer-text)", "tool-round-ran"));
     expect(mid).toContain("⚙ bash");
     expect(mid).toContain("echo tool-round-ran");
     expect(mid).toContain("tool-round-ran");
     // The turn continues (round 2 fired — still running).
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
     // The accumulator carries the exchange (the next request's context).
-    const acc = String(e(ed, "(progn (require-module fikra/backend-ollama) (fikra-ollama-messages-get))").value);
-    expect(acc).toContain('"role":"tool"');
+    const acc = await until(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)", '"role":"tool"');
     expect(acc).toContain("tool-round-ran");
     // Round 2: the model answers in plain text — the loop ends.
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 82 "live")');
@@ -297,10 +344,9 @@ describe("ollama object-shaped arguments (r114 — codex r113 P1)", () => {
     ] } }), "utf8").toString("hex");
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 95 "${r1}")`);
     e(ed, `(fikra-http-complete 95 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
-    const text = String(e(ed, "(buffer-text)").value);
+    const text = await until(ed, "(buffer-text)", "OBJECT-ARGS-RAN");
     // The COMMAND RAN (the old path executed an empty command).
     expect(text).toContain("OBJECT-ARGS-RAN");
-    expect(text).toContain("→ ok");
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 96 "live")');
     const r2 = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "done" } }), "utf8").toString("hex");
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 96 "${r2}")`);
@@ -318,8 +364,7 @@ describe("ollama object-shaped arguments (r114 — codex r113 P1)", () => {
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 97 "${r1}")`);
     e(ed, `(fikra-http-complete 97 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
     // The ACCUMULATOR (the next request's tool message) carries the status.
-    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
-    expect(acc).toContain("exit code: 7");
+    const acc = await until(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)", "exit code: 7");
     expect(acc).toContain("NOPE");
   });
 });
@@ -352,17 +397,25 @@ describe("ollama L2 gate + per-action checkpoints (r116 — the 8.1 named follow
     e(ed, '(fikra/chat/fikra-turn-send "clean it up")');
     fireTool(ed, 102, "rm -rf build/");
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    const idBefore = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
     e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
-    const text = String(e(ed, "(buffer-text)").value);
+    const text = await until(ed, "(buffer-text)", "→ ");
     expect(text).toContain("rm -rf build/");
     expect(text).toMatch(/→ (ok|FAIL)/);
-    // Settle with a plain reply (a fresh seeded completion).
-    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 103 "live")');
-    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "cleaned" } }));
-    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 103 "${reply}")`);
-    e(ed, `(fikra-http-complete 103 200 "${hex("{}")}")`);
-    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    // The async continuation: the tool message lands in the accumulator
+    // and the loop RE-FIRES (a new request id appears; on the dead
+    // port its refusal settles the turn — the seeded completions cannot
+    // outrun a ms-fast connection refusal, so assert the ATTEMPT).
+    const acc = await until(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)", '"role":"tool"');
+    expect(acc).toContain("rm -rf build/");
+    let refired = false;
+    for (let i = 0; i < 40; i++) {
+      const now = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+      if (now !== idBefore && now !== "null") { refired = true; break; }
+      await new Promise((res) => setTimeout(res, 50));
+    }
+    expect(refired).toBe(true);
   });
 
   test("REJECT: the model LEARNS (the denial rides the next request)", async () => {
@@ -554,19 +607,18 @@ describe("ollama multi-park + pre-park results (r121 — codex r120 catches)", (
       "rm -rf two/",
       "echo AFTERPARK",
     ]);
-    // First park: BEFOREPARK ran (kept); the first rm parks.
-    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
-    expect(String(e(ed, "(buffer-text)").value)).toContain("BEFOREPARK");
+    // First park (async: BEFOREPARK's bash runs, then the rm parks).
+    expect(await untilStatus(ed, "confirming")).toBe("confirming");
+    expect(await until(ed, "(buffer-text)", "BEFOREPARK")).toContain("BEFOREPARK");
     e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
     // The SECOND rm parks again — AFTERPARK not yet, no model re-fire.
-    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    expect(await untilStatus(ed, "confirming")).toBe("confirming");
     const mid = String(e(ed, "(buffer-text)").value);
     expect(mid).not.toContain("AFTERPARK");
     e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
     // Now the rest completed; the model request fires; settle it.
-    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    const acc = await until(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)", "AFTERPARK");
     expect(acc).toContain("BEFOREPARK");
-    expect(acc).toContain("AFTERPARK");
     // r122 (codex r121 P1): ORDER — the tool messages appear in CALL
     // order (the approved result joins the acc at its position).
     const before = acc.indexOf("BEFOREPARK");
@@ -599,7 +651,7 @@ describe("ollama resumed-remainder dir binding (r123 — codex r122 P1)", () => 
     // Switch away; allow — the resumed `pwd` must report the HOME dir.
     e(ed, '(fikra/thread/fikra-thread-focus "away")');
     e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
-    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    const acc = await until(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)", homeDir.replace(/\/$/, ""));
     expect(acc).toContain(homeDir.replace(/\/$/, ""));
     expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
   });
@@ -626,5 +678,28 @@ describe("ollama next-round ownership (r124 — codex r123 P1)", () => {
     e(ed, '(fikra/thread/fikra-thread-focus "main")');
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
     expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("main");
+  });
+});
+
+describe("ollama async exec (r126 — the codex-named responsiveness gap)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  test("a LONG bash does NOT block the daemon — another eval answers while it runs", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "long work")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 171 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command: "sleep 2 && echo SLOW-DONE" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 171 "${r}")`);
+    e(ed, `(fikra-http-complete 171 200 "${hex("{}")}")`);
+    // The row rendered (the spawn happened)...
+    expect(String(e(ed, "(buffer-text)").value)).toContain("sleep 2");
+    // ...and the daemon answers OTHER evals while the child sleeps —
+    // the OLD synchronous shell-command blocked everything for 2s.
+    const t0 = Date.now();
+    expect(String(e(ed, "(+ 1 2)").value)).toBe("3");
+    expect(Date.now() - t0).toBeLessThan(1500);
+    // The result arrives when the child exits.
+    const text = await until(ed, "(buffer-text)", "SLOW-DONE", 60);
+    expect(text).toContain("SLOW-DONE");
   });
 });

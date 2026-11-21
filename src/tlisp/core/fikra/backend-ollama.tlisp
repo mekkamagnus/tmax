@@ -5,9 +5,10 @@
           fikra-backend-ollama-complete
           fikra-backend-ollama-seed fikra-ollama-history-messages
           fikra-ollama-messages-get fikra-ollama-tools-json
-          fikra-backend-ollama-set-model
+          fikra-backend-ollama-set-model fikra-backend-ollama-set-url
           fikra-backend-ollama-pending-p fikra-backend-ollama-decide
-          fikra-ollama-parked-rest-get)
+          fikra-ollama-parked-rest-get fikra-ollama-latest-id-get
+          fikra-ollama-bash-filter fikra-ollama-bash-sentinel)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -62,6 +63,13 @@ decision resumes the remainder — they were dropped).")
   "The results ALREADY collected when the park hit (r121, codex r120
 P2#2: 'echo BEFOREPARK' before a parked pair was dropped — the acc must
 ride too).")
+(defvar fikra-ollama-async-out ""
+  "r126: the pending async bash's accumulated stdout (the filter
+appends; the sentinel consumes).")
+(defvar fikra-ollama-async-cont nil
+  "r126: the round continuation while an async bash runs —
+(calls i acc); the sentinel resumes run-calls from i with acc + the
+tool message, then the round tail (re-fire/park).")
 (defvar fikra-ollama-round 0
   "The current tool round (the loop cap guard).")
 (defvar fikra-ollama-max-rounds 4
@@ -97,11 +105,22 @@ availability gate must be synchronous; the turn itself is async)."
 (defun fikra-ollama-messages-get ()
   fikra-ollama-messages)
 
+;; Test seam: pin the URL (the async sentinel re-fires REAL requests —
+;; fixtures point at a dead port so seeded replies are the only
+;; completions; the pending-guard discards the refused ones).
+(defun fikra-backend-ollama-set-url (u)
+  (setq fikra-ollama-url u))
+
 ;; Admin: pin the chat model (the auto-resolution takes the FIRST
 ;; installed model, which may lack tool support — the live script pins
 ;; a tools-capable one).
 (defun fikra-backend-ollama-set-model (name)
   (setq fikra-ollama-model name))
+
+;; Test accessor: the latest fired request id (the async sentinel's
+;; re-fire creates a NEW id — tests intercept it).
+(defun fikra-ollama-latest-id-get ()
+  (if fikra-ollama-latest-id (number-to-string fikra-ollama-latest-id) "null"))
 
 (defun fikra-ollama-parked-rest-get ()
   fikra-ollama-parked-rest)
@@ -208,7 +227,8 @@ availability gate must be synchronous; the turn itself is async)."
             (fikra-ollama-calls-json tool-calls 0 "")
             "]},")) 
   (let ((results (fikra-ollama-run-calls tool-calls 0 "")))
-    (if (and (symbolp results) (string= (symbol-name results) "parked"))
+    (if (and (symbolp results) (or (string= (symbol-name results) "parked")
+                                   (string= (symbol-name results) "async")))
       nil
       (progn
     (setq fikra-ollama-messages
@@ -245,22 +265,32 @@ availability gate must be synchronous; the turn itself is async)."
 ;; in the same reply must not run while the first waits at the gate (the
 ;; adversarial rm -rf + touch sequence executed the touch).
 (defun fikra-ollama-run-calls (calls i acc)
+  ;; The empty-rest base returns "" — never nil (concat with nil throws
+  ;; and the SENTINEL swallows it: the turn stuck 'running' live).
   (if (>= i (length calls))
-    acc
+    (if acc acc "")
     (let ((res (fikra-ollama-run-tool (nth i calls))))
-      (if (and (symbolp res) (string= (symbol-name res) "parked"))
-        (progn
+      (cond
+        ((and (symbolp res) (string= (symbol-name res) "async"))
+          ;; r126: an async bash holds the round — the sentinel resumes
+          ;; from i+1 (the tool message lands at exit).
+          (progn
+            (setq fikra-ollama-async-cont (list calls (+ i 1)))
+            'async))
+        ((and (symbolp res) (string= (symbol-name res) "parked"))
           ;; r120: the REMAINDER rides the park — the decision resumes
           ;; them (they were dropped). r121: the ACC rides too (results
           ;; before the park were discarded — 'echo BEFOREPARK' vanished).
-          (setq fikra-ollama-parked-acc acc)
-          (setq fikra-ollama-parked-rest
-            (condition-case nil
-              (fikra-ollama-calls-rest calls (+ i 1))
-              (error () nil)))
-          'parked)
-        (fikra-ollama-run-calls calls (+ i 1)
-          (concat acc res))))))
+          (progn
+            (setq fikra-ollama-parked-acc acc)
+            (setq fikra-ollama-parked-rest
+              (condition-case nil
+                (fikra-ollama-calls-rest calls (+ i 1))
+                (error () nil)))
+            'parked))
+        (t
+          (fikra-ollama-run-calls calls (+ i 1)
+            (concat acc res)))))))
 
 ;; r120 catch: `cons` requires a proper list tail — (cons x nil) THROWS
 ;; in this dialect. Accumulate with append instead.
@@ -353,29 +383,79 @@ availability gate must be synchronous; the turn itself is async)."
   'parked)
 
 ;; The un-gated execution (the r113 path).
+;; r126 (the codex-named responsiveness gap): bash runs ASYNC —
+;; make-process with a filter/sentinel; the daemon NEVER blocks on a
+;; long command. The r113 exit-status contract is preserved (the
+;; command's own $? rides the output tail).
 (defun fikra-ollama-run-bash-now (cmd dir)
-  (let ((dir dir))
-    ;; The call row FIRST (r113): a long-running command shows its row.
+  (fikra/event/fikra-event-emit
+    (list (list "kind" "tool-call") (list "tool" "bash")
+          (list "summary" cmd)))
+  (setq fikra-ollama-async-out "")
+  (condition-case nil
+    (make-process
+      :command (list "sh" "-c"
+                     (concat "cd " (fikra/thread/fikra-thread-shq dir)
+                             " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e"))
+      :cwd dir
+      :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
+      :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
+    (error () nil))
+  'async)
+
+(defun fikra-ollama-bash-filter (pid output)
+  (setq fikra-ollama-async-out
+    (concat fikra-ollama-async-out output))
+  t)
+
+;; The sentinel: render the result, build the tool message, RESUME the
+;; stashed continuation (or, for a decision-executed call with no
+;; stash, append + fire the next request directly).
+(defun fikra-ollama-bash-sentinel (pid exit-code)
+  (let* ((raw fikra-ollama-async-out)
+         (code (fikra-ollama-exit-code raw))
+         (ok (string= code "0"))
+         (out (string-trim (fikra-ollama-strip-exit raw)))
+         (msg (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
+                       (concat out (if ok "" (concat "\nexit code: " code)))) "},"))
+         (cont fikra-ollama-async-cont))
+    (setq fikra-ollama-async-out "")
+    (setq fikra-ollama-async-cont nil)
     (fikra/event/fikra-event-emit
-      (list (list "kind" "tool-call") (list "tool" "bash")
-            (list "summary" cmd)))
-    ;; r113 (codex r112 P1): the EXIT STATUS is captured and honest — a
-    ;; failing command renders FAIL and the model SEES the status.
-    (let* ((raw (shell-command
-                  ;; $? must read the COMMAND'S status — a pipe to head
-                  ;; reports head's 0 (the r113 test catch). Capture into
-                  ;; a var first (shell arithmetic keeps the pipeline's
-                  ;; own status out of $?).
-                  (concat "cd " (fikra/thread/fikra-thread-shq dir)
-                          " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e")))
-           (code (fikra-ollama-exit-code raw))
-           (ok (string= code "0"))
-           (out (string-trim (fikra-ollama-strip-exit raw))))
-      (fikra/event/fikra-event-emit
-        (list (list "kind" "tool-result") (list "ok" ok)
-              (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
-      (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
-        (concat out (if ok "" (concat "\nexit code: " code)))) "},"))))
+      (list (list "kind" "tool-result") (list "ok" ok)
+            (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
+    (if (not cont)
+      (progn
+        (setq fikra-ollama-messages
+          (concat fikra-ollama-messages msg))
+        (fikra-ollama-chat fikra-ollama-pending-message))
+      (fikra-ollama-resume-from cont msg))))
+
+;; Resume run-calls from the stash's index (the message already
+;; appended).
+(defun fikra-ollama-resume-from (cont msg)
+  (let ((calls (car cont))
+        (i (car (cdr cont))))
+    ;; The completed message lands NOW (its position: right after the
+    ;; already-appended earlier results).
+    (setq fikra-ollama-messages
+      (concat fikra-ollama-messages msg))
+    (let ((results (fikra-ollama-run-calls calls i nil)))
+      (cond
+        ((and (symbolp results) (string= (symbol-name results) "parked")) nil)
+        ((and (symbolp results) (string= (symbol-name results) "async")) nil)
+        (t
+          (setq fikra-ollama-messages
+            (concat fikra-ollama-messages "" results))
+          (if (>= fikra-ollama-round fikra-ollama-max-rounds)
+            (progn
+              (setq fikra-ollama-pending-message nil)
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "text-delta")
+                      (list "speaker" "assistant")
+                      (list "text" "(tool round cap reached — stopping the loop)")))
+              (fikra/thread/fikra-thread-turn-end "completed"))
+            (fikra-ollama-chat fikra-ollama-pending-message)))))))
 
 ;; The trailing EXIT:N line's N.
 (defun fikra-ollama-exit-code (raw)
