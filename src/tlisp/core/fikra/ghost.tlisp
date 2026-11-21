@@ -14,6 +14,7 @@
 ;; to the first word boundary — bound in the insert keymap below), Esc
 ;; dismiss (the handler clears on leaving insert).
 
+(require-module fikra/event)
 (defvar fikra-ghost-source-name "fikra/ghost/fikra-ghost-source-none"
   "The completion source: none (default), local (buffer-context), or a
 custom function name taking the line prefix and returning a string/nil.")
@@ -277,12 +278,18 @@ sets on arrival). The model resolves from /api/tags on first use."
           ((string= c "\n") (concat acc bs "n"))
           (t (concat acc c)))))))
 
-;; The http filter (the primitive's callback): accumulate the body per id.
+;; The http filter (the primitive's callback): accumulate the body per id
+;; AND stamp ownership — the global completion dispatcher (below) routes
+;; by it (r108: the ollama chat backend shares the one bare global).
 (defun fikra-ghost-http-filter (id chunk-hex)
   (let ((k (number-to-string id)))
+    (editor/keymaps/keymap-mutable-set!
+      (editor/keymaps/keymap-named "fikra-http-owners") k
+      "fikra/ghost/fikra-ghost-http-complete")
     (editor/keymaps/keymap-mutable-set! fikra-ghost-http-bodies k
       (concat (hashmap-get fikra-ghost-http-bodies k) (hex-decode chunk-hex))))
   t)
+
 
 (defun fikra-ghost-strip-echo (resp prefix)
   (if (and prefix (>= (length resp) (length prefix))
@@ -328,6 +335,11 @@ sets on arrival). The model resolves from /api/tags on first use."
   (setq fikra-ghost-pending-line
     (concat (buffer-name) ":" (number-to-string (cursor-line))))
   (setq fikra-ghost-source-name "fikra/ghost/fikra-ghost-source-ollama")
+  ;; r108: the seed simulates the FIRE — ownership included (the
+  ;; dispatcher routes by it; the filter normally stamps it).
+  (editor/keymaps/keymap-mutable-set!
+    (editor/keymaps/keymap-named "fikra-http-owners")
+    (number-to-string id) "fikra/ghost/fikra-ghost-http-complete")
   id)
 
 ;; TEMP debug getter (remove before landing).
@@ -449,11 +461,3 @@ sets on arrival). The model resolves from /api/tags on first use."
 ;; land on moved ground — the mockup's 40ms budget is aspirational; the
 ;; contract is honesty about what arrived).
 
-;; The primitive's callback name is a BARE symbol — the GLOBAL dispatcher
-;; routes into the module (module defvars are invisible outside).
-(defun fikra-http-complete (id status data-hex)
-  (progn
-    (require-module "fikra/ghost")
-    (condition-case nil
-      (fikra/ghost/fikra-ghost-http-complete id status data-hex)
-      (error () nil))))

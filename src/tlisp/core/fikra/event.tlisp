@@ -1081,3 +1081,23 @@ text-deltas inside the batch join into the same line."
 
 (provide "fikra-event")
 )
+
+;; The OWNERSHIP registry — a NAMED KEYMAP (the cross-module mutable
+;; state mechanism; module-side bare names cannot see top-level defvars).
+;; Lives in event.tlisp's top level: EVERY fikra session loads event, so
+;; the bare-name global the http primitive evals is always defined
+;; (r108: it lived in ghost.tlisp — sessions that never loaded ghost
+;; could not route completions).
+(editor/keymaps/keymap-register "fikra-http-owners" (hashmap))
+
+;; The primitive's callback name is a BARE symbol — the GLOBAL dispatcher
+;; routes to the OWNING module's handler (stamped by its filter; unknown
+;; ids are a no-op — a foreign module's stragglers are not ours to read).
+(defun fikra-http-complete (id status data-hex)
+  (let ((owner (hashmap-get (editor/keymaps/keymap-named "fikra-http-owners")
+                            (number-to-string id))))
+    (if owner
+      (condition-case nil
+        (progn (funcall owner id status data-hex))
+        (error () nil))
+      nil)))

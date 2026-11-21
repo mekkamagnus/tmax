@@ -1,0 +1,216 @@
+(defmodule fikra/backend-ollama
+  (export fikra-backend-ollama-available-p fikra-backend-ollama-capabilities
+          fikra-backend-ollama-start-turn fikra-backend-ollama-abort
+          fikra-backend-ollama-model-get fikra-backend-ollama-http-filter
+          fikra-backend-ollama-complete
+          fikra-backend-ollama-seed)
+
+;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
+;; no CLI wrapper. The adapter hands the user's message here; this module
+;; drives the turn lifecycle ITSELF: turn-begin → the ASYNC /api/chat
+;; request (the hex-transport http primitive; the ownership dispatcher in
+;; ghost.tlisp routes the completion back here) → the reply renders as an
+;; assistant text-delta → turn-end. The MODEL resolves from /api/tags at
+;; first use (the first installed model; setq-free override via the
+;; thread-independent defvar default is NOT possible cross-module — the
+;; model-name getter exposes it, and the modeline reads it).
+;;
+;; Scope (r108): a pure chat turn — no tools, no mediation (the model is
+;; the loop's ONLY actor; the permission gate has nothing to gate). The
+;; tool-using native loop (§8.1's ⚙ rows driven by the model) is the named
+;; next step.
+
+(require-module fikra/event)
+(require-module fikra/thread)
+(require-module fikra/adapter)
+
+;; The ownership registry may not exist yet (ghost.tlisp registers it at
+;; ITS load; a session using only this backend never loads ghost).
+;; Re-registering would RESET the map — guard on absence.
+(if (not (editor/keymaps/keymap-named "fikra-http-owners"))
+  (editor/keymaps/keymap-register "fikra-http-owners" (hashmap)))
+
+(defvar fikra-ollama-url "http://localhost:11434"
+  "The local ollama server (module-internal; the same default the ghost
+completion source uses).")
+(defvar fikra-ollama-model nil
+  "The chat model. nil = resolve from /api/tags at first use.")
+(defvar fikra-ollama-bodies (hashmap)
+  "request-id → the accumulated response body (hex-decoded chunks).")
+
+(defun fikra-backend-ollama-available-p ()
+  "t when the local ollama answers /api/tags (a sync curl probe — the
+availability gate must be synchronous; the turn itself is async)."
+  (string-match "\"models\""
+    (shell-command
+      (concat "curl -s --max-time 2 " fikra-ollama-url "/api/tags 2>/dev/null"))))
+
+(defun fikra-backend-ollama-capabilities ()
+  ;; Honest: NON-streaming (stream:false — one landed reply), no
+  ;; permissions surface (a pure chat model; nothing to mediate).
+  (list (list "session-resume" nil)
+        (list "interactive-approvals" nil)
+        (list "streaming" nil)))
+
+(defun fikra-backend-ollama-model-get ()
+  "The resolved chat model (the modeline's backend segment reads it)."
+  fikra-ollama-model)
+
+;; ── the turn ─────────────────────────────────────────────────────────
+(defun fikra-backend-ollama-start-turn (message)
+  "Drive one RAW-API chat turn: turn-begin, fire the ASYNC /api/chat,
+  return 'pending (the completion callback renders the reply and ends
+  the turn). Model unknown → the tags request resolves it and its
+  completion re-fires the chat for the still-pending message."
+  (setq fikra-ollama-pending-message message)
+  (fikra/thread/fikra-thread-turn-begin)
+  ;; The model resolves SYNCHRONOUSLY (a light curl, like the probe) —
+  ;; no tags round-trip through the async machinery.
+  (if (not fikra-ollama-model)
+    (fikra-ollama-resolve-model))
+  (if fikra-ollama-model
+    (fikra-ollama-chat message)
+    (progn
+      (fikra/thread/fikra-thread-turn-end "error")
+      (editor-set-status "Fikra-ollama: no model installed")))
+  'pending)
+
+(defvar fikra-ollama-pending-message nil
+  "The message awaiting its reply (the land-time guard).")
+
+(defun fikra-ollama-chat (message)
+  ;; The messages payload: a system line + the user's message (the
+  ;; thread HISTORY replay into messages is the named follow-up).
+  (let* ((body (concat "{\"model\":\"" fikra-ollama-model
+                       "\",\"stream\":false,\"messages\":["
+                       "{\"role\":\"system\",\"content\":\"You are a concise coding assistant inside the tmax editor. Reply briefly.\"},"
+                       "{\"role\":\"user\",\"content\":" (fikra-ollama-json-string message)
+                       "}]}")))
+    ;; Content-Type matters: bun's fetch defaults a string body to
+    ;; text/plain — ollama 400s it (r108 live catch; curl -d worked).
+    (http-request (concat fikra-ollama-url "/api/chat")
+                  :method "POST"
+                  :body body
+                  :headers (list (list "Content-Type" "application/json"))
+                  :filter "fikra/backend-ollama/fikra-backend-ollama-http-filter")))
+
+;; JSON-string escaping (quotes + backslashes; runtime concat is
+;; reader-safe, the embedded chars must be JSON-escaped — hex-built
+;; backslash per the established idiom).
+(defun fikra-ollama-json-string (s)
+  (fikra-ollama-escape-scan s 0 ""))
+
+(defun fikra-ollama-escape-scan (s i acc)
+  (if (>= i (length s))
+    (concat "\"" acc "\"")
+    (let ((c (substring s i (+ i 1)))
+          (bs (hex-decode "5c")))
+      (fikra-ollama-escape-scan s (+ i 1)
+        (cond
+          ((string= c "\"") (concat acc bs (hex-decode "22")))
+          ((string= c bs) (concat acc bs bs))
+          ((string= c "\n") (concat acc bs "n"))
+          (t (concat acc c)))))))
+
+;; The http filter: stamp ownership + accumulate the body. A TAGS request
+;; is recognizable by its marker entry ("tags-<id>"); a chat request by a
+;; plain id.
+(defun fikra-backend-ollama-http-filter (id chunk-hex)
+  (let ((k (number-to-string id)))
+    (editor/keymaps/keymap-mutable-set!
+      (editor/keymaps/keymap-named "fikra-http-owners") k
+      "fikra/backend-ollama/fikra-backend-ollama-complete")
+    (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k
+      (concat (hashmap-get fikra-ollama-bodies k) (hex-decode chunk-hex)))
+    t))
+
+;; The completion handler (ownership-routed): a tags reply adopts the
+;; model and re-fires; a chat reply renders the assistant turn + ENDS it.
+(defun fikra-backend-ollama-complete (id status data-hex)
+  (let ((body (hashmap-get fikra-ollama-bodies (number-to-string id))))
+    (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies
+      (number-to-string id) nil)
+    (if (not (= status 200))
+      (progn
+        ;; The turn dies honestly: an error turn-end, a visible status.
+        (setq fikra-ollama-pending-message nil)
+        (fikra/thread/fikra-thread-turn-end "error")
+        (editor-set-status
+          (concat "Fikra-ollama: server unreachable (" (number-to-string status)
+                  ") " (substring (if body body "") 0 120))))
+      ;; The chat reply: {"message":{"role":"assistant","content":"..."}}
+      (let ((content (condition-case nil
+                        (fikra-ollama-alist-get "content"
+                          (fikra-ollama-alist-get "message"
+                            (json-read-from-string body)))
+                        (error () nil))))
+        (setq fikra-ollama-pending-message nil)
+        (if (and content (stringp content) (> (length content) 0))
+          (progn
+            (fikra/event/fikra-event-emit
+              (list (list "kind" "text-delta")
+                    (list "speaker" "assistant")
+                    (list "text" content)))
+            ;; The thread state machine settles the turn (emits turn-end).
+            (fikra/thread/fikra-thread-turn-end "completed")
+            (editor-set-status
+              (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
+          (progn
+            (fikra/thread/fikra-thread-turn-end "error")
+            (editor-set-status "Fikra-ollama: empty reply")))))))
+
+;; Model resolution: the tags body is small — the filter DID accumulate
+;; nothing for tags (marker-shaped); resolve via one sync curl instead
+;; (the availability probe already proved curl works).
+(defun fikra-ollama-resolve-model ()
+  (if fikra-ollama-model
+    fikra-ollama-model
+    (let ((name (condition-case nil
+                   (fikra-ollama-first-model-of
+                     (shell-command
+                       (concat "curl -s --max-time 3 " fikra-ollama-url "/api/tags 2>/dev/null")))
+                   (error () nil))))
+      (if (and name (stringp name) (> (length name) 0))
+        (setq fikra-ollama-model name))
+      fikra-ollama-model)))
+
+;; Parse the tags JSON for the first model name (a line scan — the
+;; transport is a runtime string; json-read-from-string handles it).
+(defun fikra-ollama-first-model-of (raw)
+  (let* ((parsed (json-read-from-string raw))
+         (models (fikra-ollama-alist-get "models" parsed)))
+    (if models
+      (fikra-ollama-alist-get "name" (car models))
+      nil)))
+
+(defun fikra-ollama-alist-get (key alist)
+  (let ((found nil))
+    (dolist (e alist)
+      (if (and (not found) (listp e) (= (length e) 2)
+               (string= (car e) key))
+        (setq found (car (cdr e)))))
+    found))
+
+(defun fikra-backend-ollama-abort ()
+  ;; The async request cannot be cancelled (the http primitive has no
+  ;; abort) — but the turn state settles: a late reply for an aborted
+  ;; turn is guarded by pending-message.
+  (if fikra-ollama-pending-message
+    (progn
+      (setq fikra-ollama-pending-message nil)
+      (fikra/thread/fikra-thread-turn-end "interrupted")
+      t)
+    nil))
+
+;; Test seam: drive the callbacks synthetically (no live server).
+(defun fikra-backend-ollama-seed (id)
+  (editor/keymaps/keymap-mutable-set!
+    (editor/keymaps/keymap-named "fikra-http-owners")
+    (number-to-string id) "fikra/backend-ollama/fikra-backend-ollama-complete")
+  id)
+
+;; Self-register
+(fikra/adapter/fikra-register-backend "ollama")
+
+(provide "fikra-backend-ollama")
+)

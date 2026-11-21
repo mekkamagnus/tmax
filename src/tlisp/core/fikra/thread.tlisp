@@ -62,10 +62,18 @@ else the daemon cwd (embedded editors — identical to legacy behavior).
 Always a string; threaded into thread creation and persisted as
 context-dir on the record."
   (let ((bf (buffer-filename)))
-    (if (and (stringp bf) (> (length bf) 0))
+    (if (and (stringp bf) (> (length bf) 0)
+             ;; r108: the daemon may carry a SCRATCH buffer whose file
+             ;; lived in a deleted tmax-save dir — a nonexistent dirname
+             ;; is no context (the r82 residual's real root).
+             (file-exists-p (fikra-thread-dirname bf)))
       (fikra-thread-dirname bf)
       (let ((cld (client-launch-dir)))
-        (if (and (stringp cld) (> (length cld) 0))
+        (if (and (stringp cld) (> (length cld) 0)
+                 ;; r108 (the r82 residual): an eval client's launch dir
+                 ;; can be a DELETED tmax-save scratch — a nonexistent dir
+                 ;; is no context; fall through to the daemon cwd.
+                 (file-exists-p cld))
           cld
           (process-cwd))))))
 

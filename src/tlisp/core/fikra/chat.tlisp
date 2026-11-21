@@ -108,6 +108,7 @@ context flakiness)."
   (minor-mode-set "fikra" t)
   (minor-mode-set-lighter "fikra"
     (concat "fikra:" (fikra/adapter/fikra-current-backend)
+            (fikra-lighter-model-segment)
             (fikra/modes/fikra-lighter-state-char)
             ":" (fikra/modes/fikra-effective-mode)
             ;; Mockup 8.1 modeline: the L-level rides after the mode
@@ -128,6 +129,20 @@ context flakiness)."
             ;; parked behind it (r85 — the single-pending model until
             ;; #222's child threads; honest count of what is queued).
             (fikra-lighter-queued-segment))))
+
+;; The backend's MODEL when it exposes one (mockup: "backend: ollama
+;; (qwen2.5-coder:32b)") — a generic lookup; backends without a model
+;; stay bare.
+(defun fikra-lighter-model-segment ()
+  (let ((be (fikra/adapter/fikra-current-backend)))
+    (if (or (string= be "none") (not be))
+      ""
+      (let ((m (condition-case nil
+                  (funcall (concat "fikra-backend-" be "-model-get"))
+                  (error () nil))))
+        (if (and m (stringp m) (> (length m) 0))
+          (concat " (" m ")")
+          "")))))
 
 (defun fikra-lighter-level-segment ()
   (require-module fikra/modes)
