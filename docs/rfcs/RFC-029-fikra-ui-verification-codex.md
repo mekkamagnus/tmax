@@ -930,3 +930,11 @@ The standing 6 predated the screen's r24-r37 evolution (verified patch generatio
 - **r101 (`f1e324f`, PASS 9/10)**: honest labels (SPC a R opens the diff; r reverts inside), the buffer-based open-check (the stale view-turn defvar ghost-stepped), the real two-turn walk.
 
 **8.4 closes at 9.** Remaining P3s are the disclosed divergences. Board: **66/80** (8.1 7, 8.2 7, 8.3 8, 8.4 9, 8.5 7, 8.6 10, 8.7 9, 8.8 9).
+
+## Rounds 102-104 — the 8.5 merged/fixture sub-arc (8.5: 7 → 10)
+
+- **r102 (`8a9dc86`, 6/10)**: the merged-via-patch stamp (a successful review-apply marks the thread) + the fixture markers (replay/pausing rows: — / fixture / deterministic annotation). Codex's probes found the lifecycle holes.
+- **r103 (`9064c19`, 8/10)**: persistence (the field serializes + loads — a reload keeps the row), re-entry clearing (a new worktree cycle starts clean), and the mockup row shape (the merged row KEEPS worktree ✓; the marker rides the last column).
+- **r104 (`f837c33`, PASS 10/10)**: location precedence — a real worktree beats the fixture label (fixture overrides only plain main-tree rows).
+
+**8.5 closes at 10.** Board: **69/80** (8.1 7, 8.2 7, 8.3 8, 8.4 9, 8.5 10, 8.6 10, 8.7 9, 8.8 9).
