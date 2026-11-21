@@ -1653,6 +1653,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const cwdArg = kwargs['cwd'];
           const envArg = kwargs['env'];
           const ptyArg = kwargs['pty'];
+          // #293: the child's self-reported pgid file (deterministic
+          // session identity for :pty runs).
+          let ptyPgidFile: string | null = null;
 
           if (!commandArg) return Either.left(createValidationError('FormatError', 'make-process requires :command argument'));
 
@@ -1684,9 +1687,17 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             // (codex r1's injection-class catch).
             const shq = (s2: string) => `'${s2.replace(/'/g, `'\\''`)}'`;
             const inner = command.map(shq).join(' ');
+            // #293 codex r5: DETERMINISTIC session identity — the child
+            // reports its own pgid to a per-spawn temp file before
+            // exec'ing the real command (ps-snapshot discovery is
+            // timing-sensitive; reparenting makes late recovery
+            // impossible).
+            ptyPgidFile = `/tmp/tmax-pty-pgid-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
             command = process.platform === 'darwin'
-              ? ['/usr/bin/script', '-q', '/dev/null', ...command]
-              : ['/usr/bin/script', '-qec', inner, '/dev/null'];
+              ? ['/usr/bin/script', '-q', '/dev/null', '/bin/sh', '-c',
+                 `echo $$ > ${ptyPgidFile}; exec "$@"`, '--', ...command]
+              : ['/usr/bin/script', '-qec',
+                 `echo $$ > ${ptyPgidFile}; exec "$@" -- ${inner}`, '/dev/null'];
           }
 
           // #208 (RFC-027 §D3/§D7): :cwd sets the process working directory
@@ -1787,6 +1798,14 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // ps-based discovery; re-checked twice for slow starts).
               const capturePtyChild = () => {
                 try {
+                  // Deterministic path first: the child's self-report.
+                  if (ptyPgidFile) {
+                    try {
+                      const rep = Bun.spawnSync(['cat', ptyPgidFile], { stdout: 'pipe' });
+                      const selfPgid = Number(new TextDecoder().decode(rep.stdout).trim());
+                      if (selfPgid > 0) { ptyChildPgid = selfPgid; return; }
+                    } catch { /* not written yet */ }
+                  }
                   const wpid = (proc as { pid?: number }).pid;
                   if (!wpid) return;
                   // PORTABLE child discovery: macOS/BSD ps has NO

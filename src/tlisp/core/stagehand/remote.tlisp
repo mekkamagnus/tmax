@@ -204,7 +204,9 @@ close the popup)."
           (while (and (< guard 10) (not (= (window-current) pos)))
             (editor/commands/windows/other-window)
             (setq guard (+ guard 1))))
-        t)
+        ;; t ONLY when focus actually reached the popup (the r5 catch:
+        ;; a 10-cycle miss must not authorize a delete).
+        (if (= (window-current) pos) t nil))
       nil)))
 
 (defun stagehand-remote-ensure-popup ()
