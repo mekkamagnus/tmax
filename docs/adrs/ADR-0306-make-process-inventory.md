@@ -16,10 +16,14 @@ as-built surface and the REAL gaps, each routed to its own issue.
 ## The as-built surface (verified in `src/editor/tlisp-api.ts`)
 
 - **`make-process`** (line ~1594): argv command + args; `:cwd`, `:env`
-  kwargs; a `:filter` callback (line-buffered streaming — the fikra
-  claude backend drives whole turns through it); a `:sentinel`
-  callback (exit + pid — the authoritative turn end). Returns the pid.
-- **`process-write`** (line ~1754): stdin writes (pid, data).
+  kwargs; a `:filter` callback receiving CHUNKED stdout/stderr (NOT
+  line-buffered — the fikra backend's filter itself reassembles lines
+  from raw chunks, the #208 serialized-filter contract); a
+  `:sentinel` callback (exit-code + pid, chained after ALL filter
+  evals settle — post-sentinel output is possible in principle and is
+  dropped by the fikra reassembly, not the primitive). Returns the
+  per-editor PROCESS-TABLE handle (an internal id, not the OS pid).
+- **`process-write`** (line ~1754): stdin writes (table-handle, data).
 - **Signals**: kill via the signal surface; the generation-guard
   discipline (a stale pid is never signaled) is #308's contract.
 
@@ -33,8 +37,7 @@ production-exercised daily.
   like ssh/sudo) — MISSING → **#293** owns it.
 - ❌ **Filesystem watching** (a `Bun.watch` exposure to T-Lisp —
   RFC-028/logseq-mode wants buffer revert-on-change) — MISSING →
-  **filed as its own issue on landing** (no current consumer beyond
-  the RFC's want).
+  **#329 (FILED)**, no current consumer beyond the RFC's want.
 - ❌ **Process groups / signal variety** — NOT verified as needed by
   any current consumer → **recorded as "no consumer; do not build"**
   (YAGNI; revisit when a real consumer appears).
