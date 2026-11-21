@@ -116,6 +116,8 @@
   (require-module stagehand/stage)
   ;; #290: log/show/checkout (consumes status + diff).
   (require-module stagehand/log)
+  ;; #293: push/pull over a PTY.
+  (require-module stagehand/remote)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.

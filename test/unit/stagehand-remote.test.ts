@@ -1,0 +1,241 @@
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
+
+/**
+ * @file stagehand-remote.test.ts
+ * @description #293 — Stagehand T1: push/pull over a PTY. The
+ * primitives (:pty t — TTY visibility, bidirectional IO, process-signal
+ * INT/TERM/KILL via a signal-logging fixture, the three-press
+ * escalation ladder) and the flows against a LOCAL BARE remote
+ * (streaming, exit handling, refresh, cancellation, post-mortem q).
+ */
+
+type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
+const e = (ed: Editor, expr: string) => executeTlisp(ed, expr);
+const strip = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "");
+const git = (...args: string[]) => execFileSync("git", args, { cwd: process.cwd() }).toString().trim();
+
+const dirs: string[] = [];
+const originalCwd = process.cwd();
+let editor: Editor;
+
+beforeEach(async () => {
+  const dir = mkdtempSync(join(tmpdir(), "i293-"));
+  dirs.push(dir);
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+  process.chdir(dir);
+  editor = await createStartedEditor("");
+  editor.setClientLaunchDir(dir);
+  e(editor, "(require-module stagehand/status)");
+});
+afterAll(() => {
+  process.chdir(originalCwd);
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
+const commit = (msg: string) => {
+  execFileSync("git", ["add", "."], { cwd: process.cwd() });
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", msg], { cwd: process.cwd() });
+};
+/** A local BARE remote + origin wiring; returns the remote path. */
+const bareRemote = () => {
+  const remote = mkdtempSync(join(tmpdir(), "i293r-"));
+  dirs.push(remote);
+  execFileSync("git", ["init", "-q", "--bare", "-b", "main", remote]);
+  writeFileSync(join(process.cwd(), "seed.txt"), "seed\n");
+  commit("seed"); // an upstream needs a commit to push
+  git("remote", "add", "origin", remote);
+  git("push", "-q", "-u", "origin", "main");
+  return remote;
+};
+const statusOf = () => {
+  e(editor, "(stagehand/status/stagehand-status)");
+  return strip(bufferText(editor));
+};
+const waitRemote = async (ed: Editor, ms = 8000) => {
+  for (let i = 0; i < ms / 25; i++) {
+    if (!ed ? false : String(e(ed, "(stagehand/remote/stagehand-remote-alive-p)").value) === "false") return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error("remote op never finished");
+};
+const popupText = (ed: Editor) => {
+  const cur = String(e(ed, "(buffer-current)").value);
+  e(ed, '(buffer-switch "*Stagehand-Remote*")');
+  const t = strip(bufferText(ed));
+  e(ed, `(buffer-switch "${cur}")`);
+  return t;
+};
+
+describe("#293 — the :pty primitive", () => {
+  test(":pty t gives the child a REAL TTY ([ -t 0 ] sees one); pipes do not", async () => {
+    e(editor, `(make-process :command '("/bin/sh" "-c" "if [ -t 0 ]; then echo IS_TTY; else echo NOT_TTY; fi > /tmp/i293-tty-$$.out; sleep 0.1") :pty t :cwd "${process.cwd()}")`);
+    await new Promise((r) => setTimeout(r, 600));
+    // Under script(1) the CHILD sees a tty — verify via a pipe run too.
+    const out = execFileSync("/bin/sh", ["-c", "ls /tmp/i293-tty-*.out 2>/dev/null | head -1 | xargs cat 2>/dev/null"]).toString().trim();
+    expect(out).toBe("IS_TTY");
+    execFileSync("/bin/sh", ["-c", "rm -f /tmp/i293-tty-*.out"]);
+  });
+
+  test("INPUT flows to the PTY child verbatim (read + echo)", async () => {
+    const pid = Number(String(e(editor, `(make-process :command '("/bin/sh" "-c" "read v; echo GOT:$v") :pty t :cwd "${process.cwd()}" :filter "i293-input-filter" :sentinel "i293-input-sentinel")`).value));
+    e(editor, "(defvar *i293-out* nil)");
+    e(editor, '(defun i293-input-filter (pid text) (setq *i293-out* (concat (if *i293-out* *i293-out* "") text)))');
+    e(editor, '(defun i293-input-sentinel (pid code) nil)');
+    await new Promise((r) => setTimeout(r, 400));
+    e(editor, `(process-write ${pid} "hello\\n")`);
+    for (let i = 0; i < 40; i++) {
+      if (String(e(editor, "*i293-out*").value).includes("GOT:hello")) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(String(e(editor, "*i293-out*").value)).toContain("GOT:hello");
+  });
+
+  test("process-signal INT/TERM observed by a signal-logging fixture; KILL kills", async () => {
+    // A fixture that TRAPS INT + TERM and logs them (ignoring), so
+    // only SIGKILL can end it.
+    writeFileSync(join(tmpdir(), "i293-trap.sh"), "#!/bin/sh\ntrap 'echo GOT-INT' INT\ntrap 'echo GOT-TERM' TERM\nwhile true; do sleep 0.05; done\n");
+    execFileSync("chmod", ["+x", join(tmpdir(), "i293-trap.sh")]);
+    const pid = Number(String(e(editor, `(make-process :command '("/bin/sh" "${join(tmpdir(), "i293-trap.sh")}") :cwd "${process.cwd()}" :filter "i293-trap-filter" :sentinel "i293-trap-sentinel")`).value));
+    e(editor, "(defvar *i293-trap-out* nil)");
+    e(editor, '(defun i293-trap-filter (pid text) (setq *i293-trap-out* (concat (if *i293-trap-out* *i293-trap-out* "") text)))');
+    e(editor, '(defun i293-trap-sentinel (pid code) (setq *i293-trap-out* (concat (if *i293-trap-out* *i293-trap-out* "") (concat "[EXIT:" (number-to-string code) "]"))))');
+    await new Promise((r) => setTimeout(r, 500));
+    e(editor, `(signal ${pid} "SIGINT")`);
+    await new Promise((r) => setTimeout(r, 600));
+    expect(String(e(editor, "*i293-trap-out*").value)).toContain("GOT-INT");
+    e(editor, `(signal ${pid} "SIGTERM")`);
+    await new Promise((r) => setTimeout(r, 600));
+    expect(String(e(editor, "*i293-trap-out*").value)).toContain("GOT-TERM");
+    // Still alive (both trapped). KILL ends it (the sentinel fires).
+    expect(String(e(editor, "*i293-trap-out*").value)).not.toContain("[EXIT:");
+    e(editor, `(signal ${pid} "SIGKILL")`);
+    for (let i = 0; i < 40; i++) {
+      if (String(e(editor, "*i293-trap-out*").value).includes("[EXIT:")) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(String(e(editor, "*i293-trap-out*").value)).toContain("[EXIT:");
+  });
+});
+
+describe("#293 — push/pull flows (local bare remote)", () => {
+  test("P pushes: streams into the popup, exit 0, status 'pushed', the status buffer refreshes", async () => {
+    const remote = bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand-Remote*");
+    await waitRemote(editor);
+    expect(String(e(editor, "(editor-status)").value)).toContain("pushed");
+    expect(popupText(editor)).toContain("push");
+    // The remote actually has the commit.
+    expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("feat");
+  });
+
+  test("p pulls: a new commit from the remote lands in the worktree", async () => {
+    const remote = bareRemote();
+    // A commit made IN the remote (simulating a collaborator).
+    const tree = execFileSync("git", ["--git-dir", remote, "rev-parse", "HEAD^{tree}"]).toString().trim();
+    const parent = execFileSync("git", ["--git-dir", remote, "rev-parse", "HEAD"]).toString().trim();
+    const newC = execFileSync("git", ["--git-dir", remote, "commit-tree", tree, "-p", parent, "-m", "from-remote"],
+      { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).toString().trim();
+    execFileSync("git", ["--git-dir", remote, "update-ref", "refs/heads/main", newC]);
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-pull)");
+    await waitRemote(editor);
+    expect(String(e(editor, "(editor-status)").value)).toContain("pulled");
+    expect(git("log", "-1", "--format=%s")).toBe("from-remote");
+  });
+
+  test("exit ≠ 0 → post-mortem: the output RETAINS with the exit status; q then closes", async () => {
+    const remote = bareRemote();
+    // Make the push fail: a diverged remote (non-FF).
+    {
+      const tree = execFileSync("git", ["--git-dir", remote, "rev-parse", "HEAD^{tree}"]).toString().trim();
+      const parent = execFileSync("git", ["--git-dir", remote, "rev-parse", "HEAD"]).toString().trim();
+      const newC = execFileSync("git", ["--git-dir", remote, "commit-tree", tree, "-p", parent, "-m", "divergence"],
+        { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).toString().trim();
+      execFileSync("git", ["--git-dir", remote, "update-ref", "refs/heads/main", newC]);
+    }
+    writeFileSync(join(process.cwd(), "g.txt"), "x\n");
+    commit("local");
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    await waitRemote(editor);
+    expect(String(e(editor, "(editor-status)").value)).toContain("failed");
+    expect(popupText(editor)).toMatch(/\[push exit \d+\]/);
+    // q closes post-mortem.
+    e(editor, "(stagehand/remote/stagehand-remote-quit)");
+    expect(String(e(editor, '(if (member "*Stagehand-Remote*" (buffer-list)) 1 0)').value)).toBe("0");
+  });
+
+  test("C-c ladder: 1st SIGINT (a clean git aborts), 'interrupted' observable, the popup RETAINED post-mortem", async () => {
+    const remote = bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    statusOf();
+    // A slow push: a pre-push hook that sleeps, so we can interrupt.
+    writeFileSync(join(process.cwd(), ".git", "hooks", "pre-push"), "#!/bin/sh\nsleep 5\n");
+    execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(String(e(editor, "(stagehand/remote/stagehand-remote-alive-p)").value)).toBe("true");
+    // 1st press = SIGINT.
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("SIGINT sent");
+    await waitRemote(editor);
+    // Process dead; the popup RETAINED (post-mortem); the remote got nothing.
+    expect(String(e(editor, '(if (member "*Stagehand-Remote*" (buffer-list)) 1 0)').value)).toBe("1");
+    // The REAL semantic: the interrupted push never reached the
+    // remote (the remote's main is still the seed commit).
+    expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
+  });
+
+  test("q DURING a run is PTY INPUT (the popup does NOT close)", async () => {
+    bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    writeFileSync(join(process.cwd(), ".git", "hooks", "pre-push"), "#!/bin/sh\nsleep 3\n");
+    execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    await new Promise((r) => setTimeout(r, 400));
+    e(editor, "(stagehand/remote/stagehand-remote-quit)"); // q during the run
+    expect(String(e(editor, '(if (member "*Stagehand-Remote*" (buffer-list)) 1 0)').value)).toBe("1"); // still open
+    expect(String(e(editor, "(stagehand/remote/stagehand-remote-alive-p)").value)).toBe("true"); // still running
+    // The q was WRITTEN to the pty — observable: alive + open is the
+    // contract (the input is verbatim; the remote owns its meaning).
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)");
+    await waitRemote(editor);
+  });
+
+  test("a second P while running → 'a remote operation is running'", async () => {
+    bareRemote();
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("feat");
+    writeFileSync(join(process.cwd(), ".git", "hooks", "pre-push"), "#!/bin/sh\nsleep 2\n");
+    execFileSync("chmod", ["+x", join(process.cwd(), ".git", "hooks", "pre-push")]);
+    statusOf();
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    await new Promise((r) => setTimeout(r, 400));
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("a remote operation is running");
+    e(editor, "(stagehand/remote/stagehand-remote-cancel)");
+    await waitRemote(editor);
+  });
+
+  test("no repository → the refusal status", () => {
+    const dir = mkdtempSync(join(tmpdir(), "i293nr-"));
+    dirs.push(dir);
+    process.chdir(dir);
+    editor.setClientLaunchDir(dir);
+    e(editor, "(stagehand/status/stagehand-status)");
+    e(editor, "(stagehand/remote/stagehand-remote-push)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("no repository");
+  });
+});

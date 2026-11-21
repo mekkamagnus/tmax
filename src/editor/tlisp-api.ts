@@ -1652,6 +1652,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const sentinelFn = kwargs['sentinel'];
           const cwdArg = kwargs['cwd'];
           const envArg = kwargs['env'];
+          const ptyArg = kwargs['pty'];
 
           if (!commandArg) return Either.left(createValidationError('FormatError', 'make-process requires :command argument'));
 
@@ -1662,6 +1663,25 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             command = ['/bin/sh', '-c', String(commandArg.value)];
           } else {
             return Either.left(createValidationError('TypeError', ':command must be a list or string'));
+          }
+
+          // #293: :pty t — spawn under a REAL pseudo-terminal via the
+          // platform `script(1)` wrapper (the child sees a TTY; stdin
+          // forwards through script's pty; output carries terminal
+          // CRLF). node-pty was tried and REJECTED: its native read
+          // loop never delivers under Bun (spawn succeeds, onData
+          // stays silent) — ADR-0312 records the finding. Signals
+          // reach the child through the process GROUP (the detached
+          // spawn puts script + child in one group; `signal` kills
+          // -pid already). NOTE: T-Lisp `t` arrives as a SYMBOL.
+          const ptyOn = ptyArg && (
+            (ptyArg.type === 'boolean' && ptyArg.value === true) ||
+            (ptyArg.type === 'symbol' && String(ptyArg.value) === 't'));
+          if (ptyOn) {
+            const inner = command.join(' ');
+            command = process.platform === 'darwin'
+              ? ['/usr/bin/script', '-q', '/dev/null', ...command]
+              : ['/usr/bin/script', '-qec', inner, '/dev/null'];
           }
 
           // #208 (RFC-027 §D3/§D7): :cwd sets the process working directory

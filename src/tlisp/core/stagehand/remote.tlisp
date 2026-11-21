@@ -1,0 +1,193 @@
+(defmodule stagehand/remote
+  (export stagehand-remote-push stagehand-remote-pull
+          stagehand-remote-input stagehand-remote-cancel
+          stagehand-remote-quit stagehand-remote-filter
+          stagehand-remote-sentinel stagehand-remote-buffer-name
+          stagehand-remote-alive-p stagehand-remote-last-exit)
+
+  (require-module stagehand/status)
+
+;; #293 — Stagehand T1: PUSH/PULL over a PTY. `P`/`p` in the status
+;; buffer spawn `git push`/`git pull` under make-process's :pty t (the
+;; script(1) wrapper — the child sees a TTY, so credential prompts
+;; work) with the project root as :cwd. Output streams into the
+;; *Stagehand-Remote* popup (the capture geometry: a bottom split).
+;; INPUT: printable keys + Enter go to the PTY VERBATIM via
+;; process-write while the popup is focused (the editor interprets
+;; nothing). CANCELLATION: C-c only — the escalation ladder (SIGINT →
+;; 1s → SIGTERM → 1s → SIGKILL, each step a FRESH press; the user is
+;; the trigger). q closes the popup AFTER process exit only; a
+;; running-process q is delivered to the PTY verbatim (ordinary
+;; input). exit 0 → pushed/pulled + status refresh; exit ≠ 0 → the
+;; popup retains the output with the exit in the status (post-mortem)
+;; until q.
+
+(major-mode-register "stagehand-remote" '() nil)
+(major-mode-doc "stagehand-remote" "Stagehand remote (push/pull over a PTY) — type at the remote; C-c interrupts (the ladder); q closes after exit")
+
+(defvar stagehand-remote-pid nil
+  "The live remote process's handle (nil when none).")
+(defvar stagehand-remote-exit nil
+  "The last run's exit code (nil while running).")
+(defvar stagehand-remote-presses 0
+  "The C-c press count for the escalation ladder (reset per run).")
+(defvar stagehand-remote-mode "push"
+  "The active run's mode: push | pull.")
+
+(defun stagehand-remote-buffer-name () "*Stagehand-Remote*")
+
+;; ── the entry points ────────────────────────────────────────────────
+(defun stagehand-remote-push ()
+  "P — push over a PTY into the popup."
+  (interactive)
+  (stagehand-remote-run "push"))
+
+(defun stagehand-remote-pull ()
+  "p — pull over a PTY into the popup."
+  (interactive)
+  (stagehand-remote-run "pull"))
+
+(defun stagehand-remote-run (mode)
+  (let ((root (stagehand/status/stagehand-status-root)))
+    (if (null root)
+      (editor-set-status "Stagehand: no repository")
+      (if (stagehand-remote-alive-p)
+        (editor-set-status "Stagehand: a remote operation is running")
+        (progn
+          (setq stagehand-remote-mode mode)
+          (setq stagehand-remote-exit nil)
+          (setq stagehand-remote-presses 0)
+          (stagehand-remote-ensure-popup)
+          (stagehand-remote-clear)
+          (buffer-append (concat mode " — running…\n"))
+          (let ((pid (make-process
+                       :command (list "git" mode)
+                       :cwd root
+                       :pty t
+                       :filter "stagehand/remote/stagehand-remote-filter"
+                       :sentinel "stagehand/remote/stagehand-remote-sentinel")))
+            (setq stagehand-remote-pid pid)
+            (editor-set-status (concat "Stagehand: " mode " running — C-c interrupts"))))))))
+
+;; ── the stream ──────────────────────────────────────────────────────
+(defun stagehand-remote-filter (pid output)
+  "Stream PTY output into the popup (the temporary-switch append —
+the #290 finding)."
+  (stagehand-remote-append output))
+
+(defun stagehand-remote-sentinel (pid exit-code)
+  "The exit: 0 → the done status + a status-buffer refresh; ≠ 0 →
+post-mortem (the output stays; the exit rides the status) until q."
+  (setq stagehand-remote-pid nil)
+  (setq stagehand-remote-exit exit-code)
+  (if (and (numberp exit-code) (= exit-code 0))
+    (progn
+      (stagehand-remote-append (concat "\n[" stagehand-remote-mode " ok]\n"))
+      (editor-set-status (concat "Stagehand: "
+        (if (string= stagehand-remote-mode "push") "pushed" "pulled")))
+      (condition-case nil (stagehand/status/stagehand-status-refresh) (error () nil)))
+    (progn
+      (stagehand-remote-append
+        (concat "\n[" stagehand-remote-mode " exit " (number-to-string exit-code) "]\n"))
+      (editor-set-status
+        (concat "Stagehand: " stagehand-remote-mode " failed ("
+          (number-to-string exit-code) ") — output retained (q closes)")))))
+
+(defun stagehand-remote-alive-p ()
+  "t while a remote run's process is live."
+  (not (null stagehand-remote-pid)))
+
+(defun stagehand-remote-last-exit ()
+  "The last run's exit code (nil while running) — a VALUE getter."
+  stagehand-remote-exit)
+
+;; ── input (verbatim to the PTY) ─────────────────────────────────────
+(defun stagehand-remote-input (key)
+  "A printable key or Enter, written VERBATIM to the PTY (the editor
+  interprets nothing — the user is typing at the remote)."
+  (if (stagehand-remote-alive-p)
+    (process-write stagehand-remote-pid key)
+    (editor-set-status "Stagehand: no remote running")))
+
+;; ── cancellation (C-c only; the escalation ladder) ──────────────────
+(defun stagehand-remote-cancel ()
+  "C-c — the ladder, each step a FRESH press with a 1s wait:
+1st → SIGINT; still alive + 2nd → SIGTERM; still alive + 3rd →
+SIGKILL (the popup shows 'killed'). No automatic escalation — the
+USER is the trigger."
+  (if (not (stagehand-remote-alive-p))
+    (editor-set-status "Stagehand: no remote running")
+    (progn
+      (setq stagehand-remote-presses (+ stagehand-remote-presses 1))
+      (let ((sig (cond
+                   ((= stagehand-remote-presses 1) "SIGINT")
+                   ((= stagehand-remote-presses 2) "SIGTERM")
+                   (t "SIGKILL"))))
+        (signal stagehand-remote-pid sig)
+        (editor-set-status
+          (concat "Stagehand: " sig " sent (press "
+            (number-to-string stagehand-remote-presses) ")"))))))
+
+;; ── the popup ───────────────────────────────────────────────────────
+(defun stagehand-remote-quit ()
+  "q — close the popup AFTER process exit only; during a run q is
+ordinary PTY input (it reaches the remote verbatim and does NOT
+close the popup)."
+  (if (stagehand-remote-alive-p)
+    (stagehand-remote-input "q")
+    (progn
+      (buffer-kill (stagehand-remote-buffer-name))
+      (editor-set-status "Stagehand: remote popup closed"))))
+
+(defun stagehand-remote-ensure-popup ()
+  ;; The capture geometry: a bottom split, the popup in the lower pane.
+  (if (not (member (stagehand-remote-buffer-name) (buffer-list)))
+    (buffer-create (stagehand-remote-buffer-name)))
+  (split-window-below)
+  (window-move-focus "down")
+  (switch-to-buffer (stagehand-remote-buffer-name))
+  (major-mode-set "stagehand-remote")
+  (buffer-set-read-only nil)
+  (editor-set-mode "normal")
+  (stagehand-remote-ensure-keymap))
+
+(defun stagehand-remote-append (text)
+  (condition-case nil
+    (if (string= (buffer-current) (stagehand-remote-buffer-name))
+      (buffer-append text)
+      (let ((prev (buffer-current)))
+        (buffer-switch (stagehand-remote-buffer-name))
+        (buffer-append text)
+        (buffer-switch prev)))
+    (error () nil)))
+
+(defun stagehand-remote-clear ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+(defun stagehand-remote-ensure-keymap ()
+  ;; Input keys: single printable chars + Enter feed the PTY; C-c the
+  ;; ladder; q the post-exit close. Bound as a generating function is
+  ;; not available — the status buffer's normal-mode keys are NOT here
+  ;; (the popup sets editor mode to terminal-style input via the
+  ;; keymap's catch-alls): in v1 the INPUT entry points are exported
+  ;; and bound to the raw keys via the generic dispatch below.
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-remote-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-remote"))
+        (editor/keymaps/keymap-set-key kmap "C-c" "(stagehand/remote/stagehand-remote-cancel)")
+        (editor/keymaps/keymap-set-key kmap "q" "(stagehand/remote/stagehand-remote-quit)")
+        (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/remote/stagehand-remote-input-enter)")
+        (editor/keymaps/buffer-set-keymap (stagehand-remote-buffer-name) kmap))))
+  t)
+
+(defun stagehand-remote-input-enter ()
+  "Enter → a newline to the PTY."
+  (stagehand-remote-input "\n"))
+
+(provide "stagehand-remote"))

@@ -470,12 +470,13 @@ describe("#286 — folding + navigation", () => {
     expect(String(e(editor, "(major-mode-get)").value)).toBe("stagehand-status");
     const line = () => Number(String(e(editor, "(cursor-line)").value));
     expect(line()).toBe(2);
-    // n moves down a visible row; p moves back.
+    // n moves down a visible row. (p no longer navigates: #293's
+    // contract assigns p = pull in the status buffer — the later
+    // issue owns the overlapping key; prev stays on the exported fn.)
     await editor.handleKey("n");
     expect(line()).toBe(3);
-    await editor.handleKey("p");
-    expect(line()).toBe(2);
-    // TAB on the Untracked header folds it (the file rows vanish).
+    // TAB on the Untracked header (back on line 2) folds it.
+    e(editor, "(cursor-move 2 0)");
     await editor.handleKey("Tab");
     expect(statusText(editor)).not.toContain("?? a.txt");
     expect(String(e(editor, '(stagehand/status/stagehand-status-folded-p "Untracked")').value)).toBe("true");
