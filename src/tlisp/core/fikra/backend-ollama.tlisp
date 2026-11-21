@@ -524,9 +524,17 @@ availability gate must be synchronous; the turn itself is async)."
                           (fikra-ollama-chat fikra-ollama-pending-message))
                         (fikra-ollama-resume-from cont msg))))
                   (error (m)
-                    (editor-set-status (concat "Fikra-ollama: async resume failed — " m))
-                    (if (fikra-ollama-turn-live-p)
-                      (fikra/thread/fikra-thread-turn-end "error"))
+                    ;; r131d (codex r131c catch): the handler itself
+                    ;; must not throw — a failing turn-end (an
+                    ;; unwritable event log) skipped the focus restore
+                    ;; below and stranded the turn. Best effort, then
+                    ;; restore regardless.
+                    (condition-case nil
+                      (progn
+                        (editor-set-status (concat "Fikra-ollama: async resume failed — " m))
+                        (if (fikra-ollama-turn-live-p)
+                          (fikra/thread/fikra-thread-turn-end "error")))
+                      (error () nil))
                     'sentinel-error))))
           (condition-case nil
             (if (and home (not (string= home prev)))
