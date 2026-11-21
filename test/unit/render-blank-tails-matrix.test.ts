@@ -306,6 +306,30 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     expect(col).toBeLessThan(10); // the display column (a + space + Z), not 15
   });
 
+  test("#321 codex r5: links BEFORE and AFTER the cursor — counting, cursor, and wire all on display text", () => {
+    // Long raw links display as 'a': rowsOf must count DISPLAY rows, the
+    // cursor must sit on its rendered row, and the wire must cover the
+    // frame (no blank tail).
+    const lines: string[] = [];
+    for (let i = 0; i < 99; i++) lines.push(i === 40 ? "cursor-line-here" : `[[some/long/page-${i}|a]] tail`);
+    lines.push("L99 TAIL end");
+    const state = makeState(lines, true, 40, 22);
+    const md = { ...state, currentMajorMode: "markdown", currentFilename: "note.md", activeMinorModes: ["wiki-link-display"] };
+    // 1) The cursor row: display rows are ~1/line → row 40 fits on screen
+    //    (the RAW count would push it far below the fold).
+    expect(getWrappedCursorRow(md as any, 22, 100)).toBeLessThan(22);
+    // 2) The wire covers the advanced frame: through the wire, no long
+    //    blank tail in the buffer area.
+    const wire = editorStateToJson(md as any, 22, 100);
+    const view = jsonToEditorState(wire);
+    const frame = captureFrame(view, 100, 24);
+    const bufRows = frame.slice(0, frame.length - 1);
+    let blanks = 0;
+    for (let i = bufRows.length - 1; i >= 0 && bufRows[i]!.trim() === ""; i--) blanks++;
+    expect(blanks).toBeLessThan(4);
+    expect(frame.join("\n").replace(/\u001b\[[0-9;]*m/g, "")).toContain("cursor-line-here"); // faces stripped
+  });
+
 /** Exposed for the fix-phase test + recording: the matrix table. */
 export function matrixTable(): string {
   return ["| N | rows x cols | wrap | path | tail | blank-tail-rows |",

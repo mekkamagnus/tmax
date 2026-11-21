@@ -1,4 +1,5 @@
 import { TextBufferImpl } from "../core/buffer.ts";
+import { wikiDisplayActive, transformWikiLine } from "../frontend/render/wiki-display.ts";
 import type { EditorState, Tab, Window } from "../core/contracts/editor.ts";
 import type { TextBuffer } from "../core/contracts/buffer.ts";
 import { Either } from "../utils/task-either.ts";
@@ -206,12 +207,23 @@ export function editorStateToJson(
       // viewport advance starts at/near the cursor line, so a window that
       // stops at the cursor leaves the advanced frame's tail blank (codex:
       // the reproduced cursor-21-on-100 case).
+      const dispText = (ln: number): string => {
+        const lineResult = buffer.getLine(ln);
+        const text = lineResult && lineResult._tag === "Right" ? lineResult.right : "";
+        // #321 (codex r5): the DISPLAY text — the wiki-link transform
+        // applies before wrapping (links displaying short made the raw
+        // estimate over-send yet still miss the real layout).
+        if (wikiDisplayActive(state)) {
+          const t = transformWikiLine(text, undefined);
+          if (t.changed) return t.text;
+        }
+        return text;
+      };
       while ((wrappedRows < rows
               || viewportTop + i <= cursorLine + 1
               || postCursorRows < rows)
              && i < rowLimit) {
-        const lineResult = buffer.getLine(viewportTop + i);
-        const text = lineResult && lineResult._tag === "Right" ? lineResult.right : "";
+        const text = dispText(viewportTop + i);
         const w = Math.max(1, Math.ceil(Bun.stringWidth(text) / cw));
         wrappedRows += w;
         if (viewportTop + i >= cursorLine) postCursorRows += w;

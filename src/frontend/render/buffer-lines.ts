@@ -68,6 +68,23 @@ export { getVisibleViewportTop };
  * never render); absent it counts every line (an over-advance that only
  * pins the cursor higher — harmless for span precomputation).
  */
+/**
+ * #321 (codex r5): rowsOf over the DISPLAY text — the wiki-link
+ *  transform applies before wrapping (the renderer wraps display text;
+ *  counting raw lines put the cursor rows off when links display short).
+ */
+export function makeDisplayFoldAwareRowsOf(
+  state: EditorState,
+  cw: number,
+): (ln: number) => number {
+  const raw = makeFoldAwareRowsOf((ln: number) => getLine(state, ln), cw, state.foldRanges);
+  if (!wikiDisplayActive(state)) return raw;
+  return (ln: number) => {
+    const [disp] = displayLineForWrap(state, getLine(state, ln) ?? "", 0);
+    return Math.max(raw(ln) === 0 ? 0 : 1, wrapLine(disp, cw).length);
+  };
+}
+
 export function makeFoldAwareRowsOf(
   getRawLine: (ln: number) => string,
   cw: number,
@@ -127,7 +144,7 @@ export function getWrappedViewportTop(state: EditorState, visibleLines: number, 
     totalLines,
     visibleLines,
     cw,
-    makeFoldAwareRowsOf((ln) => getLine(state, ln), cw, state.foldRanges),
+    makeDisplayFoldAwareRowsOf(state, cw),
   );
 }
 
@@ -196,7 +213,7 @@ export function getWrappedCursorRow(
   const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
   const cw = Math.max(1, width - gw);
-  const rowsOf = makeFoldAwareRowsOf((ln: number) => getLine(state, ln), cw, state.foldRanges);
+  const rowsOf = makeDisplayFoldAwareRowsOf(state, cw);
   const top = getWrappedViewportTop(state, bufferHeight, width);
   let row = 0;
   for (let ln = top; ln < state.cursorPosition.line && ln < totalLines; ln++) row += rowsOf(ln);
