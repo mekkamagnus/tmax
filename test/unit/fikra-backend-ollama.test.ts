@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -94,6 +94,7 @@ async function armed(): Promise<Editor> {
 // POST /api/chat swallows the body and never responds (every real
 // fire hangs; synthetic completions drive all replies).
 let stubUrl = "";
+let bodiesFile = "";
 let stubProc: ReturnType<typeof Bun.spawn> | null = null;
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "fikra-stub-"));
@@ -106,12 +107,16 @@ const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
       socket.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: " + body.length + "\\r\\nConnection: close\\r\\n\\r\\n" + body);
       socket.end();
     }
-    // POST /api/chat: swallow the body, never respond.
+    // POST /api/chat: RECORD the body, never respond (r136 codex
+    // re-grade P1: the request boundary must be TESTED — a malformed
+    // body 400s on every real ollama while a swallower hid it).
+    require("node:fs").appendFileSync(process.argv[2], chunk.toString().slice(chunk.toString().indexOf("\\r\\n\\r\\n") + 4) + "\\n");
   },
 } });
 console.log(l.port);
 `);
-  stubProc = Bun.spawn(["bun", "run", script], { stdout: "pipe", stderr: "ignore" });
+  bodiesFile = join(dir, "bodies.jsonl");
+  stubProc = Bun.spawn(["bun", "run", script, bodiesFile], { stdout: "pipe", stderr: "inherit" });
   // Read the FIRST LINE only (the child keeps running to serve) — under
   // a 10s guard: a hung beforeAll defeats every test timeout and the
   // runner sits silent forever (codex r131's gate hung exactly so).
@@ -821,6 +826,30 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(String(e(ed, '(shell-command "cat old135.txt")').value)).toContain("BETA-X");
   });
 });
+
+  // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
+  // stub records every /api/chat body; parse the LAST one (the escaper
+  // changes across rounds made this boundary invisible to the suite —
+  // a stray quote 400s on every real ollama).
+  tt("the fired request body PARSES as JSON", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "wire check")');
+    let body: unknown;
+    for (let i = 0; i < 60; i++) {
+      try {
+        const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
+        const last = lines[lines.length - 1];
+        if (lines.length > 0 && last) { body = JSON.parse(last); break; }
+      } catch { /* not yet / partial */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(body).toBeTruthy();
+    const b = body as { model?: string; messages?: { role: string }[]; tools?: unknown[] };
+    expect(b.model).toBe("test:fake");
+    expect(b.messages?.[0]?.role).toBe("system");
+    expect(b.messages?.some((m) => m.role === "user" && false)).toBe(false);
+    expect(Array.isArray(b.tools)).toBe(true);
+  });
 
   // r135b (codex r135 catches): control chars escape (the file literal
   // "\n" never matched a real newline — multi-line content rode raw

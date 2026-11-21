@@ -380,10 +380,26 @@ segment reads)."
       s)
     s))
 
+;; r136 (codex re-grade P1): strip QUOTE and backslash characters
+;; before the scan — shell quoting evasions (r''m -r d, "r"m -rf d)
+;; executed the same command while hiding the pattern. The displayed
+;; panel keeps the raw command; only the scan normalizes.
+(defun fikra-risk-strip-quotes (s)
+  (fikra-risk-strip-scan s 0 ""))
+
+(defun fikra-risk-strip-scan (s i acc)
+  (if (>= i (length s))
+    acc
+    (let ((c (substring s i (+ i 1))))
+      (fikra-risk-strip-scan s (+ i 1)
+        (if (or (string= c "'") (string= c (hex-decode "22")) (string= c (hex-decode "5c")))
+          acc
+          (concat acc c))))))
+
 (defun fikra-approval-risk (kind detail)
   ;; Destructive first (any tool can carry it), then the tool class —
   ;; BOTH case-insensitive (the detail is downcased; "drop table" counts).
-  (let ((d (fikra-risk-down detail)))
+  (let ((d (fikra-risk-strip-quotes (fikra-risk-down detail))))
     (if (or (string-match "rm -rf" d)
             (string-match "rm -fr" d)
             (string-match "git push --force" d)

@@ -190,7 +190,7 @@ availability gate must be synchronous; the turn itself is async)."
   ;; r135e (codex r135d catch): the model name ESCAPES (a quote in a
   ;; configured name broke the request body).
   (let* ((body (concat "{\"model\":" (fikra-ollama-json-string fikra-ollama-model)
-                       "\",\"stream\":false,\"messages\":["
+                       ",\"stream\":false,\"messages\":["
                        "{\"role\":\"system\",\"content\":\"You are a concise coding assistant inside the tmax editor. Reply briefly. Use the provided tools when they help.\"},"
                        (fikra-ollama-chomp fikra-ollama-messages)
                        "],\"tools\":["
@@ -912,11 +912,26 @@ availability gate must be synchronous; the turn itself is async)."
       nil
     (if (string= thread-id (fikra/thread/fikra-thread-current))
       (fikra-ollama-handle-reply status body)
+      ;; r136 (codex re-grade P2): the bg-settle dance is THROW-SAFE
+      ;; (a reply-handling error used to leak the focus and strand the
+      ;; turn) and settles honestly — the bash sentinel's pattern.
       (let ((prev (fikra/thread/fikra-thread-current)))
         (fikra/thread/fikra-thread-focus thread-id)
-        (fikra-ollama-handle-reply status body)
-        (fikra/thread/fikra-thread-focus prev)
-        t))))))
+        (let ((r (condition-case nil
+                  (fikra-ollama-handle-reply status body)
+                  (error (m)
+                    (condition-case nil
+                      (progn
+                        (editor-set-status (concat "Fikra-ollama: reply failed — " m))
+                        (if fikra-ollama-pending-message
+                          (progn (setq fikra-ollama-pending-message nil)
+                                 (fikra/thread/fikra-thread-turn-end "error"))))
+                      (error () nil))
+                    'reply-error))))
+          (condition-case nil
+            (fikra/thread/fikra-thread-focus prev)
+            (error () nil))
+          r)))))))
 
 ;; The reply handling, thread-local (runs with the FIRING thread
 ;; focused; the guards already ran).
