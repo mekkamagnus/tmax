@@ -139,6 +139,7 @@ describe("#288 — the commit flow", () => {
     expect(String(e(editor, "(editor-status)").value)).toMatch(/fixup created: [0-9a-f]+/);
     // No compose buffer was ever opened; no temp file.
     expect(String(e(editor, '(if (member "*Commit-Message*" (buffer-list)) 1 0)').value)).toBe("0");
+    expect(String(e(editor, "(stagehand/commit/stagehand-commit-last-tmp)").value)).toBe("null"); // no temp EVER
   });
 
   test("hook REJECTION retains the buffer + message; retry then SUCCEEDS", () => {
@@ -178,7 +179,7 @@ describe("#288 — the commit flow", () => {
     expect(git("rev-list", "--count", "HEAD")).toBe("1");
   });
 
-  test("ABORT (C-c C-k): no commit, compose gone, prior buffer + status intact", () => {
+  test("ABORT (C-c C-k): no commit, compose gone, prior buffer + status intact; temp GONE (gate r1)", () => {
     writeFileSync(join(process.cwd(), "a.txt"), "a\n");
     commit("base");
     writeFileSync(join(process.cwd(), "b.txt"), "b\n");
@@ -186,11 +187,42 @@ describe("#288 — the commit flow", () => {
     statusOf();
     e(editor, "(stagehand/commit/stagehand-commit-new)");
     type("draft that will be abandoned");
+    // First a FAILED dispatch so a temp file EXISTS to clean (abort
+    // alone never creates one — the mktemp lives inside dispatch).
+    mkdirSync(join(process.cwd(), ".git", "hooks"), { recursive: true });
+    writeFileSync(join(process.cwd(), ".git", "hooks", "commit-msg"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(process.cwd(), ".git", "hooks", "commit-msg"), 0o755);
+    e(editor, "(stagehand/commit/stagehand-commit-dispatch)"); // fails, retains
+    rmSync(join(process.cwd(), ".git", "hooks", "commit-msg"));
+    expect(tmpGone()).toBe(true); // failure exit cleaned
     e(editor, "(stagehand/commit/stagehand-commit-abort)");
     expect(git("rev-list", "--count", "HEAD")).toBe("1"); // nothing committed
+    expect(tmpGone()).toBe(true); // the abort exit left nothing behind
     // Buffer existence via member (T-Lisp lists stringify opaque).
     expect(String(e(editor, '(if (member "*Commit-Message*" (buffer-list)) 1 0)').value)).toBe("0");
     expect(String(e(editor, '(if (member "*Stagehand*" (buffer-list)) 1 0)').value)).toBe("1"); // never torn down
+  });
+
+  test("the CHORDS deliver: C-c C-c commits; C-c C-k aborts (gate r1 — keymap strings exercised)", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "a\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "b.txt"), "b\n");
+    execFileSync("git", ["add", "b.txt"], { cwd: process.cwd() });
+    statusOf();
+    e(editor, "(stagehand/commit/stagehand-commit-new)");
+    type("via real chord");
+    // Abort via the real chord first: C-c C-k.
+    await editor.handleKey("C-c");
+    await editor.handleKey("C-k");
+    expect(git("rev-list", "--count", "HEAD")).toBe("1");
+    expect(String(e(editor, '(if (member "*Commit-Message*" (buffer-list)) 1 0)').value)).toBe("0");
+    // Reopen and COMMIT via the real chord: C-c C-c.
+    e(editor, "(stagehand/commit/stagehand-commit-new)");
+    type("via real chord");
+    await editor.handleKey("C-c");
+    await editor.handleKey("C-c");
+    expect(git("log", "-1", "--format=%B")).toContain("via real chord");
+    expect(tmpGone()).toBe(true);
   });
 
   test("the UNBORN repo: c works (first commit); C and F refuse", () => {

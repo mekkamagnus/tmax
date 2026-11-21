@@ -82,8 +82,9 @@ created fixup sha."
               (concat "fixup created: "
                 (stagehand/status/stagehand-git-line "log -1 --format=%h" root)))
             (editor-set-status
-              (concat "fixup failed (" (number-to-string (nth 2 res)) ") "
-                (stagehand-first-line (nth 1 res))))))))))
+              (concat "fixup failed ("
+                (if (numberp (nth 2 res)) (number-to-string (nth 2 res)) "?")
+                ") " (stagehand-first-line (nth 1 res))))))))))
 
 ;; ── the compose ─────────────────────────────────────────────────────
 (defun stagehand-commit-compose (variant seed)
@@ -107,22 +108,28 @@ created fixup sha."
   "C-c C-c — deliver the message. Empty → status, buffer RETAINED.
 Failure → status names exit + stderr, buffer + message RETAINED
 (C-c C-c retries). Success → close + restore. The temp file is
-removed on EVERY exit."
+removed on EVERY exit — the write+run block is EXCEPTION-SAFE
+(condition-case): a throw between mktemp and the rm still cleans up."
   (let ((text (buffer-text)))
     (if (string= (string-trim text) "")
       (editor-set-status "empty message")
       (let* ((tmp (stagehand-mktemp))
-             (res (progn
-                    (append-file tmp text)
-                    (stagehand-commit-run tmp))))
+             ;; Record the path BEFORE the risky block so any exit
+             ;; (return OR throw) leaves the sentinel armed.
+             (recorded (setq stagehand-commit-tmp-path tmp))
+             (res (condition-case nil
+                     (progn
+                       (append-file tmp text)
+                       (stagehand-commit-run tmp))
+                     (error () (list "" "internal error during commit" 1)))))
         ;; THE SENTINEL: the temp file never outlives the attempt.
-        (setq stagehand-commit-tmp-path tmp)
         (shell-exec (concat "rm -f " (stagehand/status/stagehand-shq tmp)))
         (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
           (stagehand-commit-close)
           (editor-set-status
-            (concat "commit failed (" (number-to-string (nth 2 res)) ") "
-              (stagehand-first-line (nth 1 res)))))))))
+            (concat "commit failed ("
+              (if (numberp (nth 2 res)) (number-to-string (nth 2 res)) "?")
+              ") " (stagehand-first-line (nth 1 res)))))))))
 
 (defun stagehand-commit-abort ()
   "C-c C-k / C-g — abandon: no commit, close + restore."
@@ -153,8 +160,19 @@ removed on EVERY exit."
     (if (and l (> (length l) 0)) l "")))
 
 (defun stagehand-staged-count ()
-  ;; The Staged section's entry count from the live parse.
-  (length (car (cdr (nth 2 (stagehand/status/stagehand-current-sections))))))
+  ;; The Staged section's entry count from the live parse — BY NAME
+  ;; (a positional nth would silently retarget on a section reorder).
+  (length (stagehand-section-entries "Staged")))
+
+(defun stagehand-section-entries (name)
+  (stagehand-section-entries-scan (stagehand/status/stagehand-current-sections) name))
+
+(defun stagehand-section-entries-scan (secs name)
+  (if (null secs)
+    nil
+    (if (string= (car (car secs)) name)
+      (car (cdr (car secs)))
+      (stagehand-section-entries-scan (cdr secs) name))))
 
 (defun stagehand-has-head ()
   (stagehand/status/stagehand-has-commits-p
