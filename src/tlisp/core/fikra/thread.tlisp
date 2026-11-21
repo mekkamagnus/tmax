@@ -1,7 +1,7 @@
 (defmodule fikra/thread
   (export fikra-thread-load-row fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
-          fikra-thread-status-of fikra-thread-any-running-p
+          fikra-thread-status-of fikra-thread-any-running-p fikra-thread-running-ids
           fikra-thread-id-of-buffer
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-emit-file-changes fikra-thread-compute-changes
@@ -670,6 +670,15 @@ tick's auto-stop asks this, not its own bookkeeping)."
         (setq hit t)))
     hit))
 
+(defun fikra-thread-running-ids ()
+  "The ids of every RUNNING thread (in-memory registry scan — the
+transient tick's thought-gap timeout iterates these)."
+  (let ((ids (list)))
+    (dolist (id (hashmap-keys fikra-threads))
+      (if (string= (fikra-thread-status-of id) "running")
+        (setq ids (cons id ids))))
+    (reverse ids)))
+
 (defun fikra-thread-id-of-buffer (name)
   "The thread a *Fikra* buffer NAME displays (nil for non-fikra buffers).
 REGISTRY-ONLY resolution (gate r3): no disk listing, no shell — this
@@ -898,6 +907,9 @@ thread→adapter has no cycle but keep the lazy convention)."
 
 (defun fikra-thread-turn-end (status)
   "STATUS: completed | error | interrupted (the turn-end event's status)."
+  ;; #320: close any open thinking block FIRST (its marker renders inside
+  ;; the completing turn, before the end marker).
+  (condition-case nil (fikra-thought-flush-for (fikra-thread-current)) (error () nil))
   ;; Changed files render inside the completing turn (before the marker).
   (condition-case nil (fikra-thread-emit-file-changes) (error () nil))
   ;; Emitted via the EXPLICIT-PATH batch emitter: turn-end runs from the

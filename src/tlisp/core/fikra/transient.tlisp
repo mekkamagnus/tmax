@@ -119,6 +119,19 @@ old guarded stop leaked the live interval forever (gate r2)."
     (progn
       (setq fikra-transient-ticks (+ 1 fikra-transient-ticks))
       (setq fikra-transient-rev (+ 1 fikra-transient-rev))
+      ;; #320: the thought GAP timeout (2s) rides the tick — a running
+      ;; thread's stale gap closes with a status event (a real FAEP
+      ;; event through the normal emit path; the tick itself never
+      ;; fabricates log entries).
+      (condition-case nil
+        (progn
+          (require-module fikra/thought)
+          (require-module fikra/event)
+          (dolist (rid (fikra/thread/fikra-thread-running-ids))
+            (let ((evs (fikra/thought/fikra-thought-timeout-check rid now-ms)))
+              (if evs
+                (fikra/event/fikra-event-emit-batch-for rid evs)))))
+        (error () nil))
       ;; #319: age every frozen frame — a PENDING one (1) waits for its
       ;; poll; a RENDERED one (2) clears on this tick.
       (fikra-transient-age-frozen (hashmap-keys fikra-transient-frozen))

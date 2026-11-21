@@ -1,0 +1,232 @@
+(defmodule fikra/thought
+  (export fikra-thought-feed fikra-thought-flush fikra-thought-timeout-check
+          fikra-thought-watermark fikra-thought-reset
+          fikra-thought-toggle-list fikra-thought-toggle-at)
+
+;; #320 — THINKING DELTAS into THOUGHT EVENTS (the "considering…"
+;; moments). The CLI streams extended-thinking as
+;; content_block_delta/thinking_delta partials keyed by the CONTENT
+;; BLOCK INDEX; the normalizer maps each to a thought-delta event
+;; carrying (block index) + (text fragment). THIS module owns ORDERED
+;; DELIVERY: delivery is ordered per block (the stream's contract) —
+;;   index <= watermark      → REDELIVERY, dropped;
+;;   index == watermark+1    → contiguous: the block's cumulative text
+;;                              extends, and the event rides (text =
+;;                              CUMULATIVE so far — the renderer never
+;;                              accumulates);
+;;   index  > watermark+1    → ordering violation: BUFFERED (unrendered)
+;;                              until the missing index fills; a 2s gap
+;;                              with no fill CLOSES the block (status
+;;                              event `thought stream gap — block closed`)
+;;                              — never re-assembled out of order.
+;;
+;; COLLAPSE (the render rule): a thinking segment longer than 3 lines
+;; or 200 characters (whichever first; the char count EXCLUDES the
+;; prefix) renders as its first line + `… [N lines — TAB to expand]`.
+;; TAB on a collapsed (or expanded) thought line toggles; replay RESETS
+;; collapse to the length-derived default (a fresh render derives from
+;; lengths, not remembered interactions). The toggle state is a
+;; buffer-local list of toggled block keys (never persisted, never a
+;; replay-parity input — the byte-parity compare runs under DEFAULT
+;; collapse).
+
+(require-module fikra/event)
+
+;; Per-thread delivery state: id → (watermark . gap-alist)
+;; gap-alist: ((index events...) ...) with the first-buffered timestamp.
+(defvar fikra-thought-state (hashmap)
+  "id → ((watermark . n) (gaps . ((idx (events) ts-first) ...)) (text . cumulative))")
+(defvar fikra-thought-toggles (list)
+  "Buffer-local TOGGLED block keys (display-only; never persisted).")
+
+(defun fikra-thought-reset (id)
+  "Reset a thread's delivery state (turn start / tests)."
+  (editor/keymaps/keymap-mutable-set! fikra-thought-state id
+    (hashmap "watermark" -1 "gaps" (list) "text" "" "closed" -1))
+  t)
+
+(defun fikra-thought-state-of (id)
+  (let ((s (hashmap-get fikra-thought-state id)))
+    (if s s
+      (progn (fikra-thought-reset id)
+        (hashmap-get fikra-thought-state id)))))
+
+(defun fikra-thought-watermark (id)
+  (hashmap-get (fikra-thought-state-of id) "watermark"))
+
+;; ── the feed: events in → ordered thought-delta events out ────────
+;; Only thought-delta events pass through here; everything else rides
+;; untouched (interleaving preserved — the event sequence is truth).
+(defun fikra-thought-feed (id events)
+  "Route a normalized event batch: non-thought events pass through;
+thought-deltas are order-checked, the contiguous one (if any) extends
+the cumulative text and rides (text = CUMULATIVE); out-of-order ones
+buffer. Returns the emit list."
+  (fikra-thought-feed-scan id events (list)))
+
+(defun fikra-thought-feed-scan (id events out)
+  (if (null events)
+    (reverse out)
+    (let* ((e (car events))
+           (kind (fikra/event/fikra-event-get-str e "kind")))
+      (cond
+        ((string= kind "thought-delta")
+          (fikra-thought-feed-scan id (cdr events)
+            (fikra-thought-accept id e out)))
+        ;; A non-thought event closes any open block (interleaving
+          ;; preserved — the event sequence is truth).
+        (t
+          (fikra-thought-feed-scan id (cdr events)
+            (cons e (fikra-thought-flush id out))))))))
+
+(defun fikra-thought-accept (id e out)
+  "Order-check ONE thought-delta at BLOCK granularity (fragments of the
+OPEN block are in-order by the stream contract — they append):
+  blk <  watermark      → a CLOSED block's redelivery — dropped;
+  blk == watermark      → same-block continuation (append the fragment);
+  blk == watermark+1    → the next block: flush the old (marker if it
+                          crossed), open the new;
+  blk >  watermark+1    → ordering violation: BUFFER until the missing
+                          block fills (2s timeout closes).
+The accumulator tracks the cumulative privately for the collapse
+threshold, emitting a thought-collapse MARKER (a rebuild trigger) on
+every crossed fragment. OUT is the accumulator (reversed)."
+  (let* ((blk (string-to-number (fikra/event/fikra-event-get-str e "block")))
+         (st (fikra-thought-state-of id))
+         (wm (hashmap-get st "watermark")))
+    (cond
+      ((< blk wm) out) ;; closed-block redelivery — dropped
+      ((and (= blk wm) (= blk (hashmap-get st "closed"))) out) ;; the gap-closed block — dropped
+      ((or (= blk wm) (= blk (+ wm 1)))
+        (let* ((frag (fikra/event/fikra-event-get-str e "text"))
+               (fresh (= blk (+ wm 1)))
+               (base (if fresh "" (hashmap-get st "text")))
+               (txt (concat base frag))
+               (was-crossed (if fresh nil (hashmap-get st "crossed")))
+               (crossed (fikra/event/fikra-thought-collapsed-p txt))
+               (pre (if fresh (fikra-thought-flush id out) out)))
+          (editor/keymaps/keymap-mutable-set! st "watermark" blk)
+          (if fresh (editor/keymaps/keymap-mutable-set! st "closed" -1))
+          (editor/keymaps/keymap-mutable-set! st "text" txt)
+          (editor/keymaps/keymap-mutable-set! st "crossed"
+            (if (or crossed was-crossed) t nil))
+          ;; While crossed, EVERY fragment rides with a marker — the
+          ;; collapsed form's line-count changes per fragment, which is
+          ;; edit-based rendering: append the fragment (raw growth) then
+          ;; rebuild via the marker (batch-coalesced: one rebuild per
+          ;; emit batch).
+          (let ((ev (list (list "kind" "thought-delta")
+                          (list "block" (fikra/event/fikra-event-get-str e "block"))
+                          (list "text" frag))))
+            (fikra-thought-drain id
+              (if (or crossed was-crossed)
+                (cons (list (list "kind" "thought-collapse")) (cons ev pre))
+                (cons ev pre))))))
+      (t
+        ;; Gap: buffer it (with a timestamp on first hold) — the DRAIN
+        ;; (below) releases the run when the missing block fills.
+        (progn
+          (fikra-thought-buffer-gap st blk e)
+          out)))))
+
+;; After a contiguous accept, release any buffered run whose block is
+;; now watermark+1 — repeat until no contiguous buffer remains (the
+;; buffered events ride as FRAGMENTS of their blocks, each checked for
+;; the collapse threshold exactly like a fresh arrival).
+(defun fikra-thought-drain (id out)
+  (let* ((st (fikra-thought-state-of id))
+         (wm (hashmap-get st "watermark"))
+         (gaps (hashmap-get st "gaps"))
+         (next (fikra-thought-gap-take gaps (+ wm 1))))
+    (if (null next)
+      out
+      ;; The buffered events re-enter accept one by one (order-checked;
+      ;; now contiguous) — then drain again.
+      (fikra-thought-drain id
+        (fikra-thought-replay-buffered id (car (cdr next)) out)))))
+
+(defun fikra-thought-replay-buffered (id events out)
+  (if (null events)
+    out
+    (fikra-thought-replay-buffered id (cdr events)
+      (fikra-thought-accept id (car events) out))))
+
+(defun fikra-thought-gap-take (gaps blk)
+  (if (null gaps)
+    nil
+    (if (= (car (car gaps)) blk)
+      (car gaps)
+      (fikra-thought-gap-take (cdr gaps) blk))))
+
+;; Block close (a different index arrived / a non-thought event / turn
+;; end): if this block EVER crossed the collapse threshold, the marker
+;; rides once more so the final rebuild lands the collapsed line (the
+;; live buffer's mid-stream trailing fragments are replaced).
+(defun fikra-thought-flush (id out)
+  (let ((st (fikra-thought-state-of id)))
+    (if (hashmap-get st "crossed")
+      (progn
+        (editor/keymaps/keymap-mutable-set! st "crossed" nil)
+        (cons (list (list "kind" "thought-collapse")) out))
+      out)))
+
+(defun fikra-thought-buffer-gap (st blk e)
+  (let ((gaps (hashmap-get st "gaps")))
+    (editor/keymaps/keymap-mutable-set! st "gaps"
+      (cons (list blk (list e) (editor-time-now)) gaps))))
+
+;; The 2s timeout: called from the transient tick (200ms, live while
+;; threads run). A gap first-buffered >2s ago with no fill CLOSES the
+;; block: emit the status event; drop the buffer; advance the watermark
+;; past the gap so late fills become redeliveries.
+(defun fikra-thought-timeout-check (id now-ms)
+  (let* ((st (fikra-thought-state-of id))
+         (gaps (hashmap-get st "gaps")))
+    (if (null gaps)
+      (list)
+      (let ((closed (fikra-thought-timeout-scan st gaps now-ms (list))))
+        closed))))
+
+(defun fikra-thought-timeout-scan (st gaps now-ms out)
+  (if (null gaps)
+    (reverse out)
+    (let* ((g (car gaps))
+           (blk (car g))
+           (ts (car (cdr (cdr g)))))
+      (if (> (- now-ms ts) 2000)
+        (progn
+          ;; Close: drop this gap; the watermark jumps past it.
+          (editor/keymaps/keymap-mutable-set! st "gaps" (cdr gaps))
+          (editor/keymaps/keymap-mutable-set! st "watermark" blk)
+          (editor/keymaps/keymap-mutable-set! st "closed" blk)
+          (editor/keymaps/keymap-mutable-set! st "text" "")
+          (editor/keymaps/keymap-mutable-set! st "crossed" nil)
+          (fikra-thought-timeout-scan st (cdr gaps) now-ms
+            (cons (list (list "kind" "thought-status")
+                        (list "status" "thought stream gap — block closed"))
+                  out)))
+        (fikra-thought-timeout-scan st (cdr gaps) now-ms out)))))
+
+;; (The pure collapse helpers live in fikra/event — no cycle; see
+;; fikra-thought-collapsed-p / -collapse-text / -render there.)
+
+;; ── TAB toggle state (display-only) ───────────────────────────────
+(defun fikra-thought-toggle-list ()
+  fikra-thought-toggles)
+
+(defun fikra-thought-toggle-at (key)
+  "Toggle a block key's membership (TAB)."
+  (if (member key fikra-thought-toggles)
+    (setq fikra-thought-toggles
+      (fikra-thought-remove key fikra-thought-toggles (list)))
+    (setq fikra-thought-toggles (cons key fikra-thought-toggles)))
+  fikra-thought-toggles)
+
+(defun fikra-thought-remove (k lst acc)
+  (if (null lst)
+    (reverse acc)
+    (if (string= k (car lst))
+      (append (reverse acc) (cdr lst))
+      (fikra-thought-remove k (cdr lst) (cons (car lst) acc)))))
+
+(provide "fikra-thought"))
