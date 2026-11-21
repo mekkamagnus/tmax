@@ -261,11 +261,13 @@ export function createEditingHandlers(ctx: ServerContext): {
       ctx.syncEditorToAllFrames();
       ctx.captureActiveWorkspace();
       ctx.scheduleDirtyWorkspaceSave(ctx.getActiveWorkspaceId());
-      return editorStateToJson(ctx.editor.getEditorState());
+      // #318 (gate r2): EVERY response carries the transient stamp — the
+      // no-frameId keypress path too.
+      return editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter));
     } catch (error) {
       if (error instanceof Error && error.message === 'EDITOR_QUIT_SIGNAL') {
         ctx.syncEditorToAllFrames();
-        const state = editorStateToJson(ctx.editor.getEditorState());
+        const state = editorStateToJson(withTransientRevision(ctx.editor.getEditorState(), (ctx.editor as unknown as { interpreter: { execute: (e: string) => unknown } }).interpreter));
         ctx.scheduleShutdown(50);
         return { ...state, quitSignal: true };
       }

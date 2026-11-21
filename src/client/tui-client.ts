@@ -116,13 +116,16 @@ function render(state: EditorState) {
     minibuffer.lines.forEach((line, index) => writeAt(start + index, 0, line));
   } else if (state.mode === "command" || state.mode === "mx") {
     writeAt(height - 2, 0, renderCommandInput(state, width));
+  } else if (state.statusMessage) {
+    // #318 (gate r2): status messages WIN over the spinner — a running
+    // thread must not hide "Fikra: approve …" or error feedback.
+    const msg = state.statusMessage.length > width ? state.statusMessage.slice(0, width - 1) : state.statusMessage;
+    writeAt(height - 2, 0, msg + "\x1b[K");
   } else if (state.transientSegment) {
     // #318: the transient spinner row (the viewed thread is running) —
-    // appended to the status line when no status message holds it.
+    // only when no status message holds the row. Trailing \x1b[K so a
+    // shorter spinner row clears the previous longer row's tail.
     const msg = state.transientSegment.length > width ? state.transientSegment.slice(0, width - 1) : state.transientSegment;
-    writeAt(height - 2, 0, msg);
-  } else if (state.statusMessage) {
-    const msg = state.statusMessage.length > width ? state.statusMessage.slice(0, width - 1) : state.statusMessage;
     writeAt(height - 2, 0, msg + "\x1b[K");
   }
 

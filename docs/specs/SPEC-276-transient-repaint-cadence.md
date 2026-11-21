@@ -18,9 +18,12 @@ protocol is untouched except ONE comparison.
   `fikra-transient-tick`). 200ms cadence (matches the poll).
 - **Lifecycle**: starts on the first →running thread transition, stops
   on the terminal transition of the LAST running thread (auto-verified
-  each tick as hardening); client connect/disconnect never starts or
-  stops it. Thread-state owns it: `fikra-thread-status-set` notifies
-  the layer on the running/idle/error/interrupted edges.
+  each tick as hardening — the tick asks the AUTHORITATIVE thread
+  registry (`fikra-thread-any-running-p`), not this module's own
+  bookkeeping, so a missed transition notification cannot wedge the
+  interval); client connect/disconnect never starts or stops it.
+  Thread-state owns it: `fikra-thread-status-set` notifies the layer on
+  the running/idle/error/interrupted edges.
 - **The wire**: `transientRevision` rides the poll response beside
   `bufferRevision` (stamped by both the keypress and render-state
   handlers via `withTransientRevision`). The client compares BOTH
@@ -28,8 +31,13 @@ protocol is untouched except ONE comparison.
   (transient 5→6 renders while buffer-rev stays 100; no max(), no
   missed transitions).
 - **Focused-thread rule**: the transient segment renders for the thread
-  the CLIENT is viewing (`fikra-transient-segment` answers per
-  thread-id; an idle thread's segment is nil while another runs).
+  whose `*Fikra` buffer the CLIENT's frame is viewing
+  (`fikra-transient-viewed-segment-for` resolves buffer name → thread
+  id via the inverse of `fikra-thread-buffer-name-of`; an idle thread's
+  segment is nil while another runs; a non-fikra buffer gets none). The
+  segment rides the wire AND survives `jsonToEditorState` — the TUI's
+  render reads `state.transientSegment` (status messages take the row
+  first; the spinner writes only when free).
 - **Docs**: the event-driven contract's display-layer exception is
   named in this spec (event.tlisp's header contract stands for the LOG
   layer; the transient layer is display-only, never touches it).
@@ -46,4 +54,8 @@ protocol is untouched except ONE comparison.
       transient on the next poll (daemon state — every client reads the
       same counter)
 - [x] Focused-thread rule: an idle thread's segment is nil while
-      another runs (tested); the spinner rotates across ticks
+      another runs (tested); the spinner rotates across ticks (the
+      GLYPH pinned directly across 5 ticks — 4-frame cycle, not the
+      revision-bearing segment string); per-frame viewed-thread
+      resolution (a frame on `*Fikra-fix-1*` gets none while main
+      runs); the round-trip into the client EditorState asserted

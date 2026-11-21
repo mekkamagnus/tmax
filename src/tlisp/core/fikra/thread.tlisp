@@ -1,6 +1,8 @@
 (defmodule fikra/thread
   (export fikra-thread-load-row fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
+          fikra-thread-status-of fikra-thread-any-running-p
+          fikra-thread-id-of-buffer
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-emit-file-changes fikra-thread-compute-changes
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
@@ -619,6 +621,40 @@ into string= transitions — #216 gate-hardening)."
 
 (defun fikra-thread-turn-count ()
   (fikra-thread-field "turn-count"))
+
+;; ── per-id + aggregate queries (#318's transient layer asks THESE —
+;; the REGISTRY is authoritative, so a missed transition notification
+;; cannot wedge the interval on stale bookkeeping) ───────────────────
+(defun fikra-thread-status-of (id)
+  "Thread ID's status straight from the in-memory registry (a thread not
+loaded this session reads as idle — it cannot be running)."
+  (let ((state (condition-case nil (hashmap-get fikra-threads id) (error () nil))))
+    (if state
+      (let ((s (hashmap-get state "status")))
+        (if s s "idle"))
+      "idle")))
+
+(defun fikra-thread-any-running-p ()
+  "t when ANY loaded thread is running (registry scan — the transient
+tick's auto-stop asks this, not its own bookkeeping)."
+  (let ((hit nil))
+    (dolist (id (hashmap-keys fikra-threads))
+      (if (and (not hit) (string= (fikra-thread-status-of id) "running"))
+        (setq hit t)))
+    hit))
+
+(defun fikra-thread-id-of-buffer (name)
+  "The thread a *Fikra* buffer NAME displays (nil for non-fikra buffers)
+— the inverse of buffer-name-of; the frame-viewed thread resolution."
+  (if (not (stringp name))
+    nil
+    (fikra-thread-id-of-buffer-scan (fikra-thread-ids) name)))
+
+(defun fikra-thread-id-of-buffer-scan (ids name)
+  (cond
+    ((null ids) nil)
+    ((string= (fikra-thread-buffer-name-of (car ids)) name) (car ids))
+    (t (fikra-thread-id-of-buffer-scan (cdr ids) name))))
 
 (defun fikra-thread-root-id ()
   (fikra-thread-field "root"))

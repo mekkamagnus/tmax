@@ -230,6 +230,8 @@ export interface EditorState {
   statusMessage: string;
   /** #318: the viewed thread transient spinner segment (render-only). */
   transientSegment?: string;
+  /** #318: the display-layer revision (the client's second O(1) compare). */
+  transientRevision?: number;
   viewportTop: number;
   viewportLeft?: number;
   config: EditorConfig;

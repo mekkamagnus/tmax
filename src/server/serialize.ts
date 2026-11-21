@@ -113,7 +113,14 @@ export function withTransientRevision<T extends object>(
   };
   const rev = readTransient("(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-revision)) (error () 0))");
   if (typeof rev === "number") (state as { transientRevision?: number }).transientRevision = rev;
-  const seg = readTransient("(condition-case nil (progn (require-module fikra/transient) (fikra-transient-viewed-segment)) (error () nil))");
+  // #318 (gate r2 / codex r1 catch 2): resolve the segment for the
+  // thread whose *Fikra* buffer THIS state views — a frame watching
+  // *Fikra-fix-1* must not receive the daemon-current thread's spinner.
+  const viewedBuffer = (state as { currentBufferName?: unknown }).currentBufferName;
+  const segExpr = typeof viewedBuffer === "string"
+    ? `(condition-case nil (progn (require-module fikra/transient) (fikra/transient/fikra-transient-viewed-segment-for ${JSON.stringify(viewedBuffer)})) (error () nil))`
+    : "(condition-case nil (progn (require-module fikra/transient) (fikra-transient-viewed-segment)) (error () nil))";
+  const seg = readTransient(segExpr);
   if (typeof seg === "string" && seg.length > 0) (state as { transientSegment?: string }).transientSegment = seg;
   return state;
 }
@@ -336,6 +343,11 @@ export function jsonToEditorState(json: SerializedEditorState | Record<string, u
     flashSpans: (record.flashSpans as EditorState["flashSpans"]) ?? undefined,
     ghostText: (record.ghostText as string | undefined) ?? undefined,
     ghostAnchor: (record.ghostAnchor as EditorState["ghostAnchor"]) ?? undefined,
+    // #318 (gate r2 CRITICAL): the transient spinner row must survive the
+    // round-trip — render() reads state.transientSegment, so dropping it
+    // here made the whole wire half dead code in the live TUI.
+    transientRevision: (record.transientRevision as number | undefined) ?? undefined,
+    transientSegment: (record.transientSegment as string | undefined) ?? undefined,
   };
 }
 

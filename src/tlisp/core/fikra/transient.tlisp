@@ -5,7 +5,8 @@
           fikra-transient-active-p fikra-transient-count
           fikra-transient-note-running fikra-transient-note-terminal
           fikra-any-thread-running-p fikra-thread-is-running-p
-          fikra-transient-viewed-segment)
+          fikra-transient-viewed-segment fikra-transient-viewed-segment-for
+          fikra-transient-spinner-glyph)
 
 ;; #318 — the DISPLAY-LAYER REPAINT CADENCE. Fikra is event-driven
 ;; end-to-end; the animation layer is DAEMON-SIDE TRANSIENT STATE, kept
@@ -21,6 +22,11 @@
 ;; The tick source is a TS interval (this module's T-Lisp side owns the
 ;; STATE + lifecycle rules; the interval shell lives in the editor API
 ;; — a raw timing primitive, not editor logic).
+
+;; thread.tlisp requires THIS module only lazily (at status-set time),
+;; so this eager require is acyclic: the registry queries + the
+;; buffer→thread inverse lookup resolve reliably in the daemon runtime.
+(require-module fikra/thread)
 
 (defvar fikra-transient-rev 0
   "The transient revision — rides the poll response beside bufferRevision.")
@@ -54,25 +60,27 @@ every ->running edge; the guard makes repeats no-ops."
       t)))
 
 (defun fikra-transient-stop ()
-  "Stop the interval (idempotent). Called on terminal transitions when NO
-thread is running anymore."
-  (if fikra-transient-active
-    (progn
-      (setq fikra-transient-active nil)
-      (editor-transient-timer-stop)
-      t)
-    nil))
+  "Stop the interval. The TS shell stop is UNCONDITIONAL (idempotent
+shell-side) — a module reload resets the active defvar to nil, and the
+old guarded stop leaked the live interval forever (gate r2)."
+  (setq fikra-transient-active nil)
+  (editor-transient-timer-stop)
+  t)
 
 ;; The tick body — the interval shell calls this every 200ms. Bump the
 ;; revision + tick count ONLY (no buffer/event mutations).
 (defun fikra-transient-tick ()
   (if (not fikra-transient-active)
-    nil
+    ;; An inactive tick means the interval outlived its state (module
+    ;; reload) — KILL the leaked shell, not just no-op (gate r2).
+    (progn (editor-transient-timer-stop) nil)
     (progn
       (setq fikra-transient-ticks (+ 1 fikra-transient-ticks))
       (setq fikra-transient-rev (+ 1 fikra-transient-rev))
       ;; Auto-stop: the terminal transition of the last running thread
-      ;; may have been missed — verify the lifecycle rule every tick.
+      ;; may have been missed — ask the AUTHORITATIVE thread registry
+      ;; (thread.tlisp owns it; this module's own bookkeeping is not a
+      ;; witness — codex r1 catch 3).
       (if (not (fikra-any-thread-running-p))
         (fikra-transient-stop)
         t))))
@@ -99,52 +107,35 @@ idle/viewed-other thread (the focused-thread rule)."
       ((= m 2) "—")
       (t "\\"))))
 
-;; ── thread-state predicates (thread.tlisp has no exported
-;; any-running query; the registry is module-private, so thread.tlisp
-;; notifies US on transitions instead — see the hooks below). ──────
-;; Running-thread tracking as an ALIST ((id . "t") ...) — no hashmap-
-;; entries primitive exists; alist scan is fine (few threads).
-(defvar fikra-transient-running-ids (list)
-  "((id flag) ...) — maintained by the transition hooks.")
+;; ── thread-state predicates — AUTHORITATIVE: thread.tlisp's registry
+;; answers (status-of / any-running-p). The transition hooks below still
+;; drive the START/STOP edges eagerly, but no shadow bookkeeping exists
+;; to go stale (codex r1 catch 3: a missed notification must be caught
+;; by the tick's registry ask, not by this module's own list).
+(defun fikra-any-thread-running-p ()
+  (fikra/thread/fikra-thread-any-running-p))
 
+(defun fikra-thread-is-running-p (id)
+  (string= (fikra/thread/fikra-thread-status-of id) "running"))
+
+;; The transition hooks (thread.tlisp's status-set calls these on the
+;; display-relevant edges; id is the transitioning thread).
 (defun fikra-transient-note-running (id)
-  (setq fikra-transient-running-ids
-    (fikra-transient-set-flag fikra-transient-running-ids id "t"))
   (fikra-transient-start))
 
 (defun fikra-transient-note-terminal (id)
-  (setq fikra-transient-running-ids
-    (fikra-transient-set-flag fikra-transient-running-ids id "nil"))
   (if (not (fikra-any-thread-running-p))
     (fikra-transient-stop)
     nil))
 
-(defun fikra-transient-set-flag (lst id flag)
-  (if (null lst)
-    (list (list id flag))
-    (if (string= (car (car lst)) id)
-      (cons (list id flag) (cdr lst))
-      (cons (car lst) (fikra-transient-set-flag (cdr lst) id flag)))))
-
-(defun fikra-any-thread-running-p ()
-  (let ((hit nil))
-    (dolist (entry fikra-transient-running-ids)
-      (if (and (not hit) (string= (car (cdr entry)) "t"))
-        (setq hit t)))
-    hit))
-
-(defun fikra-thread-is-running-p (id)
-  (string= (fikra-transient-flag-of fikra-transient-running-ids id) "t"))
-
-(defun fikra-transient-flag-of (lst id)
-  (if (null lst)
-    "nil"
-    (if (string= (car (car lst)) id)
-      (car (cdr (car lst)))
-      (fikra-transient-flag-of (cdr lst) id))))
-
 ;; The VIEWED thread's segment (the daemon frame builder's display row):
-;; the FOCUSED thread when it runs, else nil (the focused-thread rule).
+;; the thread whose *Fikra* buffer the CLIENT is viewing (gate r2 /
+;; codex r1 catch 2: interpreter-global current is the wrong witness
+;; once frames view different threads' buffers).
+(defun fikra-transient-viewed-segment-for (buffer-name)
+  (let ((id (fikra/thread/fikra-thread-id-of-buffer buffer-name)))
+    (if id (fikra-transient-segment id) nil)))
+
 (defun fikra-transient-viewed-segment ()
   (fikra-transient-segment (fikra/thread/fikra-thread-current)))
 
