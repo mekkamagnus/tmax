@@ -732,6 +732,25 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     expect(bashMsg).toBeGreaterThan(readMsg);
   });
 
+  test("a FAILED spawn renders an honest FAIL row + the model-visible message (never 'async)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "bad dir")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 191 "live")');
+    // Point the thread's worktree field at a nonexistent dir — the
+    // spawn's :cwd fails.
+    e(ed, '(fikra/thread/fikra-thread-set-field "worktree" "/nonexistent-dir-xyz")');
+    const r = Buffer.from(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command: "echo never" } } }] } }), "utf8").toString("hex");
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 191 "${r}")`);
+    e(ed, `(fikra-http-complete 191 200 "${Buffer.from("{}", "utf8").toString("hex")}")`);
+    const text = await until(ed, "(buffer-text)", "spawn failed");
+    expect(text).toContain("FAIL");
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("spawn failed");
+    expect(acc).not.toContain("never\n");
+    e(ed, '(fikra/thread/fikra-thread-set-field "worktree" nil)');
+  });
+
   test("the non-blocking proof is DURING: the eval answers BEFORE the 2s command finishes", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "slow")');
@@ -744,7 +763,12 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     expect(String(e(ed, "(+ 1 2)").value)).toBe("3");
     const dt = Date.now() - t0;
     expect(dt).toBeLessThan(1500);
-    // ...and the result lands at exit.
-    expect(await until(ed, "(buffer-text)", "SLOW-END", 60)).toContain("SLOW-END");
+    // DURING: the call row (sleep 2) is rendered but NO result row —
+    // the child verifiably still runs (the result shape, not the
+    // command text, which the tool-call row already contains).
+    expect(String(e(ed, "(buffer-text)").value)).not.toMatch(/→ (ok|FAIL)/);
+    // ...and the RESULT row (not the command echo) lands at exit.
+    const done = await until(ed, "(buffer-text)", "→ ok", 60);
+    expect(done).toMatch(/→ ok\s*SLOW-END|SLOW-END[\s\S]*→ ok/);
   });
 });

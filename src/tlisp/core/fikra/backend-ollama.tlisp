@@ -423,7 +423,13 @@ availability gate must be synchronous; the turn itself is async)."
 ;; stash, append + fire the next request directly).
 (defun fikra-ollama-bash-sentinel (pid exit-code)
   (let* ((raw fikra-ollama-async-out)
-         (code (fikra-ollama-exit-code raw))
+         (raw-code (fikra-ollama-exit-code raw))
+         ;; r128 (codex r127 catch 3): a MISSING EXIT: marker defaulted
+         ;; to success — the child's own exit-code is the truth when the
+         ;; marker never printed (a kill, a crash).
+         (code (if (fikra-ollama-has-exit-p raw)
+                 raw-code
+                 (number-to-string exit-code)))
          (ok (string= code "0"))
          (out (string-trim (fikra-ollama-strip-exit raw)))
          (msg (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string
@@ -469,6 +475,12 @@ availability gate must be synchronous; the turn itself is async)."
             (fikra-ollama-chat fikra-ollama-pending-message)))))))
 
 ;; The trailing EXIT:N line's N.
+;; Does RAW's last line carry the EXIT:N marker?
+(defun fikra-ollama-has-exit-p (raw)
+  (let* ((lines (string-split (string-trim raw) "\n"))
+         (last (if (> (length lines) 0) (nth (- (length lines) 1) lines) "")))
+    (string-prefix-p "EXIT:" last)))
+
 (defun fikra-ollama-exit-code (raw)
   (let* ((lines (string-split (string-trim raw) "\n"))
          (last (if (> (length lines) 0) (nth (- (length lines) 1) lines) "")))
