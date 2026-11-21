@@ -71,6 +71,8 @@ const popupText = (ed: Editor) => {
   return t;
 };
 
+const rangeListLisp = `(stagehand-range-list 0 93)`;
+
 describe("#293 — the :pty primitive", () => {
   test(":pty t gives the child a REAL TTY ([ -t 0 ] sees one); pipes do not", async () => {
     e(editor, `(make-process :command '("/bin/sh" "-c" "if [ -t 0 ]; then echo IS_TTY; else echo NOT_TTY; fi > /tmp/i293-tty-$$.out; sleep 0.1") :pty t :cwd "${process.cwd()}")`);
@@ -264,13 +266,32 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     const ref = (k: string) => String(e(editor, `(keymap-ref (editor/keymaps/buffer-keymap "*Stagehand-Remote*") "${k}")`).value);
     expect(ref("h")).toContain("stagehand-remote-input-key");
     expect(ref("Z")).toContain("stagehand-remote-input-key");
-    expect(ref("5")).toContain("stagehand-remote-input-key");
+    // gate r2: q KEEPS quit (the dolist clobbered it) — and EVERY
+    // printable char resolves (the full 94-domain, not a sample: the
+    // raw " and \ codegen made 2 of them unparsable).
+    expect(ref("q")).toContain("stagehand-remote-quit");
+    const all = String(e(editor, `(string-join "" (mapcar (lambda (k) (if (keymap-ref (editor/keymaps/buffer-keymap "*Stagehand-Remote*") k) "1" "0")) (stagehand/remote/stagehand-printable-keys-get)))`).value);
+    expect(all).toBe("1".repeat(94)); // q counts too (bound to quit)
     expect(ref("Enter")).toContain("stagehand-remote-input-enter");
     expect(ref("C-c")).toContain("stagehand-remote-cancel");
     // And typing a printable key during the run writes VERBATIM (the
     // echo fixture proves the PTY write; here the binding is the proof).
     e(editor, "(stagehand/remote/stagehand-remote-cancel)");
     await waitRemote(editor);
+  });
+
+  test("gate r2: the 1s HOLD-OFF arithmetic (the ms clock) + the ladder signals", async () => {
+    // script(1) itself dies on group signals, so a live multi-press
+    // run is unreachable — the hold-off GUARD and the signal LADDER
+    // are pure functions; assert them directly.
+    const held = (gap: number) => Number(String(e(editor, `(if (stagehand/remote/stagehand-press-held-off-p ${gap}) 1 0)`).value));
+    expect(held(300)).toBe(1); // 300ms gap: HELD (the r2 catch: 1 never engaged)
+    expect(held(1100)).toBe(0); // past 1s: escalates
+    const sig = (n: number) => String(e(editor, `(stagehand/remote/stagehand-ladder-signal ${n})`).value);
+    expect(sig(1)).toBe("SIGINT");
+    expect(sig(2)).toBe("SIGTERM");
+    expect(sig(3)).toBe("SIGKILL");
+    expect(sig(9)).toBe("SIGKILL");
   });
 
   test("no repository → the refusal status", () => {

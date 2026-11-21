@@ -4,7 +4,10 @@
           stagehand-remote-quit stagehand-remote-filter
           stagehand-remote-sentinel stagehand-remote-buffer-name
           stagehand-remote-alive-p stagehand-remote-last-exit
-          stagehand-remote-input-enter stagehand-remote-input-key)
+          stagehand-remote-input-enter stagehand-remote-input-key
+          stagehand-char-of stagehand-range-list
+          stagehand-printable-keys-get stagehand-press-held-off-p
+          stagehand-ladder-signal)
 
   (require-module stagehand/status)
 
@@ -43,6 +46,16 @@ fresh press AFTER the wait).")
   ;; Single-char string for a printable ASCII CODE (the table avoids
   ;; per-char chr builtins).
   (nth (- code 33) stagehand-printable-table))
+
+;; codepoint strings parallel to stagehand-printable-table (the
+;; codegen's hex payloads).
+(defvar stagehand-printable-codes
+  (list "21" "22" "23" "24" "25" "26" "27" "28" "29" "2a" "2b" "2c" "2d" "2e" "2f"
+        "30" "31" "32" "33" "34" "35" "36" "37" "38" "39" "3a" "3b" "3c" "3d" "3e" "3f" "40"
+        "41" "42" "43" "44" "45" "46" "47" "48" "49" "4a" "4b" "4c" "4d" "4e" "4f" "50" "51" "52" "53" "54" "55" "56" "57" "58" "59" "5a"
+        "5b" "5c" "5d" "5e" "5f" "60"
+        "61" "62" "63" "64" "65" "66" "67" "68" "69" "6a" "6b" "6c" "6d" "6e" "6f" "70" "71" "72" "73" "74" "75" "76" "77" "78" "79" "7a"
+        "7b" "7c" "7d" "7e"))
 
 (defvar stagehand-printable-table
   (list "!" (hex-decode "22") "#" "$" "%" "&" "'" "(" ")" "*" "+" "," "-" "." "/"
@@ -148,15 +161,12 @@ the trigger."
     (editor-set-status "Stagehand: no remote running")
     (let ((now (editor-time-now)))
       (if (and (> stagehand-remote-presses 0)
-               (< (- now stagehand-remote-last-press) 1))
+               (stagehand-press-held-off-p (- now stagehand-remote-last-press)))
         (editor-set-status "Stagehand: waiting — press C-c again after a second")
         (progn
           (setq stagehand-remote-presses (+ stagehand-remote-presses 1))
           (setq stagehand-remote-last-press now)
-          (let ((sig (cond
-                       ((= stagehand-remote-presses 1) "SIGINT")
-                       ((= stagehand-remote-presses 2) "SIGTERM")
-                       (t "SIGKILL"))))
+          (let ((sig (stagehand-ladder-signal stagehand-remote-presses)))
             (signal stagehand-remote-pid sig)
             (editor-set-status
               (concat "Stagehand: " sig " sent (press "
@@ -215,11 +225,42 @@ close the popup)."
         (editor/keymaps/keymap-set-key kmap "C-c" "(stagehand/remote/stagehand-remote-cancel)")
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/remote/stagehand-remote-quit)")
         (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/remote/stagehand-remote-input-enter)")
-        (dolist (key (stagehand-printable-keys))
-          (editor/keymaps/keymap-set-key kmap key
-            (concat "(stagehand/remote/stagehand-remote-input-key \"" key "\")")))
+        (stagehand-bind-printables kmap 0)
         (editor/keymaps/buffer-set-keymap (stagehand-remote-buffer-name) kmap))))
   t)
+
+(defun stagehand-bind-printables (kmap i)
+  ;; Bind every printable char EXCEPT q (quit owns it) with the char
+  ;; riding HEX-ENCODED — the codegen builds T-Lisp SOURCE, and raw
+  ;; " and \ make unparsable literals (the r2 gate's 2-of-94 catch).
+  (if (< i (length stagehand-printable-table))
+    (progn
+      (let ((key (nth i stagehand-printable-table)))
+        (if (not (string= key "q"))
+          (editor/keymaps/keymap-set-key kmap key
+            (concat "(stagehand/remote/stagehand-remote-input-key (hex-decode \""
+              (nth i stagehand-printable-codes) "\"))"))))
+      (stagehand-bind-printables kmap (+ i 1)))))
+
+(defun stagehand-printable-keys-get ()
+  "The printable key list (a VALUE getter)."
+  stagehand-printable-table)
+
+(defun stagehand-press-held-off-p (gap-ms)
+  "t when GAP-MS (milliseconds since the last press) is within the
+1s bounded wait — the pure guard (editor-time-now is ms; the r2 gate
+caught the 1-vs-1000 unit bug)."
+  (< gap-ms 1000))
+
+(defun stagehand-ladder-signal (presses)
+  "The signal for PRESS count: 1 → SIGINT, 2 → SIGTERM, ≥3 → SIGKILL."
+  (cond
+    ((<= presses 1) "SIGINT")
+    ((= presses 2) "SIGTERM")
+    (t "SIGKILL")))
+
+(defun stagehand-range-list (lo hi)
+  (if (> lo hi) (list) (cons lo (stagehand-range-list (+ lo 1) hi))))
 
 (defun stagehand-printable-keys ()
   ;; The printable ASCII range as single-char key strings.
