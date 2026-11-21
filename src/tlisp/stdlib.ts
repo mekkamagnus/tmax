@@ -667,6 +667,19 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     return createNumber(String(s.value).codePointAt(0)!);
   }));
 
+  // r135e (codex r135d catch): floor — T-Lisp division is FRACTIONAL;
+  // the hex-nibble math (and any integer arithmetic on quotients)
+  // needs an integer floor.
+  interpreter.defineBuiltin("floor", raw((args: TLispValue[]) => {
+    if (args.length !== 1) {
+      throw new Error("floor requires exactly 1 argument: a number");
+    }
+    if (args[0]?.type !== "number") {
+      throw new Error("floor requires a number");
+    }
+    return createNumber(Math.floor(Number(args[0].value)));
+  }));
+
   interpreter.defineBuiltin("char-toggle-case", raw((args: TLispValue[]) => {
     if (args.length !== 1 || args[0]?.type !== "string") {
       throw new Error("char-toggle-case requires a single-character string");

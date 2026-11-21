@@ -187,7 +187,9 @@ availability gate must be synchronous; the turn itself is async)."
   ;; once at the first fire, then each tool round appends its exchange —
   ;; r112: tool rounds must ride the NEXT request or the model forgets
   ;; its own tool use) + TOOLS (the model-driven loop).
-  (let* ((body (concat "{\"model\":\"" fikra-ollama-model
+  ;; r135e (codex r135d catch): the model name ESCAPES (a quote in a
+  ;; configured name broke the request body).
+  (let* ((body (concat "{\"model\":" (fikra-ollama-json-string fikra-ollama-model)
                        "\",\"stream\":false,\"messages\":["
                        "{\"role\":\"system\",\"content\":\"You are a concise coding assistant inside the tmax editor. Reply briefly. Use the provided tools when they help.\"},"
                        (fikra-ollama-chomp fikra-ollama-messages)
@@ -295,7 +297,14 @@ availability gate must be synchronous; the turn itself is async)."
                 ;; json-encode handles BOTH shapes (the reply's arguments
                 ;; arrive as a string OR a parsed object — raw concat
                 ;; stringified objects to "[object Object]", r113 live).
-                ",\"arguments\":" (condition-case nil (json-encode args) (error () "{}"))
+                ;; r135e (codex r135d catch): an EMPTY parsed object
+                ;; re-embeds as {} — json-encode renders empty lists as
+                ;; [] (object-ness is lost in the alist round-trip).
+                ",\"arguments\":" (condition-case nil
+                                    (if (and (listp args) (= (length args) 0))
+                                      "{}"
+                                      (json-encode args))
+                                    (error () "{}"))
                 "}}")))))
 
 ;; r117 (codex r116 P1#2): a PARKED call STOPS the round — later calls
@@ -863,9 +872,12 @@ availability gate must be synchronous; the turn itself is async)."
           (t (concat acc c)))))))
 
 ;; Two lowercase hex digits (the control-char range fits a byte).
+;; r135e (codex r135d catch): INTEGER division — T-Lisp / is
+;; fractional; the low nibble was lost (U+0001 escaped as \u0000).
 (defun fikra-ollama-hex2 (n)
-  (concat (fikra-ollama-hex-nibble (/ n 16))
-          (fikra-ollama-hex-nibble (- n (* 16 (/ n 16))))))
+  (let ((hi (floor (/ n 16))))
+    (concat (fikra-ollama-hex-nibble hi)
+            (fikra-ollama-hex-nibble (- n (* 16 hi))))))
 
 (defun fikra-ollama-hex-nibble (k)
   (substring "0123456789abcdef" k (+ k 1)))
