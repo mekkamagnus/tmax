@@ -40,6 +40,9 @@ completion source uses).")
 (defvar fikra-ollama-threads (hashmap)
   "request-id → the THREAD the turn belongs to (a late reply must land
 on its own thread, never whatever is focused at land time).")
+(defvar fikra-ollama-latest-id nil
+  "The LATEST fired request (r110: a replacement turn's pending must not
+adopt the REPLACED request's reply — only the latest may land).")
 
 (defun fikra-backend-ollama-available-p ()
   "t when the local ollama answers /api/tags (a sync curl probe — the
@@ -108,21 +111,37 @@ availability gate must be synchronous; the turn itself is async)."
       ;; on ITS thread even if focus moved.
       (editor/keymaps/keymap-mutable-set! fikra-ollama-threads
         (number-to-string id) (fikra/thread/fikra-thread-current))
+      (setq fikra-ollama-latest-id id)
       id)))
 
 ;; The thread's prior turns as messages-array entries (the event memory
 ;; in order; the memory is newest-first — reverse for array order). The
 ;; in-flight user message is NOT yet in memory (the caller emits it), so
 ;; the history ends just before it.
+;; Events arrive OLDEST-FIRST; the history is every COMPLETED turn —
+;; everything up to and including the LAST turn-end (the in-flight
+;; user message is emitted BEFORE its turn-start — a turn-start cut
+;; would double it; the turn-end boundary excludes the whole open turn).
 (defun fikra-ollama-history-messages ()
-  (fikra-ollama-history-scan (reverse (fikra/event/fikra-event-events)) 0 ""))
+  (let* ((events (fikra/event/fikra-event-events))
+         (cutoff (+ (fikra-ollama-last-turn-end events 0 -1) 1)))
+    (fikra-ollama-history-scan events 0 cutoff "")))
 
-(defun fikra-ollama-history-scan (events i acc)
+;; The index of the LAST turn-end (-1 when none — a first turn has no
+;; history).
+(defun fikra-ollama-last-turn-end (events i best)
   (if (>= i (length events))
+    best
+    (if (string= (fikra/event/fikra-event-get-str (nth i events) "kind") "turn-end")
+      (fikra-ollama-last-turn-end events (+ i 1) i)
+      (fikra-ollama-last-turn-end events (+ i 1) best))))
+
+(defun fikra-ollama-history-scan (events i cutoff acc)
+  (if (or (>= i (length events)) (>= i cutoff))
     acc
     (let* ((e (nth i events))
            (k (fikra/event/fikra-event-get-str e "kind")))
-      (fikra-ollama-history-scan events (+ i 1)
+      (fikra-ollama-history-scan events (+ i 1) cutoff
         (if (string= k "text-delta")
           (let ((sp (fikra/event/fikra-event-get-str e "speaker"))
                 (tx (fikra/event/fikra-event-get-str e "text")))
@@ -171,9 +190,11 @@ availability gate must be synchronous; the turn itself is async)."
          (body (hashmap-get fikra-ollama-bodies k)))
     (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k nil)
     (editor/keymaps/keymap-mutable-set! fikra-ollama-threads k nil)
-    ;; r109 (codex r108 P1#2): a reply whose turn is GONE (aborted,
-    ;; interrupted, superseded) discards — it must not render onto
-    ;; whatever thread is current.
+    ;; r109-r110: a reply whose turn is GONE discards — request
+    ;; identity (only the LATEST fired request may land), the thread
+    ;; guard, and the pending guard.
+    (if (not (= id (if fikra-ollama-latest-id fikra-ollama-latest-id -1)))
+      nil
     (if (not (and thread-id (string= thread-id (fikra/thread/fikra-thread-current))))
       nil
     (if (not fikra-ollama-pending-message)
@@ -205,7 +226,7 @@ availability gate must be synchronous; the turn itself is async)."
               (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
           (progn
             (fikra/thread/fikra-thread-turn-end "error")
-            (editor-set-status "Fikra-ollama: empty reply")))))))))
+            (editor-set-status "Fikra-ollama: empty reply"))))))))))
 
 ;; Model resolution: the tags body is small — the filter DID accumulate
 ;; nothing for tags (marker-shaped); resolve via one sync curl instead
@@ -266,6 +287,9 @@ availability gate must be synchronous; the turn itself is async)."
     (number-to-string id) "fikra/backend-ollama/fikra-backend-ollama-complete")
   (editor/keymaps/keymap-mutable-set! fikra-ollama-threads
     (number-to-string id) (fikra/thread/fikra-thread-current))
+  ;; The latest-request stamp the real fire carries (r110's guard reads
+  ;; it — the seed simulates the fire fully).
+  (setq fikra-ollama-latest-id id)
   id)
 
 (defun fikra-backend-ollama-seed-unused (id)
@@ -275,6 +299,9 @@ availability gate must be synchronous; the turn itself is async)."
   ;; The thread identity the real fire stamps (r109 guards read it).
   (editor/keymaps/keymap-mutable-set! fikra-ollama-threads
     (number-to-string id) (fikra/thread/fikra-thread-current))
+  ;; The latest-request stamp the real fire carries (r110's guard reads
+  ;; it — the seed simulates the fire fully).
+  (setq fikra-ollama-latest-id id)
   id)
 
 ;; Self-register

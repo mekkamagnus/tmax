@@ -134,3 +134,50 @@ describe("ollama chat lifecycle (r109 — codex r108 catches)", () => {
     expect(h).toContain('"role":"assistant","content":"noted"');
   });
 });
+
+describe("ollama replacement turns (r110 — codex r109 P1)", () => {
+  test("abort turn 1, start turn 2, deliver reply 1 — the STALE reply discards", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "first question")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 51 "live")');
+    e(ed, "(fikra/backend-ollama/fikra-backend-ollama-abort)");
+    // A REPLACEMENT turn: the new request (52) supersedes 51.
+    e(ed, '(fikra/chat/fikra-turn-send "second question")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 52 "live")');
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    // Reply 1 arrives LATE — it must NOT render nor settle turn 2.
+    const stale = hex(JSON.stringify({ message: { role: "assistant", content: "STALE_ANSWER" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 51 "${stale}")`);
+    e(ed, `(fikra-http-complete 51 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    const text = String(e(ed, "(buffer-text)").value);
+    expect(text).not.toContain("STALE_ANSWER");
+    // Reply 2 lands normally.
+    const fresh = hex(JSON.stringify({ message: { role: "assistant", content: "fresh answer" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 52 "${fresh}")`);
+    e(ed, `(fikra-http-complete 52 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+    expect(String(e(ed, "(buffer-text)").value)).toContain("fresh answer");
+  });
+
+  test("history ORDER: first exchange before second; the in-flight message excluded", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "first")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 61 "live")');
+    const r1 = hex(JSON.stringify({ message: { role: "assistant", content: "first answer" } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 61 "${r1}")`);
+    e(ed, `(fikra-http-complete 61 200 "${hex("{}")}")`);
+    e(ed, '(fikra/chat/fikra-turn-send "second")');
+    // turn-begin already ran — the history builder runs at fire time, but
+    // assert the shape the builder produces from THIS memory.
+    const h = String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value);
+    const first = h.indexOf('"content":"first"');
+    const answer = h.indexOf('"content":"first answer"');
+    expect(first).toBeGreaterThan(-1);
+    expect(answer).toBeGreaterThan(first);
+    // The in-flight message ("second") appears EXACTLY ONCE in the final
+    // body — the history cut excludes it; the explicit append adds it.
+    const bodyParts = h.split('"content":"second"');
+    expect(bodyParts.length - 1).toBe(0);
+  });
+});
