@@ -1729,6 +1729,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
 
             let ptyChildPgid: number | null = null;
             let ptyCaptureTried = false;
+            let lastLadderSignalNum = 0;
             const pid = nextProcessId++;
             const entry: { process: unknown; stdin: unknown; ptyChildPgid?: () => number | null } = {
               process: proc,
@@ -1887,9 +1888,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                 if (!ptyChildPgid) return false;
                 try { process.kill(-ptyChildPgid, 0); return true; } catch { return false; }
               };
-              const finish = () => {
+              const finish = (code: number = exitCode) => {
                 if (sentinelName && ctx.evalTlisp) {
-                  ctx.evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
+                  ctx.evalTlisp(`(${sentinelName} ${pid} ${code})`);
                 }
                 processTable.delete(pid);
               };
@@ -1898,15 +1899,22 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                 if (wrapperPid) {
                   try { process.kill(-wrapperPid, 'SIGKILL'); } catch { /* group gone */ }
                 }
+                // The poll runs while the session lives — no time cap
+                // (the r4 catch: after 60s the entry leaked and the
+                // status stayed 'running' forever; the user's next
+                // press always finds a live handle).
                 const poll = setInterval(() => {
                   if (!childLives()) {
                     clearInterval(poll);
-                    finish();
+                    finish(finalExit());
                   }
                 }, 100);
-                // Bounded: a session that somehow never dies settles in
-                // 60s (the entry stays; the status stays 'running').
-                setTimeout(() => clearInterval(poll), 60_000);
+                // `signal` updates the recorded ladder signal so the
+                // sentinel reports the signal that actually ENDED the
+                // operation (the r4 catch: the wrapper's initial INT
+                // was reported even when KILL ended it).
+                const finalExit = () =>
+                  128 + ((entry as { lastLadderSignalNum?: number }).lastLadderSignalNum || signum);
               } else {
                 finish();
               }
@@ -1965,6 +1973,16 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             // the ladder reaches it even after the wrapper is gone.
             const childPgid = (entry as { ptyChildPgid?: () => number | null }).ptyChildPgid?.();
             if (childPgid) {
+              // Record the ladder signal (the sentinel reports the one
+              // that ENDED the operation).
+              const SIG_ORDER: Record<string, number> = {
+                SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGILL: 4, SIGTRAP: 5,
+                SIGABRT: 6, SIGBUS: 7, SIGFPE: 8, SIGKILL: 9, SIGUSR1: 10,
+                SIGSEGV: 11, SIGUSR2: 12, SIGPIPE: 13, SIGALRM: 14,
+                SIGTERM: 15,
+              };
+              (entry as { lastLadderSignalNum?: number }).lastLadderSignalNum =
+                SIG_ORDER[sigName as string] ?? 9;
               try { process.kill(-childPgid, sigName as NodeJS.Signals); } catch { /* session gone */ }
             }
             return Either.right(createNil());

@@ -377,6 +377,9 @@ describe("#293 — push/pull flows (local bare remote)", () => {
     await new Promise((r) => setTimeout(r, 700));
     const s2 = mtime();
     expect(s2).toBe(s1);
+    // r4: the sentinel reports the signal that ENDED the operation —
+    // SIGKILL (137), not the wrapper's initial SIGINT (130).
+    expect(String(e(editor, "(stagehand/remote/stagehand-remote-last-exit)").value)).toBe("137");
     // The remote got nothing.
     expect(execFileSync("git", ["--git-dir", remote, "log", "-1", "--format=%s"]).toString().trim()).toBe("seed");
   });
