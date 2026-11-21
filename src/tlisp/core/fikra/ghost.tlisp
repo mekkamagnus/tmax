@@ -2,7 +2,10 @@
   (export fikra-ghost-active-p fikra-ghost-accept fikra-ghost-accept-word
           fikra-ghost-dismiss fikra-ghost-maybe-trigger fikra-ghost-set
           fikra-ghost-set-source fikra-ghost-source-local fikra-ghost-source-none
-          fikra-ghost-text fikra-ghost-stale-dismiss)
+          fikra-ghost-text fikra-ghost-stale-dismiss
+          fikra-ghost-source-ollama fikra-ghost-ollama-model-get
+          fikra-ghost-ollama-last-ms fikra-ghost-http-filter
+          fikra-ghost-cycle-source fikra-ghost-ollama-seed fikra-ghost-http-complete)
 
 ;; RFC-029 section 8.8 (P5, round 1): inline completion at the cursor.
 ;; The EDITOR state carries the rendered text (ghost-text-set); this module
@@ -187,5 +190,212 @@ none or the prefix is too short."
       nil
       (fikra-ghost-local-rest line prefix (+ i 1)))))
 
+;; ── the ollama source (r89 — the mockup's "ollama (local, 40ms)") ────
+;; ASYNC by design: the source fires the HTTP request and returns nil;
+;; the ghost SETS when the response lands (the http filter + the global
+;; fikra-http-complete callback below) — and only if the cursor still
+;; sits at the request's prefix. The measured latency rides the footer.
+
+(defvar fikra-ghost-ollama-url "http://localhost:11434"
+  "The local ollama server.")
+(defvar fikra-ghost-ollama-model nil
+  "The model to complete with. nil = resolve from /api/tags at first use
+(the first installed model — a deliberate default, setq to override).")
+(defvar fikra-ghost-ollama-last-ms nil
+  "The last completion's measured latency (the footer label's number).")
+(defvar fikra-ghost-http-bodies (hashmap)
+  "request-id → the accumulated response body (hex-decoded chunks).")
+(defvar fikra-ghost-http-starts (hashmap)
+  "request-id → the fire time in ms (the latency measurement).")
+(defvar fikra-ghost-pending-prefix nil
+  "The line prefix the in-flight request completes (the land-time check).")
+
+(defun fikra-ghost-source-ollama (prefix)
+  "The ASYNC completion source: fire the request, return nil (the ghost
+sets on arrival). The model resolves from /api/tags on first use."
+  (setq fikra-ghost-pending-prefix prefix)
+  (setq fikra-ghost-ollama-last-ms nil)
+  (if fikra-ghost-ollama-model
+    (fikra-ghost-ollama-generate prefix)
+    ;; Model unknown: ask /api/tags first; its completion fires the
+    ;; generate for the still-pending prefix.
+    (fikra-ghost-ollama-tags))
+  nil)
+
+(defun fikra-ghost-ollama-tags ()
+  (http-request (concat fikra-ghost-ollama-url "/api/tags")
+                :method "GET"
+                :filter "fikra/ghost/fikra-ghost-http-filter"))
+
+(defun fikra-ghost-ollama-generate (prefix)
+  (let* ((esc (fikra-ghost-json-escape prefix 0 ""))
+         (prompt (concat "Complete this code line. Output ONLY the continuation text, no commentary, no quotes around it:\n" esc))
+         (body (concat "{\"model\":\"" fikra-ghost-ollama-model
+                       "\",\"prompt\":\"" (fikra-ghost-json-escape prompt 0 "")
+                       "\",\"stream\":false,"
+                       "\"options\":{\"num_predict\":16,\"temperature\":0}}")))
+      (let ((id (http-request (concat fikra-ghost-ollama-url "/api/generate")
+                            :method "POST"
+                            :body body
+                            :filter "fikra/ghost/fikra-ghost-http-filter")))
+      (editor/keymaps/keymap-mutable-set! fikra-ghost-http-starts
+        (number-to-string id) (current-time))
+      id)))
+
+;; JSON-string escaping on the T-Lisp side (a runtime concat never sees
+;; the reader, but the EMBEDDED quotes/backslashes must be JSON-escaped;
+;; the backslash is hex-built — literal backslashes are reader-hostile).
+(defun fikra-ghost-json-escape (s i acc)
+  (if (>= i (length s))
+    acc
+    (let ((c (substring s i (+ i 1)))
+          (bs (hex-decode "5c")))
+      (fikra-ghost-json-escape s (+ i 1)
+        (cond
+          ((string= c "\"") (concat acc bs (hex-decode "22")))
+          ((string= c bs) (concat acc bs bs))
+          ((string= c "\n") (concat acc bs "n"))
+          (t (concat acc c)))))))
+
+;; The http filter (the primitive's callback): accumulate the body per id.
+(defun fikra-ghost-http-filter (id chunk-hex)
+  (let ((k (number-to-string id)))
+    (editor/keymaps/keymap-mutable-set! fikra-ghost-http-bodies k
+      (concat (hashmap-get fikra-ghost-http-bodies k) (hex-decode chunk-hex))))
+  t)
+
+(defun fikra-ghost-strip-echo (resp prefix)
+  (if (and prefix (>= (length resp) (length prefix))
+           (string= (substring resp 0 (length prefix)) prefix))
+    (substring resp (length prefix) (length resp))
+    resp))
+
+(defun fikra-ghost-ollama-anchor-holds-p ()
+  (let* ((line (buffer-line))
+         (col (cursor-column))
+         (cur (if (> col (length line)) line (substring line 0 col))))
+    (and fikra-ghost-pending-prefix
+         (string= cur fikra-ghost-pending-prefix))))
+
+;; alist getter over json-read-from-string shapes (lists of ("k" v)).
+(defun fikra-alist-get-ghost (key alist)
+  (let ((found nil))
+    (dolist (e alist)
+      (if (and (not found) (listp e) (= (length e) 2)
+               (string= (car e) key))
+        (setq found (car (cdr e)))))
+    found))
+
+;; Test seam: seed a request's start time + pending prefix (+ point the
+;; URL somewhere controllable) — the async land path is otherwise only
+;; observable against a live server.
+(defun fikra-ghost-ollama-seed (id prefix url)
+  (setq fikra-ghost-ollama-url url)
+  (editor/keymaps/keymap-mutable-set! fikra-ghost-http-starts
+    (number-to-string id) (current-time))
+  (setq fikra-ghost-pending-prefix prefix)
+  id)
+
+;; TEMP debug getter (remove before landing).
+;; Model getter (defvars are not readable cross-module; the export list
+;; is callables only).
+(defun fikra-ghost-ollama-model-get ()
+  fikra-ghost-ollama-model)
+
+(defun fikra-ghost-body-get (id)
+  (hashmap-get fikra-ghost-http-bodies (number-to-string id)))
+
+;; SPC a o: cycle the completion source none → local → ollama → none
+;; (the status announces the live choice; the mockup's footer rides each
+;; landed ghost).
+(defun fikra-ghost-cycle-source ()
+  (interactive)
+  (let ((next
+          (cond
+            ((string= fikra-ghost-source-name "fikra/ghost/fikra-ghost-source-none")
+              "fikra/ghost/fikra-ghost-source-local")
+            ((string= fikra-ghost-source-name "fikra/ghost/fikra-ghost-source-local")
+              "fikra/ghost/fikra-ghost-source-ollama")
+            (t "fikra/ghost/fikra-ghost-source-none"))))
+    (setq fikra-ghost-source-name next)
+    (editor-set-status
+      (cond
+        ((string= next "fikra/ghost/fikra-ghost-source-local")
+          "Fikra ghost: local (buffer context)")
+        ((string= next "fikra/ghost/fikra-ghost-source-ollama")
+          (concat "Fikra ghost: ollama (local"
+                  (if fikra-ghost-ollama-model (concat ", " fikra-ghost-ollama-model) "")
+                  ")"))
+        (t "Fikra ghost: off")))
+    next))
+
+;; The primitive's callback body (module-side — its defvars live here;
+;; the GLOBAL fikra-http-complete is a thin dispatcher below).
+(defun fikra-ghost-http-complete (id status data-hex)
+  (let* ((k (number-to-string id))
+         (body (hashmap-get fikra-ghost-http-bodies k))
+         (start (hashmap-get fikra-ghost-http-starts k)))
+    (if start
+      (setq fikra-ghost-ollama-last-ms (- (current-time) start)))
+    (editor/keymaps/keymap-mutable-set! fikra-ghost-http-bodies k "")
+    (if (not (= status 200))
+      (progn
+        (setq fikra-ghost-pending-prefix nil)
+        (editor-set-status
+          (concat "TAB accept · C-n partial · Esc dismiss · ollama (unavailable: "
+                  (number-to-string status) ")")))
+      (let ((parsed (condition-case nil (json-read-from-string body) (error () nil))))
+        (if (and parsed (fikra-alist-get-ghost "models" parsed))
+          ;; the tags reply: adopt the first model, fire the generate
+          (let ((first-model
+                  (condition-case nil
+                    (fikra-alist-get-ghost "name"
+                      (car (fikra-alist-get-ghost "models" parsed)))
+                    (error () nil))))
+            (if (and first-model (stringp first-model))
+              (progn
+                (setq fikra-ghost-ollama-model first-model)
+                (if fikra-ghost-pending-prefix
+                  (fikra-ghost-ollama-generate fikra-ghost-pending-prefix))))
+            t)
+          ;; the generate reply: the "response" field completes the line
+          (let ((resp (condition-case nil
+                         (fikra-alist-get-ghost "response" parsed)
+                         (error () nil))))
+            (if (and resp (stringp resp) (> (length resp) 0)
+                     (fikra-ghost-ollama-anchor-holds-p))
+              (progn
+                ;; Models often ECHO the prefix (live probe: dolphin-mistral
+                ;; returned 'const total = items.reduce...') — the ghost is
+                ;; the REMAINDER; strip a leading echo, keep the rest whole.
+                (fikra-ghost-set
+                  (fikra-ghost-strip-echo resp fikra-ghost-pending-prefix))
+                (editor-set-status
+                  (concat "TAB accept · C-n partial · Esc dismiss · ollama (local, "
+                          (number-to-string (if fikra-ghost-ollama-last-ms
+                                               fikra-ghost-ollama-last-ms 0))
+                          "ms)")))
+              (fikra-ghost-dismiss))
+            ;; clear AFTER the anchor check/strip (r89: clearing first
+            ;; failed anchor-holds' own pending-prefix read).
+            (setq fikra-ghost-pending-prefix nil)))))))
+
 (provide "fikra-ghost")
 )
+
+;; Strip RESP's
+
+
+;; The anchor check at LAND time: the cursor's line must still carry the
+;; requested prefix at the current column (a 20s completion must never
+;; land on moved ground — the mockup's 40ms budget is aspirational; the
+;; contract is honesty about what arrived).
+
+;; The primitive's callback name is a BARE symbol — the GLOBAL dispatcher
+;; routes into the module (module defvars are invisible outside).
+(defun fikra-http-complete (id status data-hex)
+  (progn
+    (require-module "fikra/ghost")
+    (condition-case nil
+      (fikra/ghost/fikra-ghost-http-complete id status data-hex)
+      (error () nil))))

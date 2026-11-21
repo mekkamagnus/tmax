@@ -126,6 +126,10 @@ With 0 or negative number, disable."
 ;; #221: worktree handoff — patch-apply-or-refuse, never a merge. Enters
 ;; worktree mode when local; applies the worktree patch when active.
 (key-bind "SPC a w" "(progn (require-module fikra/worktree) (fikra/worktree/fikra-worktree-review))" "normal")
+;; RFC-029 8.8: cycle the ghost completion source (none → local →
+;; ollama → none); the landed ghost's footer carries the measured
+;; latency.
+(key-bind "SPC a o" "(progn (require-module \"fikra/ghost\") (fikra/ghost/fikra-ghost-cycle-source))" "normal")
 ;; #222: new thread (generated id, inherits runtime mode) + the
 ;; *Fikra-Threads* list buffer (j/k/RET/d/n).
 (key-bind "SPC a t" "(progn (require-module fikra/thread) (fikra/thread/fikra-thread-new))" "normal")

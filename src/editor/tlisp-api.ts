@@ -1826,18 +1826,24 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                   if (done) break;
                   const chunk = decoder.decode(value, { stream: true });
                   if (filterFn && ctx.evalTlisp) {
-                    ctx.evalTlisp(`(${filterFn} ${requestId} ${JSON.stringify(chunk)})`);
+                    // r89: HEX transport — raw JSON.stringify chunks lose
+                    // their escaped quotes to the T-Lisp reader (the #224
+                    // process-output class; hex chars are reader-safe).
+                    const hex = Buffer.from(chunk, 'utf8').toString('hex');
+                    ctx.evalTlisp(`(${filterFn} ${requestId} "${hex}")`);
                   }
                 }
               }
 
               if (ctx.evalTlisp) {
                 const headersStr = JSON.stringify(responseHeaders);
-                ctx.evalTlisp(`(fikra-http-complete ${requestId} ${status} ${JSON.stringify(headersStr)})`);
+                const hexH = Buffer.from(headersStr, 'utf8').toString('hex');
+                ctx.evalTlisp(`(fikra-http-complete ${requestId} ${status} "${hexH}")`);
               }
             } catch (e) {
               if (ctx.evalTlisp) {
-                ctx.evalTlisp(`(fikra-http-complete ${requestId} 0 ${JSON.stringify(e instanceof Error ? e.message : String(e))})`);
+                const hexE = Buffer.from(e instanceof Error ? e.message : String(e), 'utf8').toString('hex');
+                ctx.evalTlisp(`(fikra-http-complete ${requestId} 0 "${hexE}")`);
               }
             }
           })();

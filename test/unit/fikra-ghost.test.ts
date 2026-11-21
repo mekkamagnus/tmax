@@ -193,3 +193,74 @@ describe("#8.8 ghost - pre-1.4 width fallback (r41)", () => {
     expect(_fallbackCells.sliceCells("a" + E + "[31mb" + E + "[0mc", 1, 2)).toContain(E + "[31m");
   });
 });
+
+describe("#8.8 ghost — the ollama source (r89)", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const LINE = "const total = items.";
+
+  async function armed(editor: Editor, prefix = LINE): Promise<void> {
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, `(buffer-insert "${prefix}")`);
+    e(editor, `(fikra/ghost/fikra-ghost-ollama-seed 7 "${prefix}" "http://127.0.0.1:1")`);
+  }
+
+  test("the landed response sets the ghost (echo-stripped) + the latency footer", async () => {
+    const editor = await createStartedEditor("");
+    await armed(editor);
+    // The full body arrives as one hex chunk; completion follows.
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: LINE + ".reduce((a,b)=>a+b, 0)" }))}")`);
+    e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
+    // The ghost is the REMAINDER (the prefix echo stripped), anchored here.
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-text)").value)).toBe(".reduce((a,b)=>a+b, 0)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("ollama (local,");
+    expect(String(e(editor, "(editor-status)").value)).toContain("ms)");
+  });
+
+  test("a non-echoing response passes through whole", async () => {
+    const editor = await createStartedEditor("");
+    await armed(editor);
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: " reduce" }))}")`);
+    e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-text)").value)).toBe(" reduce");
+  });
+
+  test("the cursor moved off the prefix: the late landing DISCARDS (no stale ghost)", async () => {
+    const editor = await createStartedEditor("");
+    await armed(editor);
+    e(editor, "(cursor-move 0 0)"); // away from the end-of-line anchor
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 7 "${hex(JSON.stringify({ response: ".reduce(x)" }))}")`);
+    e(editor, `(fikra-http-complete 7 200 "${hex("{}")}")`);
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
+  });
+
+  test("a dead server reports honestly in the footer", async () => {
+    const editor = await createStartedEditor("");
+    await armed(editor, "x.");
+    e(editor, `(fikra-http-complete 7 0 "${hex("connect refused")}")`);
+    expect(String(e(editor, "(editor-status)").value)).toContain("ollama (unavailable");
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
+  });
+
+  test("the tags reply adopts the first model (the /api/tags default)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, `(fikra/ghost/fikra-ghost-ollama-seed 8 "items." "http://127.0.0.1:1")`);
+    e(editor, `(fikra/ghost/fikra-ghost-http-filter 8 "${hex(JSON.stringify({ models: [{ name: "qwen3:8b" }, { name: "gemma3:12b" }] }))}")`);
+    e(editor, `(fikra-http-complete 8 200 "${hex("{}")}")`);
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-ollama-model-get)").value)).toBe("qwen3:8b");
+  });
+
+  test("SPC a o cycles the source and the binding is registered", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, "(require-module fikra/mode)");
+    expect(JSON.stringify(e(editor, '(key-binding "SPC a o" "normal")').value)).toContain("fikra-ghost-cycle-source");
+    // none -> local -> ollama -> none (the fn returns the source name;
+    // the STATUS carries the human label).
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-cycle-source)").value)).toContain("local");
+    expect(String(e(editor, "(editor-status)").value)).toContain("Fikra ghost: local");
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-cycle-source)").value)).toContain("ollama");
+    expect(String(e(editor, "(fikra/ghost/fikra-ghost-cycle-source)").value)).toContain("none");
+    expect(String(e(editor, "(editor-status)").value)).toContain("Fikra ghost: off");
+  });
+});
