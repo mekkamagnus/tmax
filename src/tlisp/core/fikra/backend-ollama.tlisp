@@ -449,6 +449,11 @@ availability gate must be synchronous; the turn itself is async)."
 
 ;; Resume run-calls from the stash's index (the message already
 ;; appended).
+;; r129: the t-clause body MUST be a single progn — a multi-expression
+;; cond clause throws ("cond clause must have exactly 2 elements") and
+;; the dispatcher's condition-case swallowed it, sticking live turns
+;; "running" after the async tool round (unit-green because the async
+;; tests never asserted the post-refire settle).
 (defun fikra-ollama-resume-from (cont msg)
   (let ((calls (car cont))
         (i (car (cdr cont)))
@@ -461,7 +466,7 @@ availability gate must be synchronous; the turn itself is async)."
       (cond
         ((and (symbolp results) (string= (symbol-name results) "parked")) nil)
         ((and (symbolp results) (string= (symbol-name results) "async")) nil)
-        (t
+        (t (progn
           (setq fikra-ollama-messages
             (concat fikra-ollama-messages "" results))
           (if (>= fikra-ollama-round fikra-ollama-max-rounds)
@@ -472,7 +477,7 @@ availability gate must be synchronous; the turn itself is async)."
                       (list "speaker" "assistant")
                       (list "text" "(tool round cap reached — stopping the loop)")))
               (fikra/thread/fikra-thread-turn-end "completed"))
-            (fikra-ollama-chat fikra-ollama-pending-message)))))))
+            (fikra-ollama-chat fikra-ollama-pending-message))))))))
 
 ;; The trailing EXIT:N line's N.
 ;; Does RAW's last line carry the EXIT:N marker?

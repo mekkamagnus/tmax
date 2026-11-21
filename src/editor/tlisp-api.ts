@@ -1844,7 +1844,12 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
 
           (async () => {
             try {
-              const response = await fetch(url, { method, body, headers });
+              // r129: Bun's fetch defaults to a ~5-MINUTE timeout —
+              // a slow local model (qwen3 thinking ≈ 2-5 min/reply)
+              // hit it LIVE: the fetch threw, the completion arrived
+              // status 0, and the ollama turn errored with NO tool row.
+              // 15 min covers a full tool round-trip on small models.
+              const response = await fetch(url, { method, body, headers, timeout: 900_000 });
               const status = response.status;
               const responseHeaders: Record<string, string> = {};
               response.headers.forEach((v, k) => { responseHeaders[k] = v; });

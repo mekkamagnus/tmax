@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterAll } from "bun:test";
+import { describe, expect, test, beforeEach, beforeAll, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +16,8 @@ type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 
 // r126: the async sentinel re-fires a REAL request after the round —
 // intercept it: poll for a NEW latest-id, seed it, complete it.
+// r129: THROW when the re-fire never arrives (a silent return here is
+// how a broken resume path stayed unit-green while live turns stuck).
 async function settleRefireFrom(ed: Editor, before: string, reply: string): Promise<void> {
   for (let i = 0; i < 40; i++) {
     const now = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
@@ -28,6 +30,7 @@ async function settleRefireFrom(ed: Editor, before: string, reply: string): Prom
     }
     await new Promise((res) => setTimeout(res, 100));
   }
+  throw new Error("the post-round re-fire never arrived (resume path broken?)");
 }
 
 
@@ -64,16 +67,67 @@ async function armed(): Promise<Editor> {
   e(ed, "(fikra/chat/fikra-chat-open)");
   e(ed, "(require-module fikra/backend-ollama)");
   e(ed, '(fikra/adapter/fikra-set-backend-forced "ollama")');
-  // r126: bash is async and the sentinel RE-FIRES real requests — a
-  // live localhost ollama would race every seeded completion. Point at
-  // a dead port: real requests fail fast and the pending-guard discards
-  // their completions (every test drives replies synthetically).
-  e(ed, '(fikra/backend-ollama/fikra-backend-ollama-set-url "http://127.0.0.1:1")');
-  // Pin a model (no live /api/tags resolution on the dead port).
+  // r129: point at the STUB server — /api/tags answers (availability +
+  // model resolution pass), /api/chat accepts and NEVER responds. Every
+  // real fire (the initial chat AND the async sentinel's re-fire) hangs
+  // forever, so nothing can race the synthetic completions. (The r126
+  // dead-port fixture refused instantly — fine until the r129 resume
+  // fix made the re-fire actually fire: its refusal could land while it
+  // was still latest and error the turn mid-test.)
+  e(ed, `(fikra/backend-ollama/fikra-backend-ollama-set-url "${stubUrl}")`);
+  // Pin a model (no live /api/tags resolution dependency).
   e(ed, '(fikra/backend-ollama/fikra-backend-ollama-set-model "test:fake")');
   e(ed, "(fikra/chat/fikra-refresh-lighter)");
   return ed;
 }
+
+// r129: the stub ollama (see armed()). A SEPARATE PROCESS: the
+// availability probe is a SYNC shell-command curl — it blocks the
+// editor's event loop, so an in-process listener can never answer it
+// (curl self-deadlocks until --max-time). /api/tags answers instantly;
+// POST /api/chat swallows the body and never responds (every real
+// fire hangs; synthetic completions drive all replies).
+let stubUrl = "";
+let stubProc: ReturnType<typeof Bun.spawn> | null = null;
+beforeAll(async () => {
+  const dir = mkdtempSync(join(tmpdir(), "fikra-stub-"));
+  const script = join(dir, "stub.ts");
+  writeFileSync(script, `
+const body = JSON.stringify({ models: [{ name: "test:fake" }] });
+const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
+  data(socket, chunk) {
+    if (chunk.toString().includes("GET /api/tags")) {
+      socket.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: " + body.length + "\\r\\nConnection: close\\r\\n\\r\\n" + body);
+      socket.end();
+    }
+    // POST /api/chat: swallow the body, never respond.
+  },
+} });
+console.log(l.port);
+`);
+  stubProc = Bun.spawn(["bun", "run", script], { stdout: "pipe", stderr: "ignore" });
+  // Read the FIRST LINE only (the child keeps running to serve).
+  const stream = stubProc.stdout;
+  if (!stream || typeof stream === "number") throw new Error("stub ollama: no stdout");
+  const port = await new Promise<string>((resolve, reject) => {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let acc = "";
+    (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value);
+        const nl = acc.indexOf("\n");
+        if (nl >= 0) { resolve(acc.slice(0, nl)); await reader.cancel(); return; }
+      }
+      reject(new Error(`stub ollama exited before printing a port: ${acc}`));
+    })();
+  });
+  stubUrl = `http://127.0.0.1:${port.trim()}`;
+  // Refuse to run against nothing (every test would 2s-timeout).
+  if (!/^\d+$/.test(port.trim())) throw new Error(`stub ollama failed to start: ${port}`);
+});
 
 const dirs: string[] = [];
 const originalCwd = process.cwd();
@@ -92,6 +146,7 @@ beforeEach(() => {
 afterAll(() => {
   process.chdir(originalCwd);
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  stubProc?.kill();
 });
 
 describe("#8.1 raw-API ollama chat backend (r108)", () => {
@@ -770,5 +825,25 @@ describe("ollama async hardening (r127 — codex r126 catches)", () => {
     // ...and the RESULT row (not the command echo) lands at exit.
     const done = await until(ed, "(buffer-text)", "→ ok", 60);
     expect(done).toMatch(/→ ok\s*SLOW-END|SLOW-END[\s\S]*→ ok/);
+  });
+
+  // r129 — the LIVE catch: the turn must SETTLE after the async round.
+  // The resume's cond t-clause had two body expressions (T-Lisp clauses
+  // are exactly 2 elements) — the throw was swallowed by the upstream
+  // condition-case and live turns stuck "running" after the tool
+  // result; every unit test stopped at the result row, so the suite
+  // was green. This is the first consumer of settleRefireFrom.
+  test("the async round SETTLES: the re-fire reply completes the turn", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "settle")');
+    fireCalls(ed, 183, [{ name: "bash", args: { command: "echo SETTLE-BASH" } }]);
+    // The child ran and the sentinel emitted the result row.
+    await until(ed, "(buffer-text)", "SETTLE-BASH", 60);
+    // The sentinel's resume RE-FIRES (a new latest-id appears) — the
+    // seeded reply must end the turn (throws if the re-fire never comes).
+    await settleRefireFrom(ed, "183", "SETTLED-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    const text = await until(ed, "(buffer-text)", "SETTLED-DONE", 20);
+    expect(text).toContain("SETTLED-DONE");
   });
 });

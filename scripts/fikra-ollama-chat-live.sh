@@ -124,7 +124,10 @@ else
 fi
 echo "$TOOLCHAT" | grep -q "⚙ bash" \
   && ok "the row rendered" || bad "the tool row missing from the buffer"
-case "$OUT" in idle) ok "tool turn completed";; error) say "  (tool turn ended error — the evidence asserts carry the truth)";; *) bad "tool turn ended $OUT";; esac
+# r129: the post-tool re-fire MUST settle the turn — a stuck "running"
+# (resume silently swallowed) or an "error" after a successful tool
+# result are both failures, not notes.
+case "$OUT" in idle) ok "tool turn SETTLED (the post-tool re-fire completed it)";; *) bad "tool turn ended $OUT (the settle is broken)";; esac
 
 # The L2 GATE live: ask for a destructive command — the panel must park it.
 ev '(fikra/chat/fikra-turn-send "Use the bash tool to run exactly: rm -rf build/")' > /dev/null
