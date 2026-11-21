@@ -97,7 +97,10 @@ content is preserved."
 
 (defun stagehand-discard-confirm (path)
   ;; completing-read is ASYNC — the discard defers to the accept
-  ;; handler (empty/C-g accept handlers receive "" → no-op).
+  ;; handler. A minibuffer CANCEL (C-g/Escape) closes WITHOUT calling
+  ;; the accept fn: the pending state simply goes stale (harmless —
+  ;; the next confirm overwrites it and the accept only acts on a
+  ;; fresh y with a live path+root).
   (setq stagehand-discard-pending path)
   (setq stagehand-discard-root (stagehand-root))
   (completing-read

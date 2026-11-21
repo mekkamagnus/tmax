@@ -178,7 +178,9 @@ describe("#287 — per-row actions (index + worktree asserted)", () => {
     }
   });
 
-  test("argv safety: spaces, leading dash, unicode all stage + unstage", () => {
+  test("argv safety: spaces, leading dash, unicode stage AND unstage (incl. the dash restore path)", () => {
+    writeFileSync(join(process.cwd(), "base.txt"), "base\n");
+    commit("base"); // HEAD must exist: git restore --staged resolves it
     writeFileSync(join(process.cwd(), "with space.txt"), "a\n");
     writeFileSync(join(process.cwd(), "-dashy.txt"), "b\n");
     writeFileSync(join(process.cwd(), "uni-éè.txt"), "c\n");
@@ -190,6 +192,11 @@ describe("#287 — per-row actions (index + worktree asserted)", () => {
       expect(git("-c", "core.quotePath=false", "diff", "--cached", "--name-only")).toContain(name);
     }
     expect(git("-c", "core.quotePath=false", "diff", "--cached", "--name-only").split("\n").length).toBe(3);
+    // The leading-dash path rides `git restore --staged --` too (the
+    // u argv path; the gate caught this being unexercised).
+    cursorTo("-dashy.txt");
+    e(editor, "(stagehand/stage/stagehand-unstage-file)");
+    expect(git("diff", "--cached", "--name-only")).not.toContain("-dashy.txt");
   });
 });
 
@@ -244,7 +251,7 @@ describe("#287 — header-wide runs", () => {
     cursorTo("Unstaged (2)");
     e(editor, "(stagehand/stage/stagehand-stage-section)");
     const st = String(e(editor, "(editor-status)").value);
-    expect(st).toContain("applied 0 of 2 visited, failed at");
+    expect(st).toContain("applied 0 of 2 visited, failed at a.txt"); // FIRST row top-to-bottom
     chmodSync(join(process.cwd(), ".git"), 0o755);
     // Idempotent re-run succeeds after the fix.
     cursorTo("Unstaged (2)");
@@ -294,6 +301,62 @@ describe("#287 — header-wide runs", () => {
     cursorTo(" M a.txt");
     e(editor, "(stagehand/stage/stagehand-stage-file)");
     expect(String(e(editor, '(stagehand/status/stagehand-status-folded-p "Untracked")').value)).toBe("true");
+  });
+});
+
+describe("#287 — gate r1 coverage", () => {
+  test("PER-ROW git failure: status names exit + stderr; buffer unchanged", () => {
+    writeFileSync(join(process.cwd(), "n.txt"), "x\n");
+    statusOf();
+    chmodSync(join(process.cwd(), ".git"), 0o555); // break git
+    cursorTo("?? n.txt");
+    e(editor, "(stagehand/stage/stagehand-stage-file)");
+    const st = String(e(editor, "(editor-status)").value);
+    expect(st).toContain("git failed");
+    expect(String(e(editor, "(buffer-current)").value)).toBe("*Stagehand*"); // unchanged
+    chmodSync(join(process.cwd(), ".git"), 0o755);
+  });
+
+  test("D on an UNSTAGED-DELETED file RESTORES it (the worktree-D row)", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "committed content\n");
+    commit("base");
+    rmSync(join(process.cwd(), "f.txt"));
+    statusOf();
+    cursorTo(" D f.txt");
+    e(editor, "(stagehand/stage/stagehand-discard-file)");
+    e(editor, '(stagehand/stage/stagehand-discard-accept "y")');
+    expect(file("f.txt")).toBe("committed content\n");
+  });
+
+  test("SPLIT row: s stages the worktree side; u unstages the index side", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() }); // staged v2
+    writeFileSync(join(process.cwd(), "f.txt"), "v3\n"); // + unstaged v3
+    statusOf();
+    // s on the split row stages the WORKTREE side: index → v3.
+    cursorTo("MM f.txt");
+    e(editor, "(stagehand/stage/stagehand-stage-file)");
+    expect(git("diff", "--cached")).toContain("+v3");
+    expect(file("f.txt")).toBe("v3\n");
+    // u on the (now single 'M ') row unstages: index → HEAD, worktree keeps v3.
+    statusOf();
+    cursorTo("M  f.txt");
+    e(editor, "(stagehand/stage/stagehand-unstage-file)");
+    expect(git("diff", "--cached")).toBe("");
+    expect(file("f.txt")).toBe("v3\n");
+  });
+
+  test("the REAL C-g minibuffer cancel is a no-op (pending goes stale)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    statusOf();
+    cursorTo(" M f.txt");
+    await editor.handleKey("D");
+    await editor.handleKey("C-g"); // minibuffer cancel — accept never fires
+    expect(file("f.txt")).toBe("v2\n"); // untouched
   });
 });
 
