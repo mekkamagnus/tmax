@@ -24,8 +24,12 @@ content.
   code swaps between them freely. Non-string argv elements are a
   TypeError; the empty list is a FormatError.
 - **`stagehand-git-argv`** conses `"git"` onto args — the mutation
-  commands pass paths as argv ELEMENTS (structurally safe: no quoting,
-  no pathspec magic, no injection surface at all).
+  commands pass paths as argv ELEMENTS (no quoting, no injection
+  surface). CORRECTION (codex r1, reproduced): argv alone does NOT
+  disable git PATHSPEC magic — a file named `:(glob)*.txt` globbed
+  its siblings. Every path also rides `:(literal)` (codex r1 fix);
+  unstage branches to `git rm --cached` on unborn repos (restore
+  --staged cannot resolve HEAD there).
 - The #289 diff dispatch keeps its (gated, injection-hardened)
   string path — migrating it to argv is a natural follow-up for the
   cluster, not this issue's scope.
