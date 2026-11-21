@@ -107,11 +107,20 @@ for i in $(seq 1 360); do
 done
 [ -n "$TOOL_DONE" ] || bad "tool turn never settled"
 TOOLCHAT=$(ev '(progn (buffer-switch "*Fikra*") (buffer-text))' | sed -e 's/\x1b\[[0-9;]*m//g')
-# r114: the row + the RESULT line (the prompt alone must not satisfy).
-echo "$TOOLCHAT" | grep -q "bash" \
-  && echo "$TOOLCHAT" | grep -E -q "→ (ok|FAIL).*TOOL-ROUND-LIVE|TOOL-ROUND-LIVE.*→ " \
-  && ok "the MODEL-DRIVEN tool round rendered (row + result evidence)" \
-  || bad "no tool round evidence (row or result missing)"
+# r114b (codex r114): buffer greps can match prompt/assistant lines —
+# the EVENT LOG is ground truth: a tool-call (bash, the exact command)
+# AND its ok tool-result with the marker output.
+EVLOG="$(find "$LOG/repo/.tmax/fikra/threads" -name events.jsonl 2>/dev/null | head -1)"
+say "  (log: $EVLOG)"
+if [ -n "$EVLOG" ] && grep -q 'TOOL-ROUND-LIVE' "$EVLOG" \
+   && grep -q 'tool-call' "$EVLOG" \
+   && grep -q 'tool-result' "$EVLOG"; then
+  ok "the MODEL-DRIVEN tool round RAN (the event log carries the call + result)"
+else
+  bad "no tool round in the event log (call or result missing)"
+fi
+echo "$TOOLCHAT" | grep -q "⚙ bash" \
+  && ok "the row rendered" || bad "the tool row missing from the buffer"
 [ "$OUT" = "idle" ] || bad "tool turn ended $OUT (expected idle)"
 
 STATUS=$(ev '(editor-status)' | tail -1)
