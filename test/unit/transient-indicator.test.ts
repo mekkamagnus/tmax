@@ -228,6 +228,35 @@ describe("#319 — the frozen→clear terminal sequence at EVERY terminal kind",
     tick(editor);
     expect(segment(editor, "main")).toBe("null");
   });
+  test("a terminal FROM CONFIRMING revives the interval (codex r5: running→confirming→interrupted after the tick stopped)", () => {
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    e(editor, delta("x"));
+    silence(editor);
+    // The approval wait: confirming is NOT running — a tick here stops
+    // the interval (no runner, no frame yet).
+    e(editor, '(fikra/thread/fikra-thread-status-set "confirming")');
+    tick(editor);
+    expect(String(e(editor, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value)).toBe("0");
+    // The interrupt creates a frozen frame — the interval MUST revive to
+    // carry its clear (served path)…
+    e(editor, '(fikra/thread/fikra-thread-status-set "interrupted")');
+    expect(segment(editor, "main")).toMatch(/^✓/);
+    expect(String(e(editor, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value)).toBe("1");
+    e(editor, '(fikra/transient/fikra-transient-mark-rendered "main")');
+    tick(editor);
+    expect(segment(editor, "main")).toBe("null");
+    expect(String(e(editor, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value)).toBe("0");
+    // …and the HEADLESS path too (no serve — the ~10-tick bound runs).
+    e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+    silence(editor);
+    e(editor, '(fikra/thread/fikra-thread-status-set "confirming")');
+    tick(editor);
+    e(editor, '(fikra/thread/fikra-thread-status-set "interrupted")');
+    for (let i = 0; i < 10; i++) tick(editor);
+    expect(segment(editor, "main")).toBe("null");
+    expect(String(e(editor, "(if (fikra/transient/fikra-transient-active-p) 1 0)").value)).toBe("0");
+  });
+
   test("the HEADLESS bound: an unserved frame clears after ~10 ticks (no client leaks the interval)", () => {
     e(editor, "(fikra/thread/fikra-thread-turn-begin)");
     silence(editor);

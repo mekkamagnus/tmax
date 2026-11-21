@@ -288,6 +288,12 @@ regardless of the tick/poll race order."
               (fikra-transient-frozen-ms-of id))))
   (editor/keymaps/keymap-mutable-set! fikra-transient-frozen-age id 0)
   (editor/keymaps/keymap-mutable-set! fikra-transient-frozen id 1)
+  ;; The interval MUST be live to carry this frame's clear (codex r5): a
+  ;; terminal FROM CONFIRMING (running→confirming lets the tick stop —
+  ;; confirming is not running; confirming→interrupted then freezes)
+  ;; would otherwise strand the frame forever — no ticks to age, serve-
+  ;; clear, or run the headless bound. Idempotent start.
+  (fikra-transient-start)
   ;; Announce: the terminal frame CHANGES the display — clients whose
   ;; only delta is this segment must repaint (codex r2: a frozen frame
   ;; the client never displays must not be served-then-cleared unseen).
