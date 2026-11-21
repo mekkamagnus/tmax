@@ -707,14 +707,15 @@ availability gate must be synchronous; the turn itself is async)."
     (write-file-content abs content)
     ;; r116+r134: the PER-ACTION checkpoint — the edit lands its OWN ref
     ;; (<turn>-aN) BEFORE the loop continues (the mockup's 'each mutating
-    ;; action lands a checkpoint ref'; the async capture's
-    ;; checkpoint-ready rides the r107 final-trigger → the INLINE merge
-    ;; puts the marker on THIS edit row). r134 (codex r130 P1#4): kind
-    ;; "action" — two edits in one turn no longer overwrite each other's
-    ;; ref (they used to share the bare completion ref).
+    ;; action lands a checkpoint ref'). r134b (codex r134 P1): SYNC —
+    ;; the write and its snapshot are one step, so the snapshot holds
+    ;; EXACTLY this edit's state (an async capture's `git add -A` raced
+    ;; the NEXT edit into the frame) and the checkpoint-ready event
+    ;; order matches the edit order (the inline merge can no longer
+    ;; attach a late marker to the wrong edit row).
     (condition-case nil
       (progn (require-module fikra/checkpoint)
-             (fikra/checkpoint/fikra-checkpoint-capture-async "action"))
+             (fikra/checkpoint/fikra-checkpoint-capture "action"))
       (error () nil))
       (fikra/event/fikra-event-emit
         (list (list "kind" "tool-result") (list "ok" t)

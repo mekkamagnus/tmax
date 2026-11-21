@@ -156,15 +156,22 @@ commit sha on success; emits checkpoint-ready/checkpoint-error FAEP
 events; nil when disabled or failed. Never touches turn state."
   (if (fikra-checkpoint-disable-p)
     nil
-    (let* ((tmp (concat (fikra/thread/fikra-thread-field "root")
-                        "/.tmax/fikra/tmp-index-" kind))
-           (out (shell-command (fikra-checkpoint-command tmp kind))))
+    ;; r134b: the ref derives ONCE (the old shape called
+    ;; fikra-checkpoint-ref in BOTH the command and the event — each
+    ;; allocating a fresh action seq; the event named a ref that never
+    ;; existed).
+    (let* ((suffix (fikra-checkpoint-suffix kind))
+           (ref (concat "refs/fikra/" (fikra/thread/fikra-thread-field "id") "/"
+                       (number-to-string (fikra/thread/fikra-thread-turn-count)) suffix))
+           (tmp (concat (fikra/thread/fikra-thread-field "root")
+                        "/.tmax/fikra/tmp-index-" kind suffix))
+           (out (shell-command (fikra-checkpoint-command-for tmp ref kind))))
       (let ((sha (fikra-checkpoint-tail out)))
         (setq fikra-checkpoint-last-ref sha)
         (fikra/event/fikra-event-emit
           (if sha
             (list (list "kind" "checkpoint-ready")
-                  (list "ref" (fikra-checkpoint-ref kind))
+                  (list "ref" ref)
                   (list "sha" sha))
             (list (list "kind" "checkpoint-error")
                   (list "reason" (string-trim (substring out 0 (min 200 (length out))))))))
@@ -193,6 +200,15 @@ events; nil when disabled or failed. Never touches turn state."
 ;; ── process-based capture (the RFC's async reactor) ────────────────
 ;; Spawned via make-process; the sentinel parses the tail and emits the
 ;; FAEP event. Used by #214's turn sentinel for completion captures.
+;; r134b: the suffix for a KIND (allocating the action seq when
+;; applicable) — ONE place, so a capture can never derive two refs.
+(defun fikra-checkpoint-suffix (kind)
+  (cond
+    ((string= kind "baseline") "-baseline")
+    ((string= kind "review") "-review")
+    ((string= kind "action") (concat "-a" (number-to-string (fikra-checkpoint-action-seq))))
+    (t "")))
+
 (defun fikra-checkpoint-capture-async (kind)
   "Spawn the capture as its own process (async follow-up — never blocks
 the next turn). Returns the pid or nil when disabled. The pid→kind map
@@ -211,14 +227,13 @@ keys the sentinel's ref name (concurrent captures cannot race)."
            ;; the stamped event carry (a second derivation inside the
            ;; command builder double-allocated and the event named a
            ;; ref that never existed).
-           (suffix (cond
-                     ((string= kind "baseline") "-baseline")
-                     ((string= kind "review") "-review")
-                     ((string= kind "action") (concat "-a" (number-to-string (fikra-checkpoint-action-seq))))
-                     (t "")))
+           (suffix (fikra-checkpoint-suffix kind))
            (ref (concat "refs/fikra/" thread-id "/" (number-to-string turn-n) suffix))
+           ;; r134b (codex r134 P1): the tmp index is PER-CAPTURE — a
+           ;; shared name let one capture rm -f the index another was
+           ;; reading.
            (tmp (concat (fikra/thread/fikra-thread-field "root")
-                        "/.tmax/fikra/tmp-index-" kind))
+                        "/.tmax/fikra/tmp-index-" kind suffix))
            (pid (make-process
                   :command (list "sh" "-c" (fikra-checkpoint-command-for tmp ref kind))
                   :cwd (fikra/thread/fikra-thread-field "root")
@@ -233,18 +248,24 @@ keys the sentinel's ref name (concurrent captures cannot race)."
         (number-to-string pid) suffix)
       pid)))
 
+(defvar fikra-checkpoint-outputs (hashmap)
+  "r134b (codex r134 P2): pid → the capture's accumulated stdout —
+PER-PID (the old single global interleaved concurrent captures and a
+sentinel could adopt another process's REF sha).")
+
 (defun fikra-checkpoint-filter (pid output)
   ;; APPEND chunks — stdout may split mid-REF: marker (gate catch: the
   ;; last-chunk-only store misreported split captures as failures).
-  (setq fikra-checkpoint-last-output
-    (concat (if fikra-checkpoint-last-output fikra-checkpoint-last-output "") output)))
+  (let ((key (number-to-string pid)))
+    (keymap-mutable-set! fikra-checkpoint-outputs key
+      (concat (or (hashmap-get fikra-checkpoint-outputs key) "") output))))
 
 (defun fikra-checkpoint-sentinel (pid exit-code)
   ;; exit-code is NOT consulted: the capture chain ends
   ;; `|| echo CAPTURE-FAILED`, so failure also exits 0 — correctness
   ;; rests on the REF: tail parse (gate final-round note).
-  (let* ((out (if fikra-checkpoint-last-output fikra-checkpoint-last-output ""))
-         (key (number-to-string pid))
+  (let* ((key (number-to-string pid))
+         (out (or (hashmap-get fikra-checkpoint-outputs key) ""))
          (kind (let ((k (hashmap-get fikra-checkpoint-async-kinds key)))
                  (if k k "completion")))
          ;; r65: the SPAWN-STAMPED identity — never the sentinel-time
@@ -257,7 +278,7 @@ keys the sentinel's ref name (concurrent captures cannot race)."
                    (if s s ""))))
     (let ((sha (fikra-checkpoint-tail out)))
       (setq fikra-checkpoint-last-ref sha)
-      (setq fikra-checkpoint-last-output nil)
+      (keymap-mutable-set! fikra-checkpoint-outputs key nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-kinds key nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-ids key nil)
       (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-suffixes key nil)
