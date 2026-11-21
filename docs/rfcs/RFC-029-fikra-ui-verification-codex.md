@@ -919,3 +919,14 @@ The standing 6 predated the screen's r24-r37 evolution (verified patch generatio
 - **r95 (`fd4bbef`, PASS 10/10)**: the clean-overlap regression made REAL and deterministic (prepend-hunk + an outside-hunk-range local append — git apply does not fuzz, proven by manual repro).
 
 **8.6 closes at 10.** Board: **64/80** (8.1 7, 8.2 7, 8.3 8, 8.4 7, 8.5 7, 8.6 10, 8.7 9, 8.8 9).
+
+## Rounds 96-101 — the 8.4 summary-block sub-arc (8.4: 7 → 9)
+
+- **r96 (`f10b0a6` after rebase, 8/10)**: M/A/D/R status letters (both views; untracked defaults A) + the per-turn tool tally in the header ("tools: buffer-edit ×2, bash ×1" — first-use order from the event memory). Enabling export: fikra-event-get-str.
+- **r97 (`ecd8014`, 8/10)**: rename tails resolve (numstat's "old => new" vs the map's new-path key) + the mockup layout (summary → patch → keys FOOTER; the nav header line gone).
+- **r98 (`4bbc23c`, 8/10)**: brace-compressed same-dir renames ("src/{old => new}.txt") decompress before the lookup; strpos generalized.
+- **r99 (`f01566f`, PASS 9/10)**: the leading-brace directory shape ("{old => new}/file.txt") — strpos's 0-as-absent sentinel conflated found-at-0; now -1-as-absent.
+- **r100 (`f81d59d`, 8/10)**: SPC a n bound (open-latest-then-step); the footer leads with the mockup vocabulary. Deliberate disclosed divergence: SPC a p is the plan toggle.
+- **r101 (`f1e324f`, PASS 9/10)**: honest labels (SPC a R opens the diff; r reverts inside), the buffer-based open-check (the stale view-turn defvar ghost-stepped), the real two-turn walk.
+
+**8.4 closes at 9.** Remaining P3s are the disclosed divergences. Board: **66/80** (8.1 7, 8.2 7, 8.3 8, 8.4 9, 8.5 7, 8.6 10, 8.7 9, 8.8 9).
