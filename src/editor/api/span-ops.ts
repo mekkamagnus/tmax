@@ -148,6 +148,15 @@ export function createSpanOps(
       ));
     }
     const shapeNow = probeShape(bufArg.value as string);
+    if (shapeNow && el > shapeNow.lineCount - 1) {
+      // Clamp the end LINE to the buffer (gate r2: an unclamped
+      // 999999 materialized a million-entry grid).
+      return Either.left(createValidationError(
+        "ConstraintViolation",
+        `span-make: end-line ${el} is beyond the buffer (${shapeNow.lineCount} lines)`,
+        "end-line", el, `< ${shapeNow.lineCount}`,
+      ));
+    }
     if (!shapeNow) {
       return Either.left(createValidationError(
         "ConstraintViolation",

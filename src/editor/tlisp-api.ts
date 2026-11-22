@@ -538,13 +538,16 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               ? ((r as { right: string }).right).length
               : 0;
           if (lineCount < 0) return undefined;
-          // The whole-text checksum (gate r1): same-shape substitutions
-          // must invalidate too. One pass over the text — the render
-          // walks it many times anyway.
+          // The whole-text CONTENT checksum (gate r2: length-folding
+          // was shape-only): ONE getText pass, a rolling char hash —
+          // same-length substitutions invalidate, and the cost is a
+          // single memcpy + linear char walk (not per-line Either
+          // allocations).
+          const textR = buf.getText({ start: { line: 0, column: 0 }, end: { line: Math.max(0, lineCount - 1), column: 1 << 30 } });
+          const text = "right" in textR && typeof textR.right === "string" ? textR.right : "";
           let checksum = 0;
-          for (let i = 0; i < lineCount; i++) {
-            const len = lenOf(buf.getLine(i));
-            checksum = (checksum * 31 + len) | 0;
+          for (let i = 0; i < text.length; i++) {
+            checksum = (checksum * 31 + text.charCodeAt(i)) | 0;
           }
           return { lineCount, checksum, token: buf };
         };

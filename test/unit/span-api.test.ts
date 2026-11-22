@@ -161,3 +161,20 @@ describe("#296 — gate r1 fixes (the API half)", () => {
     expect(() => e(editor, '(span-make "test" -1 0 0 1 "region")')).toThrow(/negative/);
   });
 });
+
+describe("#296 — gate r2 fixes", () => {
+  test("an out-of-range END-LINE refuses (no million-entry grid)", () => {
+    setText("test", "x\n");
+    expect(() => e(editor, '(span-make "test" 0 0 999999 1 "region")')).toThrow(/beyond the buffer/);
+  });
+
+  test("the checksum folds CONTENT: a same-length substitution invalidates (real chars, not lengths)", async () => {
+    const { captureFrame } = await import("../../src/render/capture-frame.ts");
+    setText("test", "hello\nworld\n");
+    e(editor, '(span-make "test" 0 0 0 5 "region")');
+    // Substituting SAME-LENGTH content in the MIDDLE of the buffer.
+    setText("test", "hello\nwXrld\n");
+    const f = captureFrame(editor.getEditorState() as never, 40, 8);
+    expect(f.join("\n")).not.toContain("48;2;38;79;120");
+  });
+});

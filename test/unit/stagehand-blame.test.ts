@@ -188,3 +188,40 @@ describe("#296 — gate r1 fixes", () => {
     expect(frame.join("\n")).toContain("48;2;58;50;38"); // the tint lives
   });
 });
+
+describe("#296 — gate r2 fixes (blame)", () => {
+  test("M-x blame REACHABLE: the bare entry resolves and runs", () => {
+    // The require chain in normal.tlisp must include editor/commands/blame
+    // (gate r2: unreachable dead code without it).
+    const r = e(editor, "(blame)");
+    expect(String(r.value)).toContain("no file"); // the fileless-buffer path — it RAN
+  });
+
+  test("the disk-scan RESTORES the user's point (the refusal path never moves them)", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nv2\nv3\n");
+    commit("c1");
+    e(editor, '(find-file "f.txt")');
+    // Diverge the buffer (unsaved) — blame REFUSES after the scan.
+    e(editor, '(buffer-insert "X")');
+    e(editor, '(buffer-switch "*scratch*")');
+    e(editor, "(cursor-move 1 0)");
+    blame("f.txt");
+    expect(st(editor)).toContain("commit first");
+    // The scan switched through every buffer and restored both the
+    // buffer AND the point (buffer-switch resets point — #127).
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*scratch*");
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(1);
+  });
+
+  test("q from a blame-launched show returns to BLAME even when a log buffer is alive", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("c1");
+    e(editor, "(stagehand/status/stagehand-status)");
+    e(editor, "(stagehand/log/stagehand-log-open)");
+    blame("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/blame/stagehand-blame-show)");
+    e(editor, "(stagehand/log/stagehand-show-quit)");
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*Stagehand-Blame*");
+  });
+});

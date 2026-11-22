@@ -341,9 +341,14 @@ log context — idx nil means n/p report no log to walk)."
           (concat "Stagehand: git show failed (" (number-to-string (nth 2 res)) ") "
             (car (string-split (concat (nth 1 res) "\n") "\n"))))))))
 
+(defvar stagehand-show-origin nil
+  "Where the show view was opened from ('log' | 'blame') — quit
+returns there (gate r2: a live log buffer stole blame's q).")
+
 (defun stagehand-show-render (idx out)
   ;; The shared render: IDX nil = no log context (blame's RET).
   (setq stagehand-show-idx idx)
+  (setq stagehand-show-origin (if idx "log" "blame"))
   (if (not (member (stagehand-show-buffer-name) (buffer-list)))
     (buffer-create (stagehand-show-buffer-name)))
   (buffer-switch (stagehand-show-buffer-name))
@@ -389,13 +394,17 @@ guard)."
       (editor-set-status "Stagehand: newest commit"))))
 
 (defun stagehand-show-quit ()
-  "q — back to the LOG buffer when one exists (kill FIRST —
-buffer-kill rebinds current to its survivor — then the explicit
-switch wins); from blame's RET there is no log — the show buffer
-just closes (gate r1)."
+  "q — back to the ORIGIN buffer (the log, or blame) when it still
+exists (kill FIRST — buffer-kill rebinds current to its survivor —
+then the explicit switch wins); otherwise the show buffer just
+closes."
   (buffer-kill (stagehand-show-buffer-name))
-  (if (member (stagehand-log-buffer-name) (buffer-list))
-    (buffer-switch (stagehand-log-buffer-name))))
+  (let ((target
+          (if (string= (or stagehand-show-origin "") "blame")
+            "*Stagehand-Blame*"
+            (stagehand-log-buffer-name))))
+    (if (member target (buffer-list))
+      (buffer-switch target))))
 
 ;; ── checkout (the only mutation) ────────────────────────────────────
 (defun stagehand-log-checkout ()

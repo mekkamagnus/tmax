@@ -124,17 +124,40 @@ matches the disk."
   (stagehand-blame-disk-scan (buffer-list) path))
 
 (defun stagehand-blame-disk-scan (bufs path)
+  ;; Gate r2: the scan saves + restores the user's BUFFER and POINT
+  ;; (buffer-switch resets point to 0,0 — #127), checks EVERY
+  ;; matching buffer (not just the first), and resolves the disk
+  ;; read against the recorded repo root.
+  (let ((cb (buffer-current))
+        (cl (cursor-line))
+        (cc (cursor-column)))
+    (let ((ok (stagehand-blame-disk-step bufs path t)))
+      (if (not (string= (buffer-current) cb))
+        (buffer-switch cb))
+      (cursor-move cl cc)
+      ok)))
+
+(defun stagehand-blame-disk-step (bufs path ok)
   (if (null bufs)
-    t
-    (let ((cb (buffer-current)))
+    ok
+    (progn
       (buffer-switch (car bufs))
-      (let ((fname (or (buffer-filename) ""))
-            (text (buffer-text)))
-        (if (not (string= cb (car bufs)))
-          (buffer-switch cb))
+      (let ((fname (or (buffer-filename) "")))
         (if (string= fname path)
-          (string= text (or (read-file-content path) ""))
-          (stagehand-blame-disk-scan (cdr bufs) path))))))
+          (stagehand-blame-disk-step (cdr bufs) path
+            (and ok
+              (string= (buffer-text)
+                (or (read-file-content
+                      (stagehand-blame-abs path))
+                    ""))))
+          (stagehand-blame-disk-step (cdr bufs) path ok))))))
+
+(defun stagehand-blame-abs (path)
+  ;; Resolve against the recorded root (read-file-content uses the
+  ;; process cwd — gate r2).
+  (if (string-prefix-p "/" path)
+    path
+    (concat (or stagehand-blame-root ".") "/" path)))
 
 ;; ── the blame popup ─────────────────────────────────────────────────
 (defun stagehand-blame-row ()

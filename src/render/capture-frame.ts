@@ -216,9 +216,14 @@ function bufferSpanLayer(
     r && typeof r === "object" && "right" in (r as Record<string, unknown>) && typeof (r as { right?: unknown }).right === "string"
       ? ((r as { right: string }).right).length
       : 0;
+  // gate r2: ONE getText pass (the per-line walk was an ~80x
+  // per-frame regression on large buffers) folding CHARS (a real
+  // content checksum — length-folding was shape-only).
+  const textR = buf.getText({ start: { line: 0, column: 0 }, end: { line: Math.max(0, lineCount - 1), column: 1 << 30 } });
+  const text = "right" in textR && typeof textR.right === "string" ? textR.right : "";
   let checksum = 0;
-  for (let i = 0; i < lineCount; i++) {
-    checksum = (checksum * 31 + lenOf(buf.getLine(i))) | 0;
+  for (let i = 0; i < text.length; i++) {
+    checksum = (checksum * 31 + text.charCodeAt(i)) | 0;
   }
   if (
     lineCount !== entry.shape.lineCount ||

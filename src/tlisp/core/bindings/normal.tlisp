@@ -119,8 +119,10 @@
   ;; #292: stash popup (consumes status — one-way; status's keymap
   ;; binds Z into it lazily).
   (require-module stagehand/stash)
-  ;; #296: blame (consumes status + log + the span API).
+  ;; #296: blame (consumes status + log + the span API) + the M-x
+  ;; entry (the command module — gate r2: unreachable without this).
   (require-module stagehand/blame)
+  (require-module editor/commands/blame)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.
