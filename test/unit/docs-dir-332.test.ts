@@ -56,3 +56,20 @@ describe("#332 — resolveDocsTmaxDir", () => {
     expect(DOCS_TMAX_DIR).toContain("docs/tmax");
   });
 });
+
+describe("#332 — valve r1 (the no-host-probe proof)", () => {
+  test("the $bunfs path NEVER touches the filesystem (instrumented)", async () => {
+    // Instrument node:fs BEFORE importing the resolver: the virtual
+    // root must short-circuit without a single existsSync probe (a
+    // normalized host walk would probe /docs/tmax on some machine).
+    const { mock, spyOn } = await import("bun:test");
+    const fs = await import("node:fs");
+    const spy = spyOn(fs, "existsSync");
+    const { resolveDocsTmaxDir: resolve } = await import("../../src/editor/editor.ts");
+    spy.mockClear();
+    expect(resolve("/$bunfs/root")).toBe("/$bunfs/root");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+    void mock;
+  });
+});
