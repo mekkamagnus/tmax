@@ -1,0 +1,249 @@
+(defmodule editor/commands/markdown/src-blocks
+  (export markdown-src-block-at-point
+          markdown-src-block-content
+          markdown-src-mode-for-language
+          markdown-src-edit-active-p
+          markdown-edit-src
+          markdown-edit-src-commit
+          markdown-edit-src-abort)
+
+;; src-blocks.tlisp — RFC-037 (#335): the editing half of org-babel parity.
+;; C-c ' / SPC e inside a fenced code block opens the block's content in a
+;; *Src-Edit:<lang>* buffer with the language's major mode (full syntax
+;; highlighting, indentation, electric chars). C-c C-c writes the edit
+;; buffer's text back between the fences; C-c C-k / C-g discard. The
+;; markdown buffer is only touched at commit — fences are never modified.
+;;
+;; Compose-then-commit contract (#277): the buffer-local keymap front-end
+;; (the *Capture* pattern; the normal-mode keymap chain resolves the C-c
+;; chords — no default C-c bindings exist to conflict).
+
+;; ── Piece 2: language → major mode (RFC §2.3, normative) ─────────────
+;; A hashmap (not an alist): T-Lisp cons requires a list tail, so dotted
+;; pairs are not expressible; hashmap-get also makes the unmapped case a
+;; plain nil. Extensible from init.tlisp: (hashmap-set! ...) style mutation
+;; via hashmap-set on this defvar.
+(defvar markdown-src-mode-map
+  (hashmap
+    "javascript" "typescript"
+    "js" "typescript"
+    "typescript" "typescript"
+    "ts" "typescript"
+    "python" "python"
+    "py" "python"
+    "lisp" "lisp"
+    "tlisp" "lisp"
+    "scheme" "lisp"
+    "shell" "shell"
+    "bash" "shell"
+    "sh" "shell"
+    "zsh" "shell"
+    "go" "go"
+    "rust" "rust"
+    "json" "json"
+    "yaml" "yaml"
+    "toml" "toml"
+    "html" "html"
+    "css" "css"
+    "sql" "sql"
+    "c" "c"
+    "cpp" "cpp"))
+
+(defun markdown-src-mode-for-language (lang)
+  "Major mode name for fence language LANG; fundamental when unmapped (RFC-037 §2.3)."
+  (let ((mode (hashmap-get markdown-src-mode-map lang)))
+    (if mode mode "fundamental")))
+
+;; ── Piece 1: block detection (RFC §2.1) ───────────────────────────────
+
+(defun markdown-src-fence-p (line)
+  "t when LINE is a fence line (triple backtick after optional indentation)."
+  (let ((trimmed (string-trim line)))
+    (if (>= (length trimmed) 3)
+      (string= (substring trimmed 0 3) "```")
+      nil)))
+
+(defun markdown-src-fence-language (line)
+  "The language token of fence LINE (first word of the info string; \"\" when bare)."
+  (let ((info (string-trim (substring (string-trim line) 3))))
+    (if (= (length info) 0)
+      ""
+      (nth 0 (string-split info " ")))))
+
+(defun markdown-src-block-at-point ()
+  "The fenced block at point as a hashmap (start end language content-start content-end), or nil (RFC-037 §2.1)."
+  (interactive)
+  (let ((total (buffer-line-count))
+        (cur (cursor-line))
+        (fences (list))
+        (i 0))
+    (while (< i total)
+      (if (markdown-src-fence-p (buffer-get-line i))
+        (set! fences (cons i fences)))
+      (set! i (+ i 1)))
+    (set! fences (reverse fences))
+    ;; Fence lines pair by strict top-down alternation (CommonMark's simple
+    ;; case). The cursor is inside a block when a pair encloses it
+    ;; inclusively — boundary fence lines count.
+    (let ((result nil) (j 0))
+      (while (and (< (+ j 1) (length fences)) (not result))
+        (let ((open (nth j fences))
+              (close (nth (+ j 1) fences)))
+          (if (if (>= cur open) (<= cur close) nil)
+            (set! result (hashmap
+                           "start" open
+                           "end" close
+                           "language" (markdown-src-fence-language (buffer-get-line open))
+                           "content-start" (+ open 1)
+                           "content-end" (- close 1)))
+            (set! j (+ j 2)))))
+      result)))
+
+(defun markdown-src-block-content (block)
+  "BLOCK's content lines joined by newlines (no trailing newline)."
+  (let ((lines (list))
+        (i (hashmap-get block "content-start"))
+        (end (hashmap-get block "content-end")))
+    (while (<= i end)
+      (set! lines (cons (buffer-get-line i) lines))
+      (set! i (+ i 1)))
+    (string-join "\n" (reverse lines))))
+
+;; ── Piece 3: the edit command (RFC §2.2) ──────────────────────────────
+
+(defvar markdown-src-edit-target nil
+  "Buffer name of the markdown buffer being edited (nil = no pending edit).")
+(defvar markdown-src-edit-buffer nil
+  "Name of the live *Src-Edit:* buffer.")
+(defvar markdown-src-edit-start 0
+  "Opening fence line of the block under edit.")
+(defvar markdown-src-edit-content-start 0)
+(defvar markdown-src-edit-content-end 0)
+(defvar markdown-src-edit-return-mode "normal"
+  "Editor mode to restore after the edit ends.")
+
+(defun markdown-src-edit-active-p ()
+  "t while a *Src-Edit:* buffer is pending."
+  (if markdown-src-edit-target t nil))
+
+(defun markdown-edit-src-ensure-keymap (bufname)
+  "Attach the edit buffer's local keymap: C-c C-c commits, C-c C-k / C-g abort."
+  (let ((kmap (editor/keymaps/buffer-keymap bufname)))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "src-edit"))
+        (editor/keymaps/keymap-set-key kmap "C-c C-c" "(markdown-edit-src-commit)")
+        (editor/keymaps/keymap-set-key kmap "C-c C-k" "(markdown-edit-src-abort)")
+        (editor/keymaps/keymap-set-key kmap "C-g" "(markdown-edit-src-abort)")
+        (editor/keymaps/buffer-set-keymap bufname kmap))))
+  t)
+
+(defun markdown-edit-src-abort-pending ()
+  "Abort a pending src edit, echoing its content to *Messages* for recovery (RFC §2.5). No-op when nothing is pending."
+  (if markdown-src-edit-target
+    (let ((bufname markdown-src-edit-buffer)
+          (origin (buffer-current)))
+      (if bufname
+        (condition-case err
+          (progn
+            (switch-to-buffer bufname)
+            (message "Abandoned src edit (%s) content for recovery: %s"
+                     markdown-src-edit-target (buffer-text)))
+          (error (e) nil)))
+      (set! markdown-src-edit-target nil)
+      (set! markdown-src-edit-buffer nil)
+      (if (not (string= (buffer-current) origin))
+        (switch-to-buffer origin))
+      (if bufname
+        (condition-case err (buffer-kill bufname) (error (e) nil)))
+      (editor-set-status "abandoned pending src edit (content echoed to *Messages*)")
+      t)
+    nil))
+
+(defun markdown-edit-src ()
+  "Open the fenced block at point in a *Src-Edit:<lang>* buffer with the language's major mode (RFC-037)."
+  (interactive)
+  (let ((block (markdown-src-block-at-point)))
+    (if (not block)
+      (editor-set-status "not in a source block")
+      (progn
+        ;; Piece 5 — multi-block guard: one edit at a time; the pending
+        ;; edit is aborted (content echoed) before the new one opens.
+        (markdown-edit-src-abort-pending)
+        (let* ((lang (hashmap-get block "language"))
+               (label (if (> (length lang) 0) lang "text"))
+               (bufname (concat "*Src-Edit:" label "*"))
+               (mode (markdown-src-mode-for-language lang))
+               (content (markdown-src-block-content block)))
+          (set! markdown-src-edit-target (buffer-current))
+          (set! markdown-src-edit-start (hashmap-get block "start"))
+          (set! markdown-src-edit-content-start (hashmap-get block "content-start"))
+          (set! markdown-src-edit-content-end (hashmap-get block "content-end"))
+          (set! markdown-src-edit-return-mode (editor-mode))
+          (set! markdown-src-edit-buffer bufname)
+          (condition-case err (buffer-kill bufname) (error (e) nil))
+          (buffer-create bufname)
+          (switch-to-buffer bufname)
+          (cursor-move 0 0)
+          (buffer-insert content)
+          (cursor-move 0 0)
+          (major-mode-set mode)
+          (editor-set-mode "normal")
+          (markdown-edit-src-ensure-keymap bufname)
+          (editor-set-status (concat label " src block - C-c C-c write back | C-c C-k abort")))))))
+
+;; ── Piece 4: write-back and abort (RFC §2.4) ──────────────────────────
+
+(defun markdown-edit-src-commit ()
+  "Write the edit buffer's text back between the block's fences, kill the edit buffer, and return to the fence line (RFC-037 §2.4)."
+  (interactive)
+  (if (not markdown-src-edit-target)
+    (editor-set-status "no source edit in progress")
+    (let ((text (buffer-text))
+          (target markdown-src-edit-target)
+          (start markdown-src-edit-start)
+          (cstart markdown-src-edit-content-start)
+          (cend markdown-src-edit-content-end)
+          (bufname markdown-src-edit-buffer)
+          (return-mode markdown-src-edit-return-mode))
+      ;; Neutralize the pending state first: the edit buffer is about to be
+      ;; read and killed; a re-entry mid-commit must see no pending edit.
+      (set! markdown-src-edit-target nil)
+      (set! markdown-src-edit-buffer nil)
+      (switch-to-buffer target)
+      ;; Replace [cstart..cend] with the edit text. Deleting up to
+      ;; (cend+1, 0) removes the content lines AND their newlines, leaving
+      ;; the closing fence as the new line cstart; the insert re-adds the
+      ;; text plus its trailing newline. Empty text inserts just "\n" —
+      ;; one blank line between the fences, valid markdown (RFC §2.4).
+      (if (>= cend cstart)
+        (buffer-delete-range cstart 0 (+ cend 1) 0))
+      (cursor-move cstart 0)
+      (buffer-insert (concat text "\n"))
+      (cursor-move start 0)
+      (condition-case err (buffer-kill bufname) (error (e) nil))
+      (editor-set-mode return-mode)
+      (message "src block updated"))))
+
+(defun markdown-edit-src-abort ()
+  "Discard the source edit; the markdown buffer is untouched (RFC-037 §2.4)."
+  (interactive)
+  (if (not markdown-src-edit-target)
+    (editor-set-status "no source edit in progress")
+    (let ((target markdown-src-edit-target)
+          (start markdown-src-edit-start)
+          (bufname markdown-src-edit-buffer)
+          (return-mode markdown-src-edit-return-mode))
+      (set! markdown-src-edit-target nil)
+      (set! markdown-src-edit-buffer nil)
+      (switch-to-buffer target)
+      (cursor-move start 0)
+      (condition-case err (buffer-kill bufname) (error (e) nil))
+      (editor-set-mode return-mode)
+      (editor-set-status "src edit aborted"))))
+
+(key-bind "SPC e" "(markdown-edit-src)" "normal")
+(key-bind "C-c '" "(markdown-edit-src)" "normal")
+
+(provide "markdown-commands/src-blocks")
+)

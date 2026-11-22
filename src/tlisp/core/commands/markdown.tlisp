@@ -58,6 +58,7 @@
 (require-module editor/commands/markdown/execution)
 (require-module editor/commands/markdown/export)
 (require-module editor/commands/markdown/knowledge)
+(require-module editor/commands/markdown/src-blocks)
 
 (provide "markdown-commands")
 )
