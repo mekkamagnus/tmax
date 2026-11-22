@@ -389,7 +389,8 @@ availability gate must be synchronous; the turn itself is async)."
                 (if (and c (stringp c) (> (length c) 0)) c ""))))
     (setq fikra-ollama-round-text text)
     ;; r154: only the part the stream's deltas have NOT rendered yet.
-    (fikra-ollama-render-rest text entry)
+    (if (fikra-ollama-held-p (fikra-ollama-render-rest text entry))
+      (editor-set-status fikra-ollama-held-status))
     (setq fikra-ollama-messages
       (concat fikra-ollama-messages
               "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string text)
@@ -1478,9 +1479,10 @@ with its post-exit capture.")
   ;; (14181 chars of history against the 6000 budget on the first prompt
   ;; after a restart).
   (fikra-ollama-load-exchanges)
-  (let* ((merged (fikra-ollama-merge-deltas
-                   (fikra/event/fikra-event-events-of
-                     (fikra/thread/fikra-thread-current) fikra-ollama-history-window)))
+  (let* ((merged (fikra-ollama-completed-events
+                   (fikra-ollama-merge-deltas
+                     (fikra/event/fikra-event-events-of
+                       (fikra/thread/fikra-thread-current) fikra-ollama-history-window))))
          (cutoff (+ (fikra-ollama-last-turn-end merged 0 -1) 1))
          ;; r154: the most recent WHOLE turns within the budget.
          (start (fikra-ollama-history-start merged cutoff)))
@@ -1538,14 +1540,38 @@ with its post-exit capture.")
   (let ((tx (fikra/event/fikra-event-get-str e "text")))
     (if (stringp tx) tx "")))
 
-;; r154: the conversation history sent to the model is BOUNDED — the most
-;; recent WHOLE turns within this many characters (message text + tool
-;; exchanges; JSON framing excluded). Unbounded, a durable history grew
-;; with every turn: 100 turns cost seconds of editor-blocking string
-;; building at each send, for a prompt the 4096-token context cannot hold
-;; anyway (the server truncated it on its own terms). Cut at turn
-;; boundaries only — a history never opens on a tool result or a reply
-;; without its question; the newest turn rides whatever its size.
+;; r154c (codex gate P1): only COMPLETED turns are history. A turn whose
+;; turn-end never arrived (a crash mid-turn) is dropped whole — with its
+;; question and its partial reply. The budget already refused to SIZE
+;; such a turn, but the scan serialized everything from the chosen start,
+;; so a crashed turn between two completed ones leaked into the prompt.
+;; (The in-flight turn is such an open group too: its question is logged
+;; before its turn-start, before this build runs.)
+(defun fikra-ollama-completed-events (merged)
+  (fikra-ollama-completed-scan merged nil (list) (list)))
+
+;; Groups open at a question and close at its turn-end; only closed ones
+;; survive. CUR is the open group newest-first; GROUPS the closed ones.
+;; (Both seed as (list) — this dialect's cons refuses a nil tail.)
+(defun fikra-ollama-completed-scan (rest open-p cur groups)
+  (if (null rest)
+    (apply 'append (reverse groups))
+    (let ((e (car rest)))
+      (let ((k (fikra/event/fikra-event-get-str e "kind")))
+        (cond
+          ((and (string= k "text-delta")
+                (string= (fikra/event/fikra-event-get-str e "speaker") "user"))
+            ;; A question opens the next turn; a group still open here
+            ;; never ended.
+            (fikra-ollama-completed-scan (cdr rest) t (list e) groups))
+          ((and open-p (string= k "turn-end"))
+            (fikra-ollama-completed-scan (cdr rest) nil (list)
+              (cons (reverse (cons e cur)) groups)))
+          (open-p
+            (fikra-ollama-completed-scan (cdr rest) open-p (cons e cur) groups))
+          (t
+            (fikra-ollama-completed-scan (cdr rest) open-p cur groups)))))))
+
 (defvar fikra-ollama-history-budget 6000
   "Characters of recent history kept for the model (whole turns).")
 
@@ -1808,7 +1834,11 @@ with its post-exit capture.")
          (thread (if entry (hashmap-get entry "thread") nil))
          (landed (if (and entry (hashmap-get entry "open"))
                      (condition-case nil
+                       ;; Anything held for this thread goes out FIRST —
+                       ;; a thread's log never takes a newer event ahead
+                       ;; of an older held one.
                        (and thread
+                            (fikra/event/fikra-event-flush-undelivered thread)
                             (fikra/event/fikra-event-emit-batch-for thread
                               (mapcar (lambda (d)
                                         (list (list "kind" "text-delta")
@@ -1834,15 +1864,36 @@ with its post-exit capture.")
 ;; ownership record's `emitted` count) — exactly-once by ACCOUNTING. The
 ;; r153 boolean assumed every delta had rendered; one the transcript
 ;; failed to take was lost for good.
+;; r154c (codex gate P0): written for the request's OWNING thread through
+;; the HOLDING emitter — a write the transcript refuses keeps the text
+;; (it used to throw past the cleanup, and the reply was discarded for
+;; good); it is written at the next send on that thread. Returns 'held
+;; while the text waits.
 (defun fikra-ollama-render-rest (content entry)
-  (let ((shown (if (and entry (numberp (hashmap-get entry "emitted")))
+  (let* ((shown (if (and entry (numberp (hashmap-get entry "emitted")))
                    (hashmap-get entry "emitted")
-                   0)))
+                   0))
+         (owner (if (and entry (stringp (hashmap-get entry "thread")))
+                  (hashmap-get entry "thread")
+                  (fikra/thread/fikra-thread-current))))
     (if (> (length content) shown)
-      (fikra/event/fikra-event-emit
-        (list (list "kind" "text-delta")
-              (list "speaker" "assistant")
-              (list "text" (substring content shown (length content))))))))
+      (if (fikra/event/fikra-event-emit-held-for owner
+            (list (list (list "kind" "text-delta")
+                        (list "speaker" "assistant")
+                        (list "text" (substring content shown (length content)))))
+            ;; Nothing of this reply reached the transcript → the text
+            ;; opens a message of its own; else it continues the line.
+            (= shown 0))
+        nil
+        'held)
+      nil)))
+
+(defvar fikra-ollama-held-status
+  "Fikra-ollama: reply HELD — the transcript was not writable; it is written at the next send"
+  "r154c: the status shown when a reply waits in the undelivered stash.")
+
+(defun fikra-ollama-held-p (r)
+  (and (symbolp r) (string= (symbol-name r) "held")))
 
 ;; r153: the completion's reply body, built from the stream — the tool
 ;; lines merged into ONE call list beside the full streamed content, else
@@ -2102,11 +2153,13 @@ with its post-exit capture.")
                 ;; r153/r154: under streaming the deltas already rendered
                 ;; — this renders exactly what they did NOT (a non-streamed
                 ;; reply: everything).
-                (fikra-ollama-render-rest content entry)
-                ;; The thread state machine settles the turn (emits turn-end).
-                (fikra/thread/fikra-thread-turn-end "completed")
-                (editor-set-status
-                  (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
+                (let ((held (fikra-ollama-held-p (fikra-ollama-render-rest content entry))))
+                  ;; The thread state machine settles the turn (emits turn-end).
+                  (fikra/thread/fikra-thread-turn-end "completed")
+                  (editor-set-status
+                    (if held
+                      fikra-ollama-held-status
+                      (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))))
               (progn
                 (fikra/thread/fikra-thread-turn-end "error")
                 (editor-set-status "Fikra-ollama: empty reply"))))))))

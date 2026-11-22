@@ -75,6 +75,12 @@ The adapter drives everything after this (turn-begin, stream, turn-end)."
       (if (or (string= (fikra/thread/fikra-thread-status) "running")
               (string= (fikra/thread/fikra-thread-status) "confirming"))
         (fikra-turn-interrupt))
+      ;; r154c: a reply the transcript could not take is written out
+      ;; NOW, ahead of the user's new line (the send fails altogether
+      ;; while the log is still unwritable — nothing is lost by waiting).
+      (condition-case nil
+        (fikra/event/fikra-event-flush-undelivered (fikra/thread/fikra-thread-current))
+        (error () nil))
       ;; The user's message is part of the transcript — tagged with the
       ;; speaker so the renderer prefixes "You: " (the old baked-in prefix
       ;; doubled up as "AI: You: …" — codex UI verification, structure 3/10).

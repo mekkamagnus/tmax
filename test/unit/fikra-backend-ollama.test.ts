@@ -1923,6 +1923,68 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       expect(cold.length).toBeGreaterThan(4000);
     });
 
+    // r154c (codex gate P1): a turn that never ENDED (a crash mid-turn)
+    // is not history — neither its question nor its partial reply. The
+    // budget already refused to size it; the scan still serialized it.
+    tt("a turn that never ended is not history (completed turns only)", async () => {
+      const ed = await armed();
+      writeLog(ed, [
+        { kind: "text-delta", speaker: "user", text: "old" },
+        { kind: "turn-start", turn: 1 },
+        { kind: "text-delta", speaker: "assistant", text: "ok" },
+        { kind: "turn-end", turn: 1, status: "completed" },
+        { kind: "text-delta", speaker: "user", text: "CRASH-QUESTION" },
+        { kind: "turn-start", turn: 2 },
+        { kind: "text-delta", speaker: "assistant", text: "CRASH-PARTIAL" },
+        // …and no turn-end: the daemon died mid-turn.
+        { kind: "text-delta", speaker: "user", text: "new" },
+        { kind: "turn-start", turn: 3 },
+        { kind: "text-delta", speaker: "assistant", text: "fine" },
+        { kind: "turn-end", turn: 3, status: "completed" },
+      ]);
+      expect(history(ed)).toEqual([
+        { role: "user", content: "old" },
+        { role: "assistant", content: "ok" },
+        { role: "user", content: "new" },
+        { role: "assistant", content: "fine" },
+      ]);
+    });
+
+    // r154c (codex gate P0): the completion's OWN write failing must not
+    // lose the response. The text is HELD per thread and written out —
+    // in front of the user's next line — at the next send.
+    tt("a reply the transcript could not take at completion is HELD and written at the next send", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "the transcript fails")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 76 "live")');
+      const logPath = String(e(ed, "(fikra/thread/fikra-thread-log-path)").value);
+      const aside = `${logPath}.aside`;
+      renameSync(logPath, aside);
+      mkdirSync(logPath);
+      feed(ed, 76, ndjson([{ message: { role: "assistant", content: "HELD-REPLY" } }]));
+      finish(ed, 76);
+      // The turn still settles (a thread never strands on an unwritable
+      // transcript) and the status says the reply is held.
+      expect(await untilStatus(ed, "idle", 50)).toBe("idle");
+      expect(String(e(ed, "(editor-status)").value)).toContain("HELD");
+      rmdirSync(logPath);
+      renameSync(aside, logPath);
+      e(ed, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+      expect(text(ed)).not.toContain("HELD-REPLY");
+      // The next send writes the held reply FIRST, as a line of its own —
+      // and the turn's refused ENDING with it (in order: the reply, the
+      // end marker, then the new question, labelled, on its own line).
+      e(ed, '(fikra/chat/fikra-turn-send "and the next question")');
+      const t = text(ed);
+      expect(count(t, "assistant › HELD-REPLY")).toBe(1);
+      expect(t.indexOf("HELD-REPLY")).toBeLessThan(t.indexOf("completed"));
+      expect(t.indexOf("completed")).toBeLessThan(t.indexOf("user › and the next question"));
+      expect(count(log(ed, "main"), "HELD-REPLY")).toBe(1);
+      const endings = strip(log(ed, "main")).split("\n").filter((l) => l.includes('"kind":"turn-end"'));
+      expect(endings).toHaveLength(1);
+      expect(endings[0]).toContain('"status":"completed"');
+    });
+
     tt("a BLANK line in the stream never stalls it", async () => {
       const ed = await armed();
       e(ed, '(fikra/chat/fikra-turn-send "blank lines")');

@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -196,6 +196,50 @@ describe("#214 claude normalization (recorded stream-json fixtures)", () => {
     const kinds = readFileSync(logPath, "utf8").trimEnd().split("\n").map((l) => JSON.parse(l).kind);
     expect(kinds.filter((k) => k === "turn-end").length).toBe(1);
   });
+
+  // r154c (codex gate P1): a send while a turn runs interrupts it and
+  // starts a replacement at once — and the killed process's exit lands
+  // AFTER the replacement began. That stale exit must not end the
+  // replacement (it used to clear its slot and end its turn).
+  test("the KILLED process's late exit never ends its REPLACEMENT turn", async () => {
+    const stubBin = mkdtempSync(join(tmpdir(), "fikra-claude-stub-"));
+    // A harmless stand-in for the CLI: it answers the probes, then idles.
+    writeFileSync(join(stubBin, "claude"), "#!/bin/sh\ncase \"$1\" in --version|--help|-h) echo '0.0.0-stub'; exit 0;; esac\nexec sleep 30\n", { mode: 0o755 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${stubBin}:${savedPath}`;
+    try {
+      const editor = await createStartedEditor("");
+      e(editor, "(require-module fikra/backend-claude)");
+      e(editor, "(require-module fikra/adapter)");
+      e(editor, "(require-module fikra/chat)");
+      e(editor, "(require-module fikra/thread)");
+      e(editor, "(fikra/thread/fikra-thread-init)");
+      e(editor, '(fikra/adapter/fikra-set-backend-forced "claude")');
+      const status = () => String(e(editor, "(fikra/thread/fikra-thread-status)").value);
+      const endings = async () => {
+        const logPath = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
+        return readFileSync(logPath, "utf8").trimEnd().split("\n")
+          .map((l) => JSON.parse(l)).filter((l) => l.kind === "turn-end").map((l) => l.status as string);
+      };
+      e(editor, '(fikra/chat/fikra-turn-send "first question")');
+      expect(status()).toBe("running");
+      // The replacement — interrupt and a new send, back to back.
+      e(editor, '(fikra/chat/fikra-turn-send "the replacement")');
+      expect(status()).toBe("running");
+      // The killed process's exit lands now.
+      await new Promise((r) => setTimeout(r, 900));
+      expect(status()).toBe("running");
+      expect(await endings()).toEqual(["interrupted"]);
+      // The replacement ends by its own interrupt — once.
+      e(editor, "(fikra/chat/fikra-turn-interrupt)");
+      expect(status()).toBe("interrupted");
+      await new Promise((r) => setTimeout(r, 900));
+      expect(await endings()).toEqual(["interrupted", "interrupted"]);
+    } finally {
+      process.env.PATH = savedPath;
+      rmSync(stubBin, { recursive: true, force: true });
+    }
+  }, 60000);
 
   test("abort ends the turn interrupted; the SIGTERM'd sentinel does NOT end it again", async () => {
     const editor = await createStartedEditor("");

@@ -244,17 +244,31 @@ regex, no nested string-escape quoting."
 (defun fikra-backend-codex-sentinel (pid exit-code)
   "AUTHORITATIVE turn end (the process exit); settles the PID'S thread."
   (let* ((thread-id (hashmap-get fikra-codex-pid-thread (number-to-string pid)))
-         (focused (if thread-id (string= thread-id (fikra/thread/fikra-thread-current)) nil)))
-    (if thread-id
-      (progn
-        (editor/keymaps/keymap-mutable-set! fikra-codex-processes thread-id nil)
-        (editor/keymaps/keymap-mutable-set! fikra-codex-line-buffers thread-id ""))
-      nil)
-    (if thread-id
-      (if focused
-        (fikra/thread/fikra-thread-turn-end
-          (if (= exit-code 0) "completed" "error"))
-      (fikra-backend-codex-turn-end-bg thread-id exit-code)))))
+         (current (if thread-id (hashmap-get fikra-codex-processes thread-id) nil))
+         (live (and thread-id
+                    (let ((st (fikra/thread/fikra-thread-status-of thread-id)))
+                      (or (string= st "running") (string= st "confirming"))))))
+    ;; r154c (codex gate): an exit is authoritative only for the process
+    ;; CURRENT for its thread. The abort path clears the slot and a
+    ;; replacement turn refills it before the killed process's exit
+    ;; lands; that stale exit used to clear the REPLACEMENT's slot and
+    ;; end its turn. (No recorded process — a seam that routes only the
+    ;; pid — keeps the old behavior.)
+    (if (and current (not (= pid current)))
+      'superseded
+      ;; …and an exit for a turn that already ENDED (the abort path ended
+      ;; it interrupted) is not a second ending: it used to append a
+      ;; stray "error" turn-end, which replay's last-ending-wins rule
+      ;; then showed INSTEAD of the interrupt.
+      (if (not live)
+        'turn-over
+        (progn
+          (editor/keymaps/keymap-mutable-set! fikra-codex-processes thread-id nil)
+          (editor/keymaps/keymap-mutable-set! fikra-codex-line-buffers thread-id "")
+          (if (string= thread-id (fikra/thread/fikra-thread-current))
+            (fikra/thread/fikra-thread-turn-end
+              (if (= exit-code 0) "completed" "error"))
+            (fikra-backend-codex-turn-end-bg thread-id exit-code)))))))
 
 (defun fikra-backend-codex-turn-end-bg (thread-id exit-code)
   (let ((prev (fikra/thread/fikra-thread-current)))

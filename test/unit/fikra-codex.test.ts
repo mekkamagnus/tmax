@@ -228,3 +228,56 @@ describe("#224 backend registry + switcher", () => {
     expect(kinds).toContain("tool-result");
   });
 });
+
+// r154c (codex gate; the claude twin lives in fikra-backend-claude.test.ts):
+// the process lifecycle under interruption. A stand-in `codex` on PATH
+// (it idles) lets the REAL start-turn/abort/sentinel path run.
+describe("#224 process lifecycle — stale exits", () => {
+  test("an interrupt ends the turn ONCE, and a killed process's late exit never ends its replacement", async () => {
+    const stubBin = mkdtempSync(join(tmpdir(), "fikra-codex-stub-"));
+    writeFileSync(join(stubBin, "codex"), "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${stubBin}:${savedPath}`;
+    try {
+      const editor = await createStartedEditor("");
+      e(editor, "(require-module fikra/backend-codex)");
+      e(editor, "(require-module fikra/adapter)");
+      e(editor, "(require-module fikra/chat)");
+      e(editor, "(require-module fikra/thread)");
+      e(editor, "(fikra/thread/fikra-thread-init)");
+      e(editor, '(fikra/adapter/fikra-set-backend-forced "codex")');
+      const status = () => String(e(editor, "(fikra/thread/fikra-thread-status)").value);
+      const endings = async () => {
+        const logPath = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
+        return readFileSync(logPath, "utf8").trimEnd().split("\n")
+          .map((l) => JSON.parse(l)).filter((l) => l.kind === "turn-end").map((l) => l.status as string);
+      };
+      // A plain interrupt: ONE ending. The killed process's exit used to
+      // append a stray "error" turn-end — which replay's last-ending-wins
+      // rule then showed INSTEAD of the interrupt.
+      e(editor, '(fikra/chat/fikra-turn-send "first question")');
+      expect(status()).toBe("running");
+      e(editor, "(fikra/chat/fikra-turn-interrupt)");
+      expect(status()).toBe("interrupted");
+      await new Promise((r) => setTimeout(r, 900));
+      expect(status()).toBe("interrupted");
+      expect(await endings()).toEqual(["interrupted"]);
+      // The replacement: interrupt and a new send, back to back — the
+      // killed process's exit lands AFTER the replacement began.
+      e(editor, '(fikra/chat/fikra-turn-send "second question")');
+      expect(status()).toBe("running");
+      e(editor, '(fikra/chat/fikra-turn-send "the replacement")');
+      expect(status()).toBe("running");
+      await new Promise((r) => setTimeout(r, 900));
+      expect(status()).toBe("running");
+      expect(await endings()).toEqual(["interrupted", "interrupted"]);
+      e(editor, "(fikra/chat/fikra-turn-interrupt)");
+      expect(status()).toBe("interrupted");
+      await new Promise((r) => setTimeout(r, 900));
+      expect(await endings()).toEqual(["interrupted", "interrupted", "interrupted"]);
+    } finally {
+      process.env.PATH = savedPath;
+      rmSync(stubBin, { recursive: true, force: true });
+    }
+  }, 60000);
+});

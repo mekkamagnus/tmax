@@ -36,7 +36,7 @@ import type { EditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 describe("CHORE-44 Change 7 — editor API registry", () => {
   // ── AC7.1: live inventory matches the checked-in baseline ────────────
-  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (439 names)", () => {
+  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (440 names)", () => {
     const baselinePath = join(import.meta.dir, "..", "..", ".chore44-baseline", "api-names-static.txt");
     const expected = readFileSync(baselinePath, "utf8")
       .split("\n")
@@ -60,7 +60,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // without its refreeze) + #308's rg-event->hit/exec-lookup (the
     // grep backend primitives; reconciled on the #308 branch, frozen
     // here with the drift).
-    expect(live.length).toBe(439);
+    // r154: 439 → 440 — http-cancel (abort an in-flight http-request).
+    expect(live.length).toBe(440);
     expect(live).toEqual(expected);
   });
 

@@ -4,6 +4,7 @@
           fikra-event-turn-tools
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-events-of
+          fikra-event-emit-held-for fikra-event-flush-undelivered
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
           fikra-event-get-str
           fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles-get fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
@@ -118,6 +119,7 @@
   "Clear in-memory state (tests). Does not touch the log file."
   (setq fikra-event-memory (list))
   (setq fikra-text-open-by-thread (hashmap))
+  (setq fikra-event-undelivered (hashmap))
   t)
 
 ;; ── field accessors (alist of ("k" v)) ──────────────────────────────
@@ -1462,6 +1464,83 @@ id-less completed thoughts too).")
         (concat (fikra/thread/fikra-thread-field-root-of id)
                 "/.tmax/fikra/threads/" id "/events.jsonl")
         (if windowp window nil)))))
+
+;; r154c (codex gate P0): what the transcript cannot take is HELD, not
+;; lost. An unwritable log at completion used to discard the response for
+;; good — the request's state is forgotten before any retry could find
+;; it, and the turn's own ending was dropped the same way. Held batches
+;; wait here, per thread and in order, and are written out by the next
+;; flush: the send seam flushes before the user's new line, and every
+;; holding emit flushes first (a thread's log never receives a newer
+;; event ahead of an older held one). In memory only — a daemon restart
+;; before the flush still loses them; the status says a reply was held.
+(defvar fikra-event-undelivered (hashmap)
+  "thread-id → the batches the transcript refused, oldest-first:
+((fresh events) …). FRESH: the batch's text opens a message of its own.")
+
+;; Land ONE batch for THREAD. FRESH closes the thread's open run first,
+;; so a held reply never glues onto whatever line was last rendered (a
+;; continuation — part of the same reply already landed — keeps joining
+;; it). t when the batch reached the log. Never throws.
+(defun fikra-event-land-for (thread events fresh)
+  (if (null events)
+    t
+    (progn
+      (if fresh
+        (editor/keymaps/keymap-mutable-set! fikra-text-open-by-thread thread ""))
+      (condition-case nil
+        (fikra-event-emit-batch-for thread events)
+        (error () nil)))))
+
+;; A thread's held batches (a proper list — never nil).
+(defun fikra-event-held-for (thread)
+  (let ((held (if (stringp thread)
+                  (hashmap-get fikra-event-undelivered thread)
+                  nil)))
+    (if (listp held) held (list))))
+
+;; Whether anything is held. (Never test the list itself for truth:
+;; (list) is TRUTHY in this dialect — the first cut held every batch.)
+(defun fikra-event-held-p (thread)
+  (> (length (fikra-event-held-for thread)) 0))
+
+;; Write a thread's held batches out, oldest-first. t when nothing is
+;; left held (nothing was, or everything landed).
+(defun fikra-event-flush-undelivered (thread)
+  (let ((batches (fikra-event-held-for thread)))
+    (cond
+      ((null batches) t)
+      ((fikra-event-land-for thread (car (cdr (car batches))) (car (car batches)))
+        (let ((rest (cdr batches)))
+          (editor/keymaps/keymap-mutable-set! fikra-event-undelivered thread
+            (if (null rest) nil rest))
+          (fikra-event-flush-undelivered thread)))
+      (t nil))))
+
+;; Emit EVENTS for THREAD without ever losing them: anything the
+;; transcript refuses is held (behind what is already held) for the next
+;; flush. Never throws. t when the batch is in the log, nil when it waits.
+(defun fikra-event-emit-held-for (thread events fresh)
+  ;; An unknown thread has no transcript to hold for (the plain emitters
+  ;; drop it too) — holding it would only leak.
+  (if (or (not (stringp thread))
+          (null (fikra/thread/fikra-thread-field-root-of thread)))
+    nil
+    (progn
+      (fikra-event-flush-undelivered thread)
+      (if (fikra-event-held-p thread)
+        ;; The log still refuses: this batch queues behind the held ones.
+        (progn
+          (editor/keymaps/keymap-mutable-set! fikra-event-undelivered thread
+            (append (fikra-event-held-for thread)
+                    (list (list (if fresh t nil) events))))
+          nil)
+        (if (fikra-event-land-for thread events fresh)
+          t
+          (progn
+            (editor/keymaps/keymap-mutable-set! fikra-event-undelivered thread
+              (list (list (if fresh t nil) events)))
+            nil))))))
 
 (provide "fikra-event")
 )

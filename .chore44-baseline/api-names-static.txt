@@ -7,6 +7,8 @@
 # #338 (drift catch-up): 436 -> 439 — the ANCHOR carries #308's rg-event->hit +
 # exec-lookup (frozen on its branch; the anchor lagged) and scan-visible-column
 # (an earlier landing's unfrozen addition; +1 file line, 438 -> 439).
+# r154: 439 -> 440 — http-cancel (abort an in-flight http-request: the ollama backend
+# cancels an interrupted or replaced turn's stream at the transport).
 add-hook
 append-file
 aref
@@ -214,6 +216,7 @@ go-to-definition
 half-page-down
 half-page-up
 hook-list
+http-cancel
 http-request
 indent-apply-line
 indent-apply-region

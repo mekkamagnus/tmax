@@ -662,25 +662,37 @@ SKIPPED when the turn was already ended by a local abort (interrupted).
 #222 gate catch: settles the PID'S thread — a background turn ending must
 not mutate the focused thread's state."
   (let* ((thread-id (hashmap-get fikra-claude-pid-thread (number-to-string pid)))
+         (current (if thread-id (hashmap-get fikra-claude-processes thread-id) nil))
          (focused (if thread-id (string= thread-id (fikra/thread/fikra-thread-current)) nil)))
-    ;; Gate round-2: unknown pid → no-op (never assume focused). The
-    ;; pid→thread entry stays RESIDENT after exit so late straggler chunks
-    ;; still route to the right thread's accumulator.
-    (if thread-id
+    ;; r154c (codex gate P1): an exit is authoritative only for the
+    ;; process CURRENT for its thread. The abort path clears the slot and
+    ;; a replacement turn refills it — resetting the aborted flag —
+    ;; before the killed process's exit lands; that stale exit used to
+    ;; clear the REPLACEMENT's slot and end its turn. (No recorded
+    ;; process — the abort path, or a seam that routes only the pid —
+    ;; keeps the old behavior; the aborted flag still guards it.)
+    (if (and current (not (= pid current)))
+      'superseded
       (progn
-        (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id nil)
-        (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id ""))
-      nil)
-    (if (and thread-id (not (hashmap-get fikra-claude-aborteds thread-id)))
-      (if focused
-        ;; r88: the FOCUSED end revokes the token too (the bg helper had
-        ;; it; this path bypassed it — the token outlived the turn).
-        (progn
-          (fikra/thread/fikra-thread-turn-end
-            (if (= exit-code 0) "completed" "error"))
-          (fikra-claude-revoke-thread-token thread-id))
-        ;; Background thread: settle it WITHOUT stealing focus.
-        (fikra-backend-claude-turn-end-bg thread-id exit-code)))))
+        ;; Gate round-2: unknown pid → no-op (never assume focused). The
+        ;; pid→thread entry stays RESIDENT after exit so late straggler
+        ;; chunks still route to the right thread's accumulator.
+        (if thread-id
+          (progn
+            (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id nil)
+            (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id ""))
+          nil)
+        (if (and thread-id (not (hashmap-get fikra-claude-aborteds thread-id)))
+          (if focused
+            ;; r88: the FOCUSED end revokes the token too (the bg helper had
+            ;; it; this path bypassed it — the token outlived the turn).
+            (progn
+              (fikra/thread/fikra-thread-turn-end
+                (if (= exit-code 0) "completed" "error"))
+              (fikra-claude-revoke-thread-token thread-id))
+            ;; Background thread: settle it WITHOUT stealing focus.
+            (fikra-backend-claude-turn-end-bg thread-id exit-code))
+          nil)))))
 
 (defun fikra-backend-claude-turn-end-bg (thread-id exit-code)
   (let ((prev (fikra/thread/fikra-thread-current)))

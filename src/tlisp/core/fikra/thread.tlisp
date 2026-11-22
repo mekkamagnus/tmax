@@ -941,12 +941,15 @@ thread→adapter has no cycle but keep the lazy convention)."
   ;; r131e (codex r131d catch): the turn-end EVENT is best-effort — an
   ;; append failure (an unwritable log path) must not strand the thread
   ;; "running": the STATUS transition below is the state truth.
-  (condition-case nil
-    (fikra/event/fikra-event-emit-batch-for (fikra-thread-current)
-      (list (list (list "kind" "turn-end")
-                  (list "turn" (fikra-thread-field "turn-count"))
-                  (list "status" status))))
-    (error () nil))
+  ;; r154c: through the HOLDING emitter — the refused ending waits with
+  ;; anything else the transcript refused, in order, for the next flush
+  ;; (it used to be dropped: the turn then had no ending in its log, and
+  ;; replay rendered it as never finished).
+  (fikra-event-emit-held-for (fikra-thread-current)
+    (list (list (list "kind" "turn-end")
+                (list "turn" (fikra-thread-field "turn-count"))
+                (list "status" status)))
+    nil)
   ;; #223 (gate catch: the offer had NO production call site): a COMPLETED
   ;; turn in plan interaction offers the y/e/n approval. Lazy require
   ;; (plan requires thread; the cycle forbids top-level).
