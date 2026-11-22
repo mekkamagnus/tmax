@@ -1,5 +1,5 @@
 (defmodule editor/commands/grep
-  (export grep-exact-keys-p grep-buffer-register grep-buffer-append-hit
+  (export grep-exact-keys-p grep-coord-p grep-buffer-register grep-buffer-append-hit
           grep-buffer-complete grep-buffer-rollback
           grep-test-producer grep-hits-get grep-generation-get
           grep-current-gen-get grep-status-get
@@ -49,6 +49,12 @@
         (setq unknown (cons k unknown))))
     (append missing unknown)))
 
+(defun grep-coord-p (x)
+  ;; An integer >= 1 (gate r1: numberp alone let 1.5 through). No
+  ;; floor builtin — the printed form carries no decimal point.
+  (and (numberp x) (>= x 1)
+    (not (string-contains-p "." (number-to-string x)))))
+
 (defun grep-name-offenders (offenders kind)
   (if (null offenders) ""
     (concat kind ": " (string-join ", " offenders) "; ")))
@@ -88,8 +94,10 @@ rerun. Returns the generation id."
   grep-generation-counter)
 
 (defun grep-buffer-append-hit (gen hitmap)
-  "Append one structured hit to generation GEN."
+  "Append one structural hit to generation GEN."
   ;; Validation FIRST (even on stale generations).
+  (if (not (numberp gen))
+    (grep-error "append-hit: gen must be an integer"))
   (let ((offenders (grep-exact-keys-p hitmap (list "file" "line" "col" "text"))))
     (if (> (length offenders) 0)
       (grep-error (concat "append-hit: bad fields — "
@@ -99,11 +107,9 @@ rerun. Returns the generation id."
       (grep-error "append-hit: file must be a non-empty string"))
     (if (not (stringp (hashmap-get hitmap "text")))
       (grep-error "append-hit: text must be a string (may be empty)"))
-    (if (not (and (numberp (hashmap-get hitmap "line"))
-                  (>= (hashmap-get hitmap "line") 1)))
+    (if (not (grep-coord-p (hashmap-get hitmap "line")))
       (grep-error "append-hit: line must be an integer >= 1"))
-    (if (not (and (numberp (hashmap-get hitmap "col"))
-                  (>= (hashmap-get hitmap "col") 1)))
+    (if (not (grep-coord-p (hashmap-get hitmap "col")))
       (grep-error "append-hit: col must be an integer >= 1")))
   ;; Well-formed + stale/completed/retired → SILENT drop.
   (if (grep-live-gen-p gen)
@@ -147,29 +153,45 @@ generation's content. A restored generation's id RETIRES."
       (grep-error "rollback: generation already complete"))
     (t
       (progn
-        ;; PEEK the previous snapshot (this gen was never pushed);
-        ;; its gen becomes current again — its id was never retired.
-        (setq grep-current-gen
-          (if (> (length grep-stack) 0) (nth 0 (nth (- (length grep-stack) 1) grep-stack)) nil))
-        (setq grep-meta
-          (if (> (length grep-stack) 0) (nth 1 (nth (- (length grep-stack) 1) grep-stack)) nil))
-        (setq grep-hits
-          (if (> (length grep-stack) 0) (nth 2 (nth (- (length grep-stack) 1) grep-stack)) (list)))
-        (setq grep-completed
-          (if (> (length grep-stack) 0) (nth 3 (nth (- (length grep-stack) 1) grep-stack)) nil))
-        (setq grep-status
-          (if (> (length grep-stack) 0) (nth 4 (nth (- (length grep-stack) 1) grep-stack)) nil))
-        (if (= (length grep-stack) 0)
-          (grep-restore-content grep-saved-content)
-          (grep-rerender-hits))
+        ;; gate r1: POP the snapshot the rolled-back gen pushed and
+        ;; restore THE POPPED one (peek-only made consecutive
+        ;; rollbacks re-restore the same generation). The rolled-back
+        ;; id retires explicitly; the popped gen becomes current.
+        (setq grep-retired (cons gen grep-retired))
+        (let ((snap (grep-stack-pop)))
+          (setq grep-current-gen (if snap (nth 0 snap) nil))
+          (setq grep-meta (if snap (nth 1 snap) nil))
+          (setq grep-hits (if snap (nth 2 snap) (list)))
+          (setq grep-completed (if snap (nth 3 snap) nil))
+          (setq grep-status (if snap (nth 4 snap) nil))
+          (if snap
+            (grep-rerender-hits)
+            (grep-restore-content grep-saved-content)))
         (editor-set-status "grep: rolled back")))))
 
+(defun grep-stack-pop ()
+  (if (= (length grep-stack) 0)
+    nil
+    (let ((last (nth (- (length grep-stack) 1) grep-stack)))
+      (setq grep-stack (reverse (cdr (reverse grep-stack))))
+      last)))
+
 (defun grep-rerender-hits ()
+  (grep-switch-in)
   (buffer-set-read-only nil)
   (grep-clear-buffer)
-  (dolist (h grep-hits)
-    (buffer-append (concat (grep-hit-line h) "\n")))
-  (buffer-set-read-only t))
+  ;; APPEND-style join: no trailing newline (gate r1: the mismatch
+  ;; desynced hit indices after a rollback + append).
+  (grep-rerender-scan grep-hits 0)
+  (buffer-set-read-only t)
+  (grep-switch-out))
+
+(defun grep-rerender-scan (hits i)
+  (if (< i (length hits))
+    (progn
+      (buffer-append
+        (concat (if (= i 0) "" "\n") (grep-hit-line (nth i hits))))
+      (grep-rerender-scan hits (+ i 1)))))
 
 (defun grep-live-gen-p (gen)
   ;; Well-formed gen is LIVE only when current, uncompleted, unretired.
@@ -192,9 +214,30 @@ generation's content. A restored generation's id RETIRES."
         (buffer-append text))
       (buffer-set-read-only t))))
 
+(defvar grep-prev-buffer nil
+  "The render's saved current buffer (gate r1 DATA DESTROYER: the
+buffer primitives are NAMELESS — every async render switches to
+*grep* then RESTORES the user's buffer; without this, a completion
+landing while the user edited elsewhere appended into THEIR buffer
+and flipped it read-only).")
+
+(defun grep-switch-in ()
+  (setq grep-prev-buffer (buffer-current))
+  (buffer-switch (grep-buffer-name)))
+
+(defun grep-switch-out ()
+  (if (and (not (string= (buffer-current) (grep-buffer-name)))
+           grep-prev-buffer)
+    nil
+    (if (and grep-prev-buffer
+             (member grep-prev-buffer (buffer-list)))
+      (buffer-switch grep-prev-buffer))))
+
 (defun grep-render-open ()
   (if (not (member (grep-buffer-name) (buffer-list)))
     (buffer-create (grep-buffer-name)))
+  ;; render-open intentionally LEAVES *grep* current (register is a
+  ;; user-facing open); the async renders below restore.
   (buffer-switch (grep-buffer-name))
   (major-mode-set "grep")
   (editor-set-mode "normal")
@@ -210,9 +253,11 @@ generation's content. A restored generation's id RETIRES."
     (if (= (length p) 0) "<glob-only>" p)))
 
 (defun grep-render-append (n)
-  ;; Stream the newest hit; the POINT never moves (selection stable).
+  ;; Stream the newest hit; the POINT never moves (selection stable);
+  ;; the USER'S current buffer is restored (gate r1).
   (if (member (grep-buffer-name) (buffer-list))
     (progn
+      (grep-switch-in)
       (buffer-set-read-only nil)
       ;; First hit replaces the placeholder; later hits append.
       (if (= n 1)
@@ -220,15 +265,24 @@ generation's content. A restored generation's id RETIRES."
           (grep-clear-buffer)
           (buffer-append (grep-hit-line (nth 0 grep-hits))))
         (buffer-append (concat "\n" (grep-hit-line (nth (- n 1) grep-hits)))))
-      (buffer-set-read-only t))))
+      (buffer-set-read-only t)
+      (grep-switch-out))))
 
 (defun grep-hit-line (hit)
   (concat (nth 0 hit) ":" (number-to-string (nth 1 hit)) ":"
     (number-to-string (nth 2 hit)) ":" (nth 3 hit)))
 
 (defun grep-render-complete ()
+  (grep-switch-in)
   (buffer-set-read-only nil)
   (cond
+    ((and (stringp grep-message) (> (length grep-message) 0)
+          (not (string= grep-status "error")))
+      ;; done/no-matches with a message: a diagnostic suffix.
+      (progn
+        (grep-clear-buffer)
+        (buffer-append (concat "no matches for " (grep-pattern-display)
+                           " — " grep-message "\n"))))
     ((and (string= grep-status "done") (= (length grep-hits) 0))
       (progn
         ;; done with zero hits → the no-matches state.
@@ -252,7 +306,8 @@ generation's content. A restored generation's id RETIRES."
       (cond
         ((string= grep-status "error") "error")
         ((= (length grep-hits) 0) "no matches")
-        (t (concat (number-to-string (length grep-hits)) " hits"))))))
+        (t (concat (number-to-string (length grep-hits)) " hits")))))
+  (grep-switch-out))
 
 (defun grep-clear-buffer ()
   (let ((count (buffer-line-count)))
@@ -333,7 +388,9 @@ generation's content. A restored generation's id RETIRES."
   (if (= (length grep-hits) 0)
     (editor-set-status "grep: no hits")
     (let* ((i (or (grep-hit-at-cursor) 0))
-           (stride (let ((c (count-get))) (if (and (numberp c) (> c 0)) c 1)))
+           (stride (let ((c (count-get)))
+                     (count-reset)
+                     (if (and (numberp c) (> c 0)) c 1)))
            (n (length grep-hits))
            ;; Wrap arithmetic (floor-mod by additions — T-Lisp has no mod).
            (j (grep-wrap (+ i (* dir stride)) n)))
@@ -355,24 +412,15 @@ generation's content. A restored generation's id RETIRES."
       (editor-set-status "grep: no rerun registered"))))
 
 (defun grep-quit ()
-  "q — kill the results buffer; the CURRENT window switches to the
-most-recent NON-results buffer (recency; *scratch* if none). No
-windows are ever deleted."
-  (let ((target (grep-recency-target)))
-    (buffer-kill (grep-buffer-name))
-    (if target (buffer-switch target))
-    (editor-set-status "grep: closed")))
-
-(defun grep-recency-target ()
-  ;; The most-recent buffer that is NOT the results buffer.
-  (grep-recency-scan (buffer-list) (grep-buffer-name)))
-
-(defun grep-recency-scan (bufs self)
-  (if (null bufs)
-    nil
-    (if (not (string= (car bufs) self))
-      (car bufs)
-      (grep-recency-scan (cdr bufs) self))))
+  "q — kill the results buffer. The Editor's buffer-kill already
+picks the recency-correct survivor (gate r1: an explicit switch
+OVERRIDES it, and buffer-list is INSERTION order, not recency);
+*scratch* only if the survivor is somehow still *grep*. No windows
+are ever deleted."
+  (buffer-kill (grep-buffer-name))
+  (if (string= (buffer-current) (grep-buffer-name))
+    (buffer-switch "*scratch*"))
+  (editor-set-status "grep: closed"))
 
 ;; ── the test producer (drives the interface; #307's own harness) ────
 (defun grep-test-producer (script)
