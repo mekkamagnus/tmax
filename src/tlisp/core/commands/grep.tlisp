@@ -277,15 +277,28 @@ and flipped it read-only).")
         (buffer-switch (grep-buffer-name))
         (setq grep-prev-buffer nil)))))
 
+(defvar grep-own-line 0 "*grep*'s own cursor (line) across renders.")
+(defvar grep-away-rendered nil "t after a render ran while another buffer was current (the cursor reset on return).")
+
+(defun grep-nav-target-line () grep-own-line)
+(defvar grep-own-col 0 "*grep*'s own cursor (col) across renders.")
+
 (defun grep-switch-out ()
   ;; Restore the user's buffer AND point (gate r2 P5/P6: the
-  ;; buffer-switch cursor reset). No-op when we never switched.
+  ;; buffer-switch cursor reset). *grep*'s OWN selection is saved on
+  ;; the way in and restored when the user RETURNS (valve r4: the
+  ;; away-render round-trip reset it).
   (if (and grep-prev-buffer
            (member grep-prev-buffer (buffer-list)))
     (progn
+      (setq grep-away-rendered t)
       (buffer-switch grep-prev-buffer)
       (cursor-move grep-prev-line grep-prev-col)))
   (setq grep-prev-buffer nil))
+
+(defun grep-restore-own-point ()
+  (if (string= (buffer-current) (grep-buffer-name))
+    (cursor-move grep-own-line grep-own-col)))
 
 (defun grep-render-open ()
   (if (not (member (grep-buffer-name) (buffer-list)))
@@ -462,7 +475,11 @@ and flipped it read-only).")
 (defun grep-nav (dir)
   (if (= (length grep-hits) 0)
     (editor-set-status "grep: no hits")
-    (let* ((i (or (grep-hit-at-cursor) 0))
+    (let* ((at (if grep-away-rendered nil (grep-hit-at-cursor)))
+           ;; valve r4: after an away-render round-trip the cursor
+           ;; resets to 0 (indistinguishable from hit 1) — the
+           ;; recorded selection wins until the user interacts.
+           (i (if at at grep-own-line))
            (stride (let ((c (count-get)))
                      (count-reset)
                      (if (and (numberp c) (> c 0)) c 1)))
@@ -470,6 +487,9 @@ and flipped it read-only).")
            ;; Wrap arithmetic (floor-mod by additions — T-Lisp has no mod).
            (j (grep-wrap (+ i (* dir stride)) n)))
       (cursor-move j 0)
+      (setq grep-own-line j)
+      (setq grep-own-col 0)
+      (setq grep-away-rendered nil)
       (editor-set-status
         (concat "grep: hit " (number-to-string (+ j 1)) " of "
           (number-to-string n))))))
