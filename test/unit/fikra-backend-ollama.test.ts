@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -1432,7 +1432,11 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     };
     const edit = (path: string, content: string) => ({ function: { name: "buffer_edit", arguments: { path, content } } });
 
-    tt("a STAGED added file: the revert removes it from the worktree AND the index", async () => {
+    // r146 wanted the staged entry gone too; the codex r155 gate called
+    // that P0 (a version the USER staged, destroyed). r155c: the entry
+    // is the user's unless the action's own command moved the index —
+    // a buffer_edit never does — so it STAYS, and the status says so.
+    tt("a STAGED added file: the revert removes the worktree file and KEEPS the user's staged entry", async () => {
       const ed = await armed();
       e(ed, '(fikra/chat/fikra-turn-send "stage an addition")');
       fire(ed, 600, [edit("added151.txt", "ADDED\n")]);
@@ -1440,10 +1444,12 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       // The user stages the addition.
       execFileSync("git", ["add", "added151.txt"]);
       e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
-      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      const status = String(e(ed, "(editor-status)").value);
+      expect(status).toContain("action reverted");
+      expect(status).toContain("1 path(s) you had staged are still staged");
       expect(existsSync(join(process.cwd(), "added151.txt"))).toBe(false);
-      // AND from the index (a staged addition must not outlive the rm).
-      expect(execFileSync("git", ["ls-files", "added151.txt"]).toString()).toBe("");
+      // …and the staged entry is exactly what the user staged.
+      expect(execFileSync("git", ["show", ":added151.txt"]).toString()).toBe("ADDED\n");
     });
 
     // r152b (codex r152 catch): a bookkeeping write failure is DURABLY
@@ -3043,6 +3049,114 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     e(ed, "(fikra/backend-ollama/fikra-ollama-action-checkpoint)");
     expect(actionRefs()).toEqual([]);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  // r155c (codex gate round 2): a staged addition is the USER's work.
+  // The pair now records whether the action's OWN command moved the
+  // index (a fingerprint before and after); only then does a revert
+  // unstage what it finds.
+  // The WORKTREE mode as git records it (100644 / 100755).
+  const fileMode = (f: string) => ((statSync(join(process.cwd(), f)).mode & 0o111) ? "100755" : "100644");
+  const worktreeIsLink = (f: string) => lstatSync(join(process.cwd(), f), { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
+
+  tt("an addition the USER staged survives the revert — and the status says so", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "make a file")');
+    call(ed, 510, "touch user-staged.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    execFileSync("git", ["add", "user-staged.txt"]);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    const status = String(e(ed, "(editor-status)").value);
+    expect(status).toContain("action reverted");
+    expect(status).toContain("still staged");
+    expect(existsSync(join(process.cwd(), "user-staged.txt"))).toBe(false);
+    expect(execFileSync("git", ["ls-files", "user-staged.txt"], { encoding: "utf8" }).trim()).toBe("user-staged.txt");
+  });
+
+  tt("the action's OWN `git add` is undone with the action", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "stage your own file")');
+    call(ed, 511, "touch self-staged.txt && git add self-staged.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(execFileSync("git", ["ls-files", "self-staged.txt"], { encoding: "utf8" }).trim()).toBe("self-staged.txt");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    const status = String(e(ed, "(editor-status)").value);
+    expect(status).toContain("action reverted");
+    expect(status).not.toContain("still staged");
+    expect(existsSync(join(process.cwd(), "self-staged.txt"))).toBe(false);
+    expect(execFileSync("git", ["ls-files", "self-staged.txt"], { encoding: "utf8" }).trim()).toBe("");
+  });
+
+  // Kind and mode are part of a path's state: a symlink the user
+  // replaced with a file holding its target text is not "unchanged".
+  tt("a symlink the user replaced with a FILE is refused (and survives)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "link it")');
+    call(ed, 512, "ln -s base.txt kind.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    execFileSync("rm", ["kind.txt"]);
+    writeFileSync(join(process.cwd(), "kind.txt"), "base.txt");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
+    expect(worktreeIsLink("kind.txt")).toBe(false);
+    expect(readFileSync(join(process.cwd(), "kind.txt"), "utf8")).toBe("base.txt");
+  });
+
+  tt("a later chmod +x is neither reset nor clobbered — the revert refuses", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "append to it")');
+    call(ed, 513, "printf 'more\\n' >> base.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    execFileSync("chmod", ["+x", "base.txt"]);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
+    expect(fileMode("base.txt")).toBe("100755");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\nmore\n");
+  });
+
+  tt("a MODE-ONLY action is checkpointed and reverts", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "make it runnable")');
+    call(ed, 514, "chmod +x base.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(fileMode("base.txt")).toBe("100755");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(fileMode("base.txt")).toBe("100644");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
+  });
+
+  // git C-quotes such names in its line output; the revert used to pass
+  // the quoted text as a filename and abort.
+  tt("a path with a quote and a space reverts", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "odd name")');
+    call(ed, 515, "touch 'quote\" and space.txt'");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(existsSync(join(process.cwd(), 'quote" and space.txt'))).toBe(true);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(existsSync(join(process.cwd(), 'quote" and space.txt'))).toBe(false);
+  });
+
+  // The snapshot's view excludes ignored paths (so does every other
+  // checkpoint in the editor). A write to one is REPORTED — a mutation
+  // without its checkpoint is never silent.
+  tt("a write to an IGNORED path is reported as outside the checkpoint", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), ".gitignore"), ".tmax/\n.env\n");
+    execFileSync("git", ["add", ".gitignore"]);
+    execFileSync("git", ["commit", "-qm", "ignore env"]);
+    e(ed, '(fikra/chat/fikra-turn-send "write the env")');
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    call(ed, 516, "cp base.txt .env");
+    const mid = strip(await until(ed, "(buffer-text)", "cannot hold", 120));
+    expect(mid.split("\n").filter((l) => l.includes("1 path(s) the checkpoint cannot hold changed — not revertable: .env")).length).toBe(1);
+    expect(String(e(ed, "(editor-status)").value)).toContain("outside the checkpoint");
+    expect(existsSync(join(process.cwd(), ".env"))).toBe(true);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, before, "written");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
   });
 
   // Codex gate r154 round 5 (P2): the counters ran BEFORE the append — a

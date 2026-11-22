@@ -134,6 +134,13 @@ pre-state when earlier actions changed the tree.")
 (defvar fikra-ollama-last-action-stash nil
   "r142b: the last action revert's stash patch (the action's own
 pre-to-post change — git-apply restores it).")
+(defvar fikra-ollama-action-ix-changed (hashmap)
+  "r155c: post-ref → t when the action's OWN command changed the user's
+index (its fingerprint moved across the command). Only then does a
+revert remove what is staged for the action's paths — an entry the USER
+staged afterwards is theirs to keep.")
+(defvar fikra-ollama-revert-preserved-count 0
+  "r155c: staged entries a finished revert left in place on purpose.")
 (defvar fikra-ollama-action-posts (list)
   "r142: the action post-refs newest-first (the revert target picker).")
 (defvar fikra-ollama-turn-home nil
@@ -612,24 +619,43 @@ with its post-exit capture.")
 ;; PERSISTENT index (a warm index makes the add a re-stat: ~60 ms on a
 ;; 2k-file repo; a fresh one rehashes everything). GIT_INDEX_FILE is
 ;; scoped to these commands ONLY — the model's own git runs see the
-;; user's index. `.tmax` is excluded: the thread's state is not the
-;; user's tree, and its logs change while the command runs. The two
+;; user's index. `.tmax` is excluded at ANY depth: the thread's state is
+;; not the user's tree, and its logs change while the command runs. The
 ;; trees go to a marker FILE, never stdout — the model's tool result
 ;; stays exactly the command's output.
+;; r155c (codex gate): the snapshot is ATOMIC — a failed `git add` must
+;; not let `write-tree` name a tree the add never produced.
 (defun fikra-ollama-snapshot-cmd (idx var)
-  (concat var "=$(GIT_INDEX_FILE=" idx " git add -A -- . ':(exclude).tmax' >/dev/null 2>&1; "
+  (concat var "=$(GIT_INDEX_FILE=" idx " git add -A -- . ':(exclude,glob)**/.tmax' >/dev/null 2>&1 && "
           "GIT_INDEX_FILE=" idx " git write-tree 2>/dev/null); "))
+
+;; A fingerprint of the USER's index (its staged entries, in order): the
+;; marker carries one from before and one from after the command, so the
+;; revert can tell the action's OWN `git add` from a file the user staged
+;; afterwards (r155c — the two deserve opposite treatment).
+(defun fikra-ollama-index-fingerprint-cmd (var)
+  (concat var "=$(git ls-files -s | cksum | cut -d ' ' -f1 2>/dev/null); "))
 
 (defun fikra-ollama-snapshot-wrap (cmd dir)
   (let* ((d (concat dir "/.tmax/fikra"))
          (tid (fikra/thread/fikra-thread-current))
+         (dq (fikra/thread/fikra-thread-shq d))
          (idx (fikra/thread/fikra-thread-shq (concat d "/ckpt-index-" tid)))
-         (f (fikra/thread/fikra-thread-shq (concat d "/ckpt-trees-" tid))))
-    (concat "mkdir -p " (fikra/thread/fikra-thread-shq d) " ; rm -f " f " ; "
+         (f (fikra/thread/fikra-thread-shq (concat d "/ckpt-trees-" tid)))
+         (stamp (fikra/thread/fikra-thread-shq (concat d "/ckpt-stamp-" tid)))
+         (changed (fikra/thread/fikra-thread-shq (concat d "/ckpt-changed-" tid))))
+    (concat "mkdir -p " dq " ; rm -f " f " ; "
             (fikra-ollama-snapshot-cmd idx "__p")
+            (fikra-ollama-index-fingerprint-cmd "__pi")
+            ;; r155c: everything the command modifies is listed by
+            ;; modification time — the snapshot's view excludes ignored
+            ;; paths, so a write to one is reported instead of vanishing.
+            "touch " stamp " ; "
             (fikra-ollama-bash-body cmd)
             " ; " (fikra-ollama-snapshot-cmd idx "__q")
-            "echo \"$__p $__q\" > " f)))
+            (fikra-ollama-index-fingerprint-cmd "__qi")
+            "find . -newer " stamp " -type f -not -path './.git/*' -not -path './.tmax/*' | head -400 > " changed " ; "
+            "echo \"$__p $__q $__pi $__qi\" > " f)))
 
 (defun fikra-ollama-run-bash-now (cmd dir)
   (fikra/event/fikra-event-emit
@@ -708,56 +734,151 @@ with its post-exit capture.")
   nil)
 
 ;; r155: the ordinary-bash ACTION checkpoint. Runs in the sentinel under
-;; the HOME focus. The child left "<pre> <post>" tree names in the
-;; marker file; DIFFERENT trees mean the command changed the worktree:
-;; both are sealed as refs (post → pre) exactly like a mediated action,
-;; so SPC a C-r reverts it. Identical trees mean nothing to hold: a
-;; read-only call carries no checkpoint — and says so. r155b: with
-;; checkpointing enabled for this root, anything else is a FAILURE and
-;; is reported (a locked snapshot index, a marker the command destroyed,
-;; a ref that would not seal). Disabled roots (not a git dir, an unborn
-;; HEAD) stay silent — there is nothing to hold and nothing promised.
+;; the HOME focus. The child wrote "<pre-tree> <post-tree>
+;; <index-before> <index-after>" to the marker file and the files it
+;; touched (by modification time) to a list beside it. DIFFERENT trees
+;; mean the command changed the worktree: both are sealed as refs
+;; (post → pre) exactly like a mediated action, so SPC a C-r reverts it.
+;; Identical trees mean nothing to hold: a read-only call carries no
+;; checkpoint — and says so. r155b: with checkpointing enabled for this
+;; root, a marker that yields no pair is a FAILURE and is reported.
+;; r155c: a file the command changed that the snapshot cannot see (an
+;; ignored path, a nested .tmax) is REPORTED too — a mutation without
+;; its checkpoint is never silent; and the index fingerprints tell the
+;; pair whether the action's OWN command moved the index. Disabled roots
+;; (not a git dir, an unborn HEAD) stay silent: nothing is promised there.
 (defun fikra-ollama-action-checkpoint ()
   ;; The module may not be loaded yet (no turn has run in this editor).
   (condition-case nil (require-module fikra/checkpoint) (error () nil))
   (condition-case nil
-    (let* ((f (concat (fikra/thread/fikra-thread-working-dir)
-                      "/.tmax/fikra/ckpt-trees-"
-                      (fikra/thread/fikra-thread-current)))
-           (raw (if (file-exists-p f) (string-trim (read-file-content f)) ""))
-           (sp (string-match " " raw))
-           (pre (if (and sp (numberp sp) (> sp 0)) (substring raw 0 sp) ""))
-           (post (if (and sp (numberp sp) (> sp 0)) (substring raw (+ sp 1) (length raw)) ""))
-           (usable (and (fikra-ollama-hex40-p pre) (fikra-ollama-hex40-p post))))
-      ;; The marker is consumed whatever it held — a stale or useless one
-      ;; must not be reported again by an unrelated later call.
+    (let* ((base (concat (fikra/thread/fikra-thread-working-dir)
+                         "/.tmax/fikra/ckpt-"))
+           (tid (fikra/thread/fikra-thread-current))
+           (f (concat base "trees-" tid))
+           (changed (concat base "changed-" tid))
+           (toks (fikra-ollama-marker-tokens
+                   (if (file-exists-p f) (string-trim (read-file-content f)) "")))
+           (pre (if (> (length toks) 0) (nth 0 toks) ""))
+           (post (if (> (length toks) 1) (nth 1 toks) ""))
+           (ix-pre (if (> (length toks) 2) (nth 2 toks) ""))
+           (ix-post (if (> (length toks) 3) (nth 3 toks) ""))
+           (usable (and (fikra-ollama-hex40-p pre) (fikra-ollama-hex40-p post)))
+           (changed-lines (if (file-exists-p changed)
+                            (string-split (string-trim (read-file-content changed)) (hex-decode "0a"))
+                            (list))))
+      ;; The markers are consumed whatever they held — a stale or useless
+      ;; one must not be reported again by an unrelated later call.
       (if (file-exists-p f)
         (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq f)))
+        nil)
+      (if (file-exists-p changed)
+        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq changed)))
         nil)
       (cond
         ((fikra/checkpoint/fikra-checkpoint-disable-p) nil)
         ((not usable) (fikra-ollama-checkpoint-failed "snapshot"))
-        ((string= pre post) nil)
         (t
-          ;; r134e: this runs in the SENTINEL's eval context — the event
-          ;; emits through the explicit-path owner emitter (set here,
-          ;; cleared on every path: a leaked owner misrouted later sync
-          ;; captures).
-          (condition-case nil
-            (progn
-              (fikra/checkpoint/fikra-checkpoint-set-emit-owner (fikra/thread/fikra-thread-current))
-              (let ((names (fikra/checkpoint/fikra-checkpoint-pair-trees pre post)))
-                (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
-                (if names
-                  (progn
-                    (setq fikra-ollama-last-pre-name (car names))
-                    (fikra-ollama-record-action-pair (car names)))
-                  (fikra-ollama-checkpoint-failed "seal"))))
-            (error (m)
-              (condition-case nil (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil) (error () nil))
-              (fikra-ollama-checkpoint-failed (if (stringp m) m "error")))))))
+          (progn
+          ;; r155c: what the command touched that the trees cannot hold.
+          (fikra-ollama-report-outside-checkpoint changed-lines pre post)
+          (if (string= pre post)
+            nil
+            ;; r134e: this runs in the SENTINEL's eval context — the event
+            ;; emits through the explicit-path owner emitter (set here,
+            ;; cleared on every path: a leaked owner misrouted later sync
+            ;; captures).
+            (condition-case nil
+              (progn
+                (fikra/checkpoint/fikra-checkpoint-set-emit-owner (fikra/thread/fikra-thread-current))
+                (let ((names (fikra/checkpoint/fikra-checkpoint-pair-trees pre post)))
+                  (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+                  (if names
+                    (progn
+                      (setq fikra-ollama-last-pre-name (car names))
+                      ;; The action changed the index iff the user's index
+                      ;; fingerprint moved across the command.
+                      (fikra-ollama-record-action-pair (car names)
+                        (and (> (length ix-pre) 0)
+                             (> (length ix-post) 0)
+                             (not (string= ix-pre ix-post)))))
+                    (fikra-ollama-checkpoint-failed "seal"))))
+              (error (m)
+                (condition-case nil (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil) (error () nil))
+                (fikra-ollama-checkpoint-failed (if (stringp m) m "error")))))))))
     (error (m)
       (fikra-ollama-checkpoint-failed (if (stringp m) m "error")))))
+
+;; The marker's space-separated fields (empty ones dropped).
+(defun fikra-ollama-marker-tokens (raw)
+  (if (or (not (stringp raw)) (= (length raw) 0))
+    (list)
+    (let ((out (list)))
+      (dolist (tok (string-split raw " "))
+        (if (> (length tok) 0) (setq out (cons tok out)) nil))
+      (reverse out))))
+
+;; r155c: the files the command changed that lie OUTSIDE the checkpoint's
+;; view — ignored by git, under a nested .tmax, or simply not in the
+;; pre→post diff — are named in the transcript: they are real mutations
+;; a revert will not undo. (The diff is read NUL-separated: git quotes
+;; paths with spaces or quotes in its line output.)
+(defun fikra-ollama-report-outside-checkpoint (changed pre post)
+  (let* ((root (fikra/thread/fikra-thread-working-dir))
+         (diff-text (string-trim (shell-command
+                    (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                            " diff --name-only -z " pre " " post
+                            " | xargs -0 -n1 printf '%s" (hex-decode "0a") "'"))))
+         (covered (fikra-ollama-split-paths diff-text))
+         (outside (fikra-ollama-outside-scan changed (list) covered 0)))
+    (if (> (length outside) 0)
+      (let ((n (length outside)))
+        (condition-case nil
+          (fikra/event/fikra-event-emit-batch-for (fikra/thread/fikra-thread-current)
+            (list (list (list "kind" "checkpoint-error")
+                        (list "reason"
+                          (concat (number-to-string n) " path(s) the checkpoint cannot hold changed — not revertable: "
+                                  (fikra-ollama-join-take outside 3 ", ")
+                                  (if (> n 3) " …" ""))))))
+          (error () nil))
+        (if (string= pre post)
+          (editor-set-status
+            (concat "Fikra: " (number-to-string n)
+                    " path(s) changed outside the checkpoint — not revertable"))
+          nil))
+      nil)))
+
+;; Changed files (./x, one per line) minus the covered ones; empty
+;; entries dropped, "./" stripped; the first 400 (the list's own cap).
+(defun fikra-ollama-outside-scan (lines acc covered i)
+  (if (or (null lines) (> i 400))
+    (reverse acc)
+    (let ((l (car lines)))
+      (let ((p (if (and (stringp l) (> (length l) 2) (string= (substring l 0 2) "./"))
+                  (substring l 2 (length l))
+                  (if (stringp l) l ""))))
+        (fikra-ollama-outside-scan (cdr lines)
+          (if (and (> (length p) 0) (not (member p covered)))
+            (cons p acc)
+            acc)
+          covered (+ i 1))))))
+
+;; Newline-separated text → its non-empty lines.
+(defun fikra-ollama-split-paths (text)
+  (if (or (not (stringp text)) (= (length text) 0))
+    (list)
+    (let ((out (list)))
+      (dolist (l (string-split text (hex-decode "0a")))
+        (if (> (length l) 0) (setq out (cons l out)) nil))
+      (reverse out))))
+
+;; The first N of a list, joined by SEP.
+(defun fikra-ollama-join-take (items n sep)
+  (if (or (null items) (<= n 0))
+    ""
+    (concat (car items)
+            (if (and (cdr items) (> n 1))
+              (concat sep (fikra-ollama-join-take (cdr items) (- n 1) sep))
+              ""))))
 
 (defun fikra-ollama-bash-filter (pid output)
   ;; r131: the output accumulates on the PID's own entry (concurrent
@@ -1199,6 +1320,7 @@ with its post-exit capture.")
 ;; r150: the restart-simulation accessor (pairs + stack wiped).
 (defun fikra-ollama-action-state-reset ()
   (setq fikra-ollama-action-pairs (hashmap))
+  (setq fikra-ollama-action-ix-changed (hashmap))
   (setq fikra-ollama-action-posts (list)))
 
 ;; r152: drop other threads' entries (newest-first preserved).
@@ -1250,7 +1372,13 @@ with its post-exit capture.")
                (sp (string-match " " line)))
           (if (and sp (numberp sp) (> sp 0))
             (let* ((post (substring line 0 sp))
-                   (pre (substring line (+ sp 1) (length line)))
+                   (rest (substring line (+ sp 1) (length line)))
+                   (sp2 (string-match " " rest))
+                   ;; The line is "<post> <pre> [<ix>]": r155c adds the
+                   ;; optional third token; older lines stop at <pre>.
+                   (pre (if (and sp2 (numberp sp2) (> sp2 0))
+                          (substring rest 0 sp2)
+                          rest))
                    (have (hashmap-get fikra-ollama-action-pairs post)))
               ;; r150: a REVERTED tombstone (newest line for the post)
               ;; stays reverted — the loader never resurrects it.
@@ -1261,6 +1389,10 @@ with its post-exit capture.")
                   (keymap-mutable-set! fikra-ollama-action-pairs post "REVERTED"))
                 ((not have)
                   (progn
+                    (if (and sp2 (numberp sp2) (> sp2 0))
+                      (keymap-mutable-set! fikra-ollama-action-ix-changed post
+                        (if (string= (string-trim (substring rest (+ sp2 1) (length rest))) "ix") t nil))
+                      nil)
                     (keymap-mutable-set! fikra-ollama-action-pairs post pre)
                     ;; r150b: newest-first iteration + APPEND keeps the
                     ;; NEWEST at the head (prepend reversed the order).
@@ -1272,19 +1404,22 @@ with its post-exit capture.")
 ;; r142: pair an action's post-ref with its pre-ref (called right
 ;; after the post capture; both names read from the checkpoint module's
 ;; last-ref-name stash).
-(defun fikra-ollama-record-action-pair (pre)
+(defun fikra-ollama-record-action-pair (pre &optional (ix-changed nil))
   (let* ((post (fikra/checkpoint/fikra-checkpoint-last-ref-name-get))
          (pre-ref (if pre pre nil)))
     (if (and post pre-ref)
       (progn
         (keymap-mutable-set! fikra-ollama-action-pairs post pre-ref)
+        ;; r155c: only an action whose OWN command moved the index may
+        ;; take staged entries back out (see the revert's removal rule).
+        (keymap-mutable-set! fikra-ollama-action-ix-changed post (if ix-changed t nil))
         (setq fikra-ollama-action-posts (append (list post) fikra-ollama-action-posts))
         ;; r150/r152: the durable line — a failure is VISIBLE (a
         ;; restart would lose this revertable action).
         (let ((out (condition-case nil
                       (progn
                         (append-file (fikra-ollama-actions-file)
-                          (concat post " " pre-ref (hex-decode "0a")))
+                          (concat post " " pre-ref (if ix-changed " ix" "") (hex-decode "0a")))
                         "ok")
                       (error () "failed"))))
           (if (string= out "failed")
@@ -1321,42 +1456,68 @@ with its post-exit capture.")
 (defun fikra-ollama-state-diverged-p (root pre post paths)
   (fikra-ollama-state-diverged-scan root pre post paths))
 
-(defun fikra-ollama-path-state (root ref p)
-  ;; r149d: TWO commands — an exit-status probe (content-independent)
-  ;; and the raw content. A content equal to any marker string can
-  ;; never collide; no newline stripping (byte-exact both sides).
-  (if (string= (string-trim (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " cat-file -e " ref ":" (fikra/thread/fikra-thread-shq p) " 2>/dev/null && echo OK || echo MISS"))) "OK")
-    (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " show " ref ":" (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
-    nil))
+;; A tree entry's MODE at a ref (git ls-tree's first field), nil when
+;; the ref lacks the path.
+(defun fikra-ollama-ref-mode (root ref p)
+  (let ((out (shell-command
+               (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                       " ls-tree " ref " -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))))
+    (if (and (stringp out) (> (length out) 7) (string= (substring out 6 7) " "))
+      (substring out 0 6)
+      nil)))
 
+;; r149d: TWO commands — an exit-status probe (content-independent) and
+;; the raw content. A content equal to any marker string can never
+;; collide; no newline stripping (byte-exact both sides).
+;; r155c (codex gate): a state is "<mode> NEWLINE <content>" — the KIND
+;; (file / symlink) and the executable bit are part of it. Content alone
+;; let a symlink replaced by a file holding its target text pass for
+;; untouched, and a later chmod +x be reset by the restore.
+(defun fikra-ollama-path-state (root ref p)
+  (let ((mode (fikra-ollama-ref-mode root ref p)))
+    (if mode
+      (concat mode "\n"
+              (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                      " show " ref ":" (fikra/thread/fikra-thread-shq p) " 2>/dev/null")))
+      nil)))
+
+;; r155b (codex gate): a SYMLINK's state is its TARGET TEXT (what the
+;; tree stores), not the content it points at — `cat` followed the
+;; link, so a link-creating action read as "changed since the action"
+;; and could never be reverted (a dangling link read as absent).
+;; r155c: the state is "<mode> NEWLINE <content>" (120000 for a link,
+;; 100755 when the file is executable, else 100644).
 (defun fikra-ollama-worktree-state (root p)
-  ;; r149d: TWO commands — a kind probe (content-independent) and the
-  ;; raw content. A content equal to any marker string can never
-  ;; collide; no newline stripping (byte-exact both sides).
-  ;; r155b (codex gate): a SYMLINK's state is its TARGET TEXT (what the
-  ;; tree stores), not the content it points at — `cat` followed the
-  ;; link, so a link-creating action read as "changed since the action"
-  ;; and could never be reverted (a dangling link read as absent).
   (let ((abs (fikra/thread/fikra-thread-shq (concat root "/" p))))
     (let ((kind (string-trim (shell-command
-               (concat "if [ -L " abs " ]; then echo LINK; elif [ -e " abs " ]; then echo FILE; else echo MISS; fi")))))
+               (concat "if [ -L " abs " ]; then echo LINK; elif [ -e " abs " ]; then "
+                       "if [ -x " abs " ]; then echo XFILE; else echo FILE; fi; else echo MISS; fi")))))
       (cond
         ;; readlink ends its output with a newline the tree does not
         ;; store — command substitution drops it, printf adds none.
         ((string= kind "LINK")
-          (shell-command (concat "__l=$(readlink " abs " 2>/dev/null) && printf %s \"$__l\"")))
-        ((string= kind "FILE") (shell-command (concat "cat " abs " 2>/dev/null")))
+          (concat "120000\n"
+                  (shell-command (concat "__l=$(readlink " abs " 2>/dev/null) && printf %s \"$__l\""))))
+        ((string= kind "XFILE")
+          (concat "100755\n" (shell-command (concat "cat " abs " 2>/dev/null"))))
+        ((string= kind "FILE")
+          (concat "100644\n" (shell-command (concat "cat " abs " 2>/dev/null"))))
         (t nil)))))
 
 ;; r149: the INDEX content of a path (a staged-only change with a
 ;; matching worktree file must still refuse — the r146 staged catch).
+;; r155c: the staged entry's MODE rides along (git ls-files -s's first
+;; field) — the same "<mode> NEWLINE <content>" shape as every other side.
 (defun fikra-ollama-index-state (root p)
-  ;; r149d: TWO commands — an exit-status probe (content-independent)
-  ;; and the raw content. A content equal to any marker string can
-  ;; never collide; no newline stripping (byte-exact both sides).
-  (if (string= (string-trim (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " ls-files --error-unmatch -- " (fikra/thread/fikra-thread-shq p) " >/dev/null 2>&1 && echo OK || echo MISS"))) "OK")
-    (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " show :" (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
-    nil))
+  (let* ((out (shell-command
+                (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                        " ls-files -s -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null")))
+         (mode (if (and (stringp out) (> (length out) 6)) (substring out 0 6) nil)))
+    (if mode
+      (concat mode "\n"
+              (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                      " show :" (fikra/thread/fikra-thread-shq p) " 2>/dev/null")))
+      nil)))
 
 (defun fikra-ollama-state-diverged-scan (root pre post paths)
   (if (or (not paths) (= (length paths) 0))
@@ -1429,12 +1590,15 @@ with its post-exit capture.")
         (editor-set-status (concat "Fikra: no pre-ref recorded for " post))
         (let* ((stash (concat root "/.tmax/fikra/stash/action-"
                               (number-to-string (current-time)) ".patch"))
-               (paths-text (string-trim
-                             (shell-command
-                               (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                                       " diff --name-only " pre " " post))))
-               (paths (if (string= paths-text "") (list)
-                        (string-split paths-text (hex-decode "0a")))))
+               ;; r155c (codex gate): the paths are read NUL-separated —
+               ;; git C-quotes names with spaces or quotes in its line
+               ;; output, and the quoted text was passed as a filename.
+               (paths (fikra-ollama-split-paths
+                        (string-trim
+                          (shell-command
+                            (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                    " diff --name-only -z " pre " " post
+                                    " | xargs -0 -n1 printf '%s" (hex-decode "0a") "'"))))))
           (cond
             ((= (length paths) 0)
               ;; r146 (codex): a no-change action SKIPS (pops) — it
@@ -1472,7 +1636,12 @@ with its post-exit capture.")
                     'stash-failed)
                   (progn
                     (setq fikra-ollama-last-action-stash stash)
-                    (let ((fails (fikra-ollama-restore-paths root pre paths (list))))
+                    (setq fikra-ollama-revert-preserved-count 0)
+                    ;; r155c: an entry staged for an action-added path is
+                    ;; the USER's unless the action's own command moved
+                    ;; the index — only then does the revert unstage it.
+                    (let ((fails (fikra-ollama-restore-paths root pre paths (list)
+                                    (not (hashmap-get fikra-ollama-action-ix-changed post)))))
                       (if (> (length fails) 0)
                         (progn
                           (editor-set-status
@@ -1484,7 +1653,16 @@ with its post-exit capture.")
                           (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
                           (keymap-mutable-set! fikra-ollama-action-pairs post nil)
                           (fikra-ollama-tombstone-action post)
-                          (editor-set-status (concat "Fikra: action reverted to " pre))
+                          (editor-set-status
+                            (concat "Fikra: action reverted to " pre
+                                    ;; r155c: a staged entry left on purpose
+                                    ;; is said out loud — it would bring
+                                    ;; the file back at the next commit.
+                                    (if (> fikra-ollama-revert-preserved-count 0)
+                                      (concat " — "
+                                              (number-to-string fikra-ollama-revert-preserved-count)
+                                              " path(s) you had staged are still staged (unstage to drop them for good)")
+                                      "")))
                           'ok))))))))))))))
 
 ;; Paths as sh-quoted argv text.
@@ -1504,7 +1682,7 @@ with its post-exit capture.")
 ;; passes because restored paths now match the PRE-ref... which the
 ;; post-ref check would flag — so the retry compares against the
 ;; EXPECTED end-state (pre-ref content) per path, not the post-ref.
-(defun fikra-ollama-restore-paths (root ref paths fails)
+(defun fikra-ollama-restore-paths (root ref paths fails keep-staged)
   (if (or (not paths) (= (length paths) 0))
     fails
     (let* ((p (car paths))
@@ -1523,18 +1701,35 @@ with its post-exit capture.")
                    (concat "git -C " (fikra/thread/fikra-thread-shq root)
                            " restore --source=" ref " --worktree -- " (fikra/thread/fikra-thread-shq p)
                            " 2>/dev/null && echo RESTORED || echo FAILED"))) "RESTORED")
-                 ;; Removal: the file AND its staged addition go; the
-                 ;; removal is verified (the path must be gone).
+                 ;; Removal (a path the action ADDED): the worktree file
+                 ;; goes; the removal is verified (the path must be gone).
+                 ;; The INDEX entry goes only when the action itself moved
+                 ;; the index (its own `git add`) — an entry the USER
+                 ;; staged afterwards is theirs to keep (r155c, codex gate
+                 ;; P0: removing it lost their work) and is counted for the
+                 ;; status note: it would bring the file back at commit.
                  (let ((__out (shell-command
                    (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p)) " 2>/dev/null; "
-                           "git -C " (fikra/thread/fikra-thread-shq root)
-                           " rm -f --cached --ignore-unmatch -- " (fikra/thread/fikra-thread-shq p)
-                           " >/dev/null 2>&1; "
+                           (if keep-staged
+                             ""
+                             (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                     " rm -f --cached --ignore-unmatch -- " (fikra/thread/fikra-thread-shq p)
+                                     " >/dev/null 2>&1; "))
                            "test ! -e " (fikra/thread/fikra-thread-shq (concat root "/" p))
                            " && echo RESTORED || echo FAILED"))))
-                   (string= (string-trim __out) "RESTORED")))))
+                   (let ((__ok (string= (string-trim __out) "RESTORED")))
+                     ;; A kept entry is reported (the file is gone from the
+                     ;; worktree; the staging remains the user's decision).
+                     (if (and __ok keep-staged
+                              (> (length (string-trim (shell-command
+                                      (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                              " ls-files -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null")))) 0))
+                       (setq fikra-ollama-revert-preserved-count
+                         (+ 1 fikra-ollama-revert-preserved-count))
+                       nil)
+                     __ok)))))
       (fikra-ollama-restore-paths root ref (cdr paths)
-        (if ok fails (append fails (list p)))))))
+        (if ok fails (append fails (list p))) keep-staged))))
 
 ;; r138: append FRAGMENT into the CURRENT turn's exchange slot.
 ;; r139: the slot key is THREAD/TURN/ROUND — every round flushes in
