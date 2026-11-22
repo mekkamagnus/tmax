@@ -761,16 +761,16 @@ describe("#291 — valve r3 fixes", () => {
     e(editor, "(cursor-move 0 0)");
     e(editor, "(stagehand/diff/stagehand-diff-next)");
     e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
-    // Switch away, then the sentinel lands.
+    // Switch away and let the REAL sentinel land (valve r4: driving
+    // the sentinel directly raced the still-running git process).
     e(editor, '(buffer-switch "*scratch*")');
-    e(editor, "(stagehand/diff/stagehand-diff-apply-sentinel 0 0)");
-    expect(String(e(editor, "(editor-status)").value)).toContain("hunk applied");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
     // The current buffer is STILL the user's; the diff view refreshed in place.
     expect(String(e(editor, "(buffer-name)").value)).toBe("*scratch*");
     e(editor, '(buffer-switch "*Stagehand-Diff*")');
     const view = strip(bufferText(editor));
     expect(view).toContain("no changes on this side");
-    await waitApply(editor, 2000);
   });
 
   test("a FAILED refresh keeps its status (never overwritten with 'hunk applied')", () => {
