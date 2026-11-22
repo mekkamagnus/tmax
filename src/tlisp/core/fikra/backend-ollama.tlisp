@@ -992,23 +992,28 @@ with its post-exit capture.")
   (fikra-ollama-state-diverged-scan root pre post paths))
 
 (defun fikra-ollama-path-state (root ref p)
-  (string-trim (shell-command
+  (let ((raw (shell-command
     (concat "git -C " (fikra/thread/fikra-thread-shq root)
             " show " ref ":" (fikra/thread/fikra-thread-shq p)
             " 2>/dev/null || echo __ABSENT__"))))
+    (if (string= raw "__ABSENT__\n") "__ABSENT__" raw)))
 
 (defun fikra-ollama-worktree-state (root p)
-  (string-trim (shell-command
+  (let ((raw (shell-command
     (concat "cat " (fikra/thread/fikra-thread-shq (concat root "/" p))
             " 2>/dev/null || echo __ABSENT__"))))
+    (if (string= raw "__ABSENT__\n") "__ABSENT__" raw)))
 
 ;; r149: the INDEX content of a path (a staged-only change with a
 ;; matching worktree file must still refuse — the r146 staged catch).
 (defun fikra-ollama-index-state (root p)
-  (string-trim (shell-command
+  (let ((raw (shell-command
     (concat "git -C " (fikra/thread/fikra-thread-shq root)
             " show :" (fikra/thread/fikra-thread-shq p)
             " 2>/dev/null || echo __UNSTAGED__"))))
+    ;; r149: the unstaged sentinel strips its echo newline (content stays
+    ;; byte-exact — a whitespace-only user edit must still diverge).
+    (if (string= raw "__UNSTAGED__\n") "__UNSTAGED__" raw)))
 
 (defun fikra-ollama-state-diverged-scan (root pre post paths)
   (if (or (not paths) (= (length paths) 0))
