@@ -9,7 +9,7 @@
           stagehand-diff-table stagehand-diff-accept
           stagehand-diff-apply-filter stagehand-diff-apply-sentinel
           stagehand-diff-apply-exit-get stagehand-diff-side-get
-          stagehand-diff-refresh-view)
+          stagehand-diff-refresh-view stagehand-diff-hunk-file)
 
 ;; #289 — Stagehand T0: the diff GRAMMAR + faces. `git diff
 ;; --no-color` output is PARSED into line classes (never ANSI
@@ -412,6 +412,59 @@ the n-first y/n."
       "mode-only changes not supported")
     (t nil)))
 
+(defun stagehand-diff-hunk-file (idx)
+  "The FILE the target hunk IDX belongs to (its owning header block's
+b-side path) — the refusal scope keys on THIS, never the view's
+first path (the r3 gate's wrong-keying catch: a first-listed rename
+falsely blocked every later file's hunks in a multi-file view)."
+  (stagehand-diff-hunk-file-scan
+    (stagehand-diff-parse (or stagehand-diff-raw ""))
+    nil 0 idx))
+
+(defun stagehand-diff-hunk-file-scan (pairs bpath count target)
+  ;; BPATH: the current file's b-path (the latest +++ or diff --git
+  ;; b-side); COUNT: hunks seen so far.
+  (if (null pairs)
+    bpath
+    (let* ((pair (car pairs))
+           (cls (car pair))
+           (line (car (cdr pair))))
+      (cond
+        ((string= cls "file-header")
+          (stagehand-diff-hunk-file-scan (cdr pairs)
+            (or (stagehand-diff-b-side line) bpath) count target))
+        ((string= cls "hunk-header")
+          (if (= count target)
+            bpath
+            (stagehand-diff-hunk-file-scan (cdr pairs) bpath
+              (+ count 1) target)))
+        (t
+          (stagehand-diff-hunk-file-scan (cdr pairs) bpath count target))))))
+
+(defun stagehand-diff-b-side (header-line)
+  ;; '+++ b/<path>' or 'diff --git a/x b/<path>' → the b-side path
+  ;; (nil otherwise; quoted forms handled).
+  (cond
+    ((string-prefix-p "+++ b/" header-line)
+      (substring header-line 6 (length header-line)))
+    ((string-prefix-p "+++ " header-line)
+      (substring header-line 4 (length header-line)))
+    ((string-prefix-p "diff --git " header-line)
+      (stagehand-diff-b-side-scan header-line))
+    (t nil)))
+
+(defun stagehand-diff-b-side-scan (header-line)
+  ;; The token after ' b/' in the diff --git line.
+  (stagehand-diff-b-token (string-split header-line " ") nil))
+
+(defun stagehand-diff-b-token (tokens found)
+  (if (or (null tokens) found)
+    found
+    (let ((tk (car tokens)))
+      (if (string-prefix-p "b/" tk)
+        (substring tk 2 (length tk))
+        (stagehand-diff-b-token (cdr tokens) found)))))
+
 (defun stagehand-diff-patch-has (needle)
   ;; Scoped to the TARGET FILE's section (a rename on an unrelated
   ;; file in the view must not block this hunk — the r1/r2 gate
@@ -420,11 +473,17 @@ the n-first y/n."
     (string-split (or (stagehand-diff-file-section) "") "\n") needle))
 
 (defun stagehand-diff-file-section ()
-  "The target file's raw section: from its 'diff --git' line to the
-next one (the whole raw when the boundary is not found)."
-  (let ((lines (string-split (or stagehand-diff-raw "") "\n")))
-    (if stagehand-diff-paths
-      (stagehand-diff-section-of lines (car stagehand-diff-paths) nil (list))
+  "The TARGET file's raw section: from its 'diff --git' line to the
+next one. Keyed on the HUNK AT POINT's owning file (never the view's
+first path — the r3 gate's wrong-keying catch)."
+  (let* ((lines (string-split (or stagehand-diff-raw "") "\n"))
+         (idx (stagehand-diff-hunk-idx-at-cursor))
+         (target (if (null idx)
+                   (car stagehand-diff-paths)
+                   (or (stagehand-diff-hunk-file idx)
+                     (car stagehand-diff-paths)))))
+    (if target
+      (stagehand-diff-section-of lines target nil (list))
       (or stagehand-diff-raw ""))))
 
 (defun stagehand-diff-section-of (lines path collecting out)

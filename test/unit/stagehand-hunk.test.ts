@@ -305,7 +305,11 @@ describe("#291 — gate r1 regressions", () => {
     writeFileSync(join(process.cwd(), "ren.txt"), "r\n");
     writeFileSync(join(process.cwd(), "f.txt"), "v1\nv2\nv3\n");
     commit("base");
-    execFileSync("git", ["mv", "ren.txt", "renamed.txt"], { cwd: process.cwd() });
+    // a-renamed.txt sorts BEFORE f.txt: the section's FIRST path is
+    // the rename, so a refusal scan keyed on (car paths) — instead of
+    // the hunk's OWNING file — would falsely refuse f.txt's hunk (the
+    // r3 gate's finding; renamed.txt sorted after and hid it).
+    execFileSync("git", ["mv", "ren.txt", "a-renamed.txt"], { cwd: process.cwd() });
     writeFileSync(join(process.cwd(), "f.txt"), "v1\nCHANGED\nv3\n");
     // The r2 gate's exact shape: the STAGED section (the rename AND
     // f.txt's staged content hunk in ONE view — the Unstaged section
