@@ -52,16 +52,12 @@ describe("#310 — scope resolution (FRESH, cache-bypassed)", () => {
     // Poison the cache with a bogus root.
     e(editor, '(project-root-set "/nonexistent/poisoned-310")');
     const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "here")').value);
+    // EXACT pins (valve r1): the detected root IS this repo —
+    // equality against the resolved cwd, never a substring.
     expect(scope).not.toContain("poisoned");
-    // An EQUALITY pin: the detected root IS this repo (the substring
-    // form passed even with the broken derivation — gate r1).
     expect(scope).toContain("i310-");
-  });
-
-  test("SPC p s: the same FRESH resolution", async () => {
-    e(editor, '(project-root-set "/nonexistent/poisoned-310")');
-    const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "project")').value);
-    expect(scope).not.toContain("poisoned");
+    const proj = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "project")').value);
+    expect(proj).toBe(scope); // both bindings resolve the SAME root
   });
 
   test("SUBDIRECTORY file: the start path is the file's DIR, not the basename (gate r1)", async () => {
@@ -87,8 +83,10 @@ describe("#310 — scope resolution (FRESH, cache-bypassed)", () => {
     writeFileSync(join(other, "other-needle.txt"), "other repo needle\n");
     e(editor, `(find-file "${join(other, "other-needle.txt")}")`);
     const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "here")').value);
-    // The FILE's repo, not the cwd's.
-    expect(scope).not.toContain(process.cwd());
+    // EXACT pin: the resolved scope IS the FILE's repo (resolved).
+    const resolvedOther = require("node:path").resolve(other);
+    expect(scope).toBe(resolvedOther);
+    expect(scope).not.toBe(require("node:path").resolve(process.cwd()));
     execFileSync("git", ["-C", other, "add", "."]);
   });
 
@@ -154,6 +152,27 @@ describe("#310 — retirement + the REAL key path", () => {
     e(editor, '(editor/commands/grep-scope/grep-scope-accept "dispatch needle")');
     const s = await waitDone(editor);
     expect(s).toContain("1 hits");
+  });
+
+  test("the PROMPT TEXT shows through the real dispatch; C-g cancels with NO process (valve r1)", async () => {
+    writeFileSync("p.txt", "prompt needle\n");
+    e(editor, '(find-file "p.txt")');
+    e(editor, "(editor-set-mode \"normal\")");
+    for (const key of ["SPC", "s", "g"]) {
+      await editor.handleKey(key);
+    }
+    // The minibuffer is open with the TRUTHFUL prompt (backend +
+    // scope) — the prompt rides the view's `prompt` field.
+    const mb = (editor.getState() as unknown as {
+      minibufferView?: { prompt?: string };
+    }).minibufferView;
+    expect(mb?.prompt ?? "").toContain("grep (rg)");
+    expect(mb?.prompt ?? "").toContain(": ");
+    // C-g cancels: no process, no buffer.
+    await editor.handleKey("Escape");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    expect(String(e(editor, "(editor/commands/grep/grep-rg-dump)").value)).toContain("gen=nil");
+    expect(String(e(editor, '(if (member "*grep*" (buffer-list)) "buf" "nob")').value)).toContain("nob");
   });
 
   test("SPC p s through the REAL key dispatch", async () => {
