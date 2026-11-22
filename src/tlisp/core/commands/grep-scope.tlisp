@@ -13,17 +13,39 @@
   "The resolved scope awaiting the minibuffer answer (a string), or
 the symbol 'no-project (SPC p s outside a project — refused).")
 
+(defun grep-scope-dirname (path)
+  "A REAL dirname (gate r1: the old derivation kept the file's
+BASENAME — a buffer visiting /other/sub/file.txt with cwd elsewhere
+resolved against cwd, scoping the search to the WRONG project).
+Absolute → the leading segments; relative → same, '.' when bare."
+  (let ((segs (string-split path "/")))
+    (grep-scope-dirname-join (reverse segs) (list))))
+
+(defun grep-scope-dirname-join (rev acc)
+  ;; Skip the first (the basename), join the rest absolute-first.
+  (if (null rev)
+    "."
+    (let ((rest (cdr rev)))
+      (if (null rest)
+        "."
+        (grep-scope-join-segs (reverse rest))))))
+
+(defun grep-scope-join-segs (segs)
+  (if (null segs)
+    "."
+    (let ((joined (car segs)))
+      (dolist (sg (cdr segs))
+        (setq joined (concat joined "/" sg)))
+      (if (and (string-prefix-p "/" joined) (= (length joined) 1))
+        "/"
+        joined))))
+
 (defun grep-scope-start-path ()
-  "The detection start: the current buffer's file dir; no file →
-process.cwd()."
+  "The detection start: the current buffer's file DIR; no file →
+process.cwd() (the TS primitive resolves '.' against it)."
   (let ((fn (buffer-filename)))
     (if (and (stringp fn) (> (length fn) 0))
-      (let ((dir (car (reverse (string-split fn "/")))))
-        ;; dirname: strip the last path segment (naive but the
-        ;; primitive takes any start INSIDE the tree).
-        (if (> (length dir) 0)
-          (concat dir "/")
-          "."))
+      (grep-scope-dirname fn)
       ".")))
 
 (defun grep-scope-resolve (binding)
@@ -57,10 +79,9 @@ scope string, or nil when 'project found no project."
       (grep-scope-open-at scope))))
 
 (defun grep-scope-open (binding)
-  (let ((scope (grep-scope-resolve binding)))
-    (if (null scope)
-      (editor-set-status "not in a project — SPC s g searches from here")
-      (grep-scope-open-at scope))))
+  ;; 'here' never returns nil (the start-path fallback); the dead
+  ;; branch was removed (gate r1 minor).
+  (grep-scope-open-at (grep-scope-resolve binding)))
 
 (defun grep-scope-open-at (scope)
   ;; Backend detection BEFORE the prompt (the label is truthful).

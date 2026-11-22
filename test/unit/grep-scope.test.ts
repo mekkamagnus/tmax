@@ -53,13 +53,43 @@ describe("#310 — scope resolution (FRESH, cache-bypassed)", () => {
     e(editor, '(project-root-set "/nonexistent/poisoned-310")');
     const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "here")').value);
     expect(scope).not.toContain("poisoned");
-    expect(scope.length).toBeGreaterThan(0);
+    // An EQUALITY pin: the detected root IS this repo (the substring
+    // form passed even with the broken derivation — gate r1).
+    expect(scope).toContain("i310-");
   });
 
   test("SPC p s: the same FRESH resolution", async () => {
     e(editor, '(project-root-set "/nonexistent/poisoned-310")');
     const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "project")').value);
     expect(scope).not.toContain("poisoned");
+  });
+
+  test("SUBDIRECTORY file: the start path is the file's DIR, not the basename (gate r1)", async () => {
+    // cwd in repoA; the visited file lives in repoA/sub/ — the OLD
+    // derivation resolved the BASENAME against cwd (scoping wrong).
+    mkdirSync(join(process.cwd(), "sub"), { recursive: true });
+    writeFileSync(join(process.cwd(), "sub", "deep.txt"), "deep needle\n");
+    e(editor, '(find-file "sub/deep.txt")');
+    const start = String(e(editor, "(editor/commands/grep-scope/grep-scope-start-path)").value);
+    expect(start).toContain("sub");
+    expect(start).not.toBe("deep.txt");
+    // The poisoned-cache resolution returns THIS repo, not another.
+    e(editor, '(project-root-set "/nonexistent/poisoned-310")');
+    const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "here")').value);
+    expect(scope).not.toContain("poisoned");
+  });
+
+  test("FILE OUTSIDE the cwd tree: detection scopes to the FILE's project (gate r1's repro)", async () => {
+    // A second git repo elsewhere; the visited file inside it.
+    const other = mkdtempSync(join(tmpdir(), "i310-other-"));
+    dirs.push(other);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: other });
+    writeFileSync(join(other, "other-needle.txt"), "other repo needle\n");
+    e(editor, `(find-file "${join(other, "other-needle.txt")}")`);
+    const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "here")').value);
+    // The FILE's repo, not the cwd's.
+    expect(scope).not.toContain(process.cwd());
+    execFileSync("git", ["-C", other, "add", "."]);
   });
 
   test("outside a project: 'here' falls back to the start path; 'project' refuses", () => {
