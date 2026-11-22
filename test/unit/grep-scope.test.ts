@@ -154,6 +154,41 @@ describe("#310 — retirement + the REAL key path", () => {
     expect(s).toContain("1 hits");
   });
 
+  test("FULL INTERACTION (valve r2): type + submit through the minibuffer; the EXACT prompt; both cancel keys", async () => {
+    writeFileSync("q.txt", "typed needle\n");
+    e(editor, '(find-file "q.txt")');
+    e(editor, '(editor-set-mode "normal")');
+    for (const key of ["SPC", "s", "g"]) await editor.handleKey(key);
+    // The EXACT prompt: backend + the RESOLVED scope (the detected
+    // root) + the colon-space.
+    const mb0 = (editor.getState() as unknown as { minibufferView?: { prompt?: string } }).minibufferView;
+    const scope = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "here")').value);
+    expect(mb0?.prompt ?? "").toBe(`grep (rg) ${scope}: `);
+    // TYPE the pattern and submit through the minibuffer.
+    for (const key of "typed needle") await editor.handleKey(key);
+    await editor.handleKey("Enter");
+    let s2 = "";
+    for (let i = 0; i < 240; i++) {
+      s2 = st(editor);
+      if (s2.includes("hits") || s2.includes("no matches") || s2.includes("error")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(s2).toContain("1 hits");
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toContain("typed needle");
+  });
+
+  test("C-g (\x07) through real dispatch: no process, no buffer (valve r2)", async () => {
+    writeFileSync("r.txt", "x\n");
+    e(editor, '(find-file "r.txt")');
+    e(editor, '(editor-set-mode "normal")');
+    for (const key of ["SPC", "s", "g"]) await editor.handleKey(key);
+    await editor.handleKey("\x07");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    expect(String(e(editor, "(editor/commands/grep/grep-rg-dump)").value)).toContain("gen=nil");
+    expect(String(e(editor, '(if (member "*grep*" (buffer-list)) "buf" "nob")').value)).toContain("nob");
+  });
+
   test("the PROMPT TEXT shows through the real dispatch; C-g cancels with NO process (valve r1)", async () => {
     writeFileSync("p.txt", "prompt needle\n");
     e(editor, '(find-file "p.txt")');
