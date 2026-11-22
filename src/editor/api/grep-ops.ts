@@ -149,6 +149,11 @@ export function createGrepOps(): Map<string, TLispFunctionImpl> {
         const c = columnOf(text, start);
         col = c.col;
         if (!c.valid) degraded = true;
+      } else {
+        // A nonnumeric start (string/null/absent) IS an invalid
+        // offset — col 1 + degraded-text (valve r3: it used to pass
+        // through unflagged).
+        degraded = true;
       }
     }
     const hit = createHashmap([

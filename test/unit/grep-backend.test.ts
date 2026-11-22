@@ -390,4 +390,25 @@ describe("#308 — the backend", () => {
     e(editor, '(buffer-switch "*grep*")');
     expect(strip(bufferText(editor))).toContain("rg exited 143 (no stderr)");
   });
+
+  // ── valve r3 fixes ──────────────────────────────────────────────────
+
+  test("SCOPED SEARCH → RET: a relative-scope hit OPENS (no sub/sub doubling)", async () => {
+    // rg --json paths are cwd-relative and CARRY the scope prefix;
+    // resolve-path used to join the scope AGAIN → sub/sub/a.txt →
+    // 'file gone' (valve r3's reproduced finding).
+    mkdirSync(join(process.cwd(), "sub"));
+    writeFileSync(join(process.cwd(), "sub", "inner308.txt"), "scoped needle here\n");
+    e(editor, '(grep-search "scoped needle" "sub")');
+    const s = await waitDone(editor);
+    expect(s).toContain("1 hits");
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toContain("sub/inner308.txt");
+    e(editor, '(cursor-move 0 0)');
+    e(editor, '(editor/commands/grep/grep-ret)');
+    // The file OPENED (not 'file gone').
+    expect(String(st(editor))).not.toContain("file gone");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("inner308.txt");
+    expect(strip(bufferText(editor))).toContain("scoped needle here");
+  });
 });

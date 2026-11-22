@@ -215,6 +215,27 @@ describe("#308 — rg-event->hit (the output protocol)", () => {
     expect(String(field(ev, "col").value)).toBe("1");
     expect(String(flagOf(ev).value)).toContain("degraded-text");
   });
+
+  test("NONNUMERIC start (string / null / absent) → col 1 + degraded-text (valve r3)", () => {
+    const base = {
+      type: "match",
+      data: {
+        path: { text: "n.txt" },
+        lines: { text: "somewhere\n" },
+        line_number: 1,
+      },
+    };
+    for (const sub of [
+      [{ start: "oops", end: 4, match: { text: "me" } }],
+      [{ start: null, end: 4, match: { text: "me" } }],
+      [{ end: 4, match: { text: "me" } }],
+    ]) {
+      const ev = JSON.stringify({ ...base, data: { ...base.data, submatches: sub } });
+      expect(String(field(ev, "col").value)).toBe("1");
+      expect(String(flagOf(ev).value)).toContain("degraded-text");
+      expect(String(field(ev, "file").value)).toContain("n.txt"); // appended
+    }
+  });
 });
 
 describe("#308 — the stash/replay protocol (pid-attributed)", () => {

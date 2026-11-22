@@ -430,11 +430,16 @@ and flipped it read-only).")
               (grep-land (nth 1 hit) (nth 2 hit)))))))))
 
 (defun grep-resolve-path (path)
-  ;; Relative hit paths resolve against the registered SCOPE.
+  "Absolute paths pass through. Relative hit paths resolve against
+the registered SCOPE — UNLESS rg already emitted the scope prefix
+(rg --json paths are cwd-relative and CARRY the scope: joining
+again doubled it into sub/sub — valve r3's reproduced finding;
+synthetic producer hits without the prefix still join)."
   (if (string-prefix-p "/" path)
     path
     (let ((scope (hashmap-get grep-meta "scope")))
-      (if (and (stringp scope) (> (length scope) 0))
+      (if (and (stringp scope) (> (length scope) 0)
+               (not (string-prefix-p (concat scope "/") path)))
         (concat scope "/" path)
         path))))
 
