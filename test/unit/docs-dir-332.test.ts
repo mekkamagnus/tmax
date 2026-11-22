@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,9 @@ import { resolveDocsTmaxDir } from "../../src/editor/editor.ts";
 
 describe("#332 — resolveDocsTmaxDir", () => {
   const dirs: string[] = [];
+  afterAll(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
   test("the DEV layout: ../../docs/tmax with the texinfo corpus", () => {
     const root = mkdtempSync(join(tmpdir(), "d332-"));
     dirs.push(root);
@@ -32,6 +35,13 @@ describe("#332 — resolveDocsTmaxDir", () => {
     writeFileSync(join(root, "tmax.texinfo"), "x");
     writeFileSync(join(root, "tmax.info"), "x");
     expect(resolveDocsTmaxDir(root)).toBe(root);
+  });
+
+  test("a $bunfs virtual root short-circuits (NO host-filesystem walk)", () => {
+    // The gate's escape: a normalize()d ../../ walk from /$bunfs
+    // collapses to a literal HOST /docs/tmax — the resolver must
+    // never probe the host from the virtual root.
+    expect(resolveDocsTmaxDir("/$bunfs/root")).toBe("/$bunfs/root");
   });
 
   test("an empty dir falls back to itself (the old behavior)", () => {

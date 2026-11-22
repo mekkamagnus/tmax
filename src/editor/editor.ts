@@ -132,10 +132,13 @@ export const DOCS_TMAX_DIR = resolveDocsTmaxDir(import.meta.dir);
  * function for unit tests over both layouts.
  */
 export function resolveDocsTmaxDir(fromDir: string): string {
+  // The compiled-binary layout FIRST and exclusively: $bunfs never
+  // normalizes '..' (ADR-0271) and a normalize()d ../../ walk would
+  // collapse to a HOST path (/$bunfs/root/../.. → /docs/tmax — the
+  // gate's host-FS escape). The embedded assets sit at the root.
+  if (fromDir.startsWith("/$bunfs")) return fromDir;
   const devPath = normalize(`${fromDir}/../../docs/tmax`);
   if (fs.existsSync(`${devPath}/tmax.texinfo`)) return devPath;
-  // The compiled-binary layout: the assets sit beside the virtual root.
-  if (fs.existsSync(`${fromDir}/tmax.texinfo`)) return fromDir;
   return fromDir;
 }
 
