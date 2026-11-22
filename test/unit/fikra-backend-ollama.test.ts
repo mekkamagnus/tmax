@@ -1260,6 +1260,27 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
   // r150 (codex): the action pairs are DURABLE — a simulated restart
   // (pairs + stack wiped) still reverts the latest action from the file;
   // a reverted pair stays reverted (tombstoned — never resurrected).
+  // r150b (codex ordering catch): with TWO actions, a restart's revert
+  // targets the NEWEST (the second edit), not the oldest.
+  tt("after a restart, the revert targets the NEWEST action first", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "two durable edits")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 360 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [
+        { function: { name: "buffer_edit", arguments: { path: "d1.txt", content: "ONE\n" } } },
+        { function: { name: "buffer_edit", arguments: { path: "d2.txt", content: "TWO\n" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 360 "${r}")`);
+    e(ed, `(fikra-http-complete 360 200 "${hex("{}")}")`);
+    expect(existsSync(join(process.cwd(), "d1.txt"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "d2.txt"))).toBe(true);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-state-reset)");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    // The NEWEST (d2) reverts; d1 stays.
+    expect(existsSync(join(process.cwd(), "d2.txt"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "d1.txt"))).toBe(true);
+  });
+
   tt("the action pairs survive a simulated restart; reverted pairs stay reverted", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "durable action")');

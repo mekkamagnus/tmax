@@ -1008,8 +1008,10 @@ with its post-exit capture.")
                 ((not have)
                   (progn
                     (keymap-mutable-set! fikra-ollama-action-pairs post pre)
+                    ;; r150b: newest-first iteration + APPEND keeps the
+                    ;; NEWEST at the head (prepend reversed the order).
                     (setq fikra-ollama-action-posts
-                      (append (list post) fikra-ollama-action-posts))))))))
+                      (append fikra-ollama-action-posts (list post)))))))))
         (error () nil))
       (fikra-ollama-load-action-lines (cdr lines)))))
 
