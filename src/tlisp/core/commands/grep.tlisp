@@ -6,6 +6,7 @@
           grep-rg-replay-pending grep-rg-kill-prior grep-rg-stderr-filter
           grep-rg-run-files
           grep-completion-hook-set!
+          grep-buffer-content grep-restore-content
           grep-rg-executable-set! grep-rg-test-state!
           grep-ret grep-next grep-prev grep-rerun grep-quit)
 
@@ -318,11 +319,25 @@ and flipped it read-only).")
 (defun grep-render-open ()
   (if (not (member (grep-buffer-name) (buffer-list)))
     (buffer-create (grep-buffer-name)))
+  ;; #311 gate r2: under a LIVE minibuffer prompt (the consult fire)
+  ;; save the user's buffer + point — complete's switch-out restores
+  ;; them — and do NOT stomp the editor mode (mx owns the keys until
+  ;; the prompt closes; the stomp zombified the prompt: further keys
+  ;; routed to the normal keymap, Enter ran grep-ret via the *grep*
+  ;; keymap, Escape cancelled nothing). Standalone registers keep the
+  ;; user-facing open: *grep* current, mode normal.
+  (if (minibuffer-state-get)
+    (if (string= (buffer-current) (grep-buffer-name))
+      nil
+      (progn
+        (setq grep-prev-buffer (buffer-current))
+        (setq grep-prev-line (cursor-line))
+        (setq grep-prev-col (cursor-column))))
+    (editor-set-mode "normal"))
   ;; render-open intentionally LEAVES *grep* current (register is a
   ;; user-facing open); the async renders below restore.
   (buffer-switch (grep-buffer-name))
   (major-mode-set "grep")
-  (editor-set-mode "normal")
   (buffer-set-read-only nil)
   (grep-clear-buffer)
   (buffer-append (concat "grep " (grep-pattern-display) " — searching…\n"))

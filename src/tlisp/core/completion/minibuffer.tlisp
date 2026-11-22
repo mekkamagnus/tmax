@@ -8,7 +8,10 @@ prompt open, cleared on EVERY close; late callbacks drop silently.")
 (defvar minibuffer-on-close-hook nil
   "The EVERY-close teardown callback (#311 gate r1): minibuffer-close
 funcalls it condition-cased BEFORE clearing — the owner's timer/
-process hygiene runs on accept, cancel AND error exits alike.")
+process hygiene runs on accept, cancel AND error exits alike. #311
+gate r2: the callback receives the EXIT KIND (\"accept\" | \"cancel\")
+so owners can run cancel-only contracts (buffer hygiene, state
+clearing) without firing them on the accept path.")
 
 (defun minibuffer-on-input-set! (fn)
   "Set the input callback (module defvars are NOT setq-able across
@@ -223,14 +226,15 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
             (minibuffer-state-set (hashmap-set session "history-index" (length history)))
             (minibuffer-set-input "")))))))
 
-(defun minibuffer-close ()
+(defun minibuffer-close (kind)
   (let ((session (minibuffer-state-get)))
     (progn
       ;; #311 gate r1: EVERY close (accept, cancel, error) runs the
       ;; owner's teardown (timers, processes) FIRST — a nil hook
-      ;; drops silently.
+      ;; drops silently. gate r2: the exit KIND threads through so
+      ;; cancel-only contracts run on cancel alone.
       (condition-case nil
-        (if minibuffer-on-close-hook (funcall minibuffer-on-close-hook))
+        (if minibuffer-on-close-hook (funcall minibuffer-on-close-hook kind))
         (error () nil))
       (setq minibuffer-on-input-hook nil)
       (setq minibuffer-on-close-hook nil)
@@ -242,7 +246,7 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
 
 (defun minibuffer-cancel ()
   "Cancel the active minibuffer without calling its accept function."
-  (minibuffer-close))
+  (minibuffer-close "cancel"))
 
 (defun minibuffer-accept ()
   "Accept selected candidate or permitted raw input."
@@ -255,7 +259,7 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
           (let ((accept-function (hashmap-get session "accept-function")))
             (progn
               (minibuffer-history-add-to (hashmap-get session "history") value)
-              (minibuffer-close)
+              (minibuffer-close "accept")
               (funcall accept-function value)))
           (vertico-publish))))))
 

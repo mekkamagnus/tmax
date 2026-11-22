@@ -34,16 +34,22 @@ single-session).")
 setq-able across the boundary)."
   (setq grep-consult-state nil)
   (setq grep-consult-scope nil)
+  (editor/commands/grep/grep-completion-hook-set! nil)
   t)
 
 (defun grep-consult-test-begin ()
   "A test seam: initialize the session state (module defvars are
-not setq-able across the module boundary)."
+not setq-able across the module boundary) — entry-equivalent,
+INCLUDING the completion hook (gate r2: without it a direct-path
+completion never wrote the snapshot the restore rule needs)."
   (setq grep-consult-scope ".")
   (setq grep-consult-state
     (hashmap "query" "" "pendingGen" nil "completedSnapshot" nil
+      "snapshotContent" nil
       "timerId" nil "preview-pane" nil "preview-borrowed" nil
       "preview-prior" nil))
+  (editor/commands/grep/grep-completion-hook-set!
+    (lambda (status) (grep-consult-on-complete status)))
   t)
 
 ;; ── the query grammar ───────────────────────────────────────────────
@@ -174,6 +180,7 @@ backend preflight, then the debounced live prompt."
           (setq grep-consult-scope scope)
           (setq grep-consult-state
             (hashmap "query" "" "pendingGen" nil "completedSnapshot" nil
+              "snapshotContent" nil
               "timerId" nil "preview-pane" nil "preview-borrowed" nil
               "preview-prior" nil))
           ;; The input hook + the prompt (SPEC-116 shape, free text).
@@ -181,8 +188,14 @@ backend preflight, then the debounced live prompt."
             (lambda (input) (grep-consult-on-input input)))
           ;; gate r1: the EVERY-close teardown — timers + processes
           ;; die on accept/cancel/error alike (the dead-code finding).
+          ;; gate r2: the exit KIND runs the cancel contract on cancel
+          ;; alone (close precedes the accept fn — a state-based
+          ;; branch would fire it on Enter too).
           (editor/completion/minibuffer/minibuffer-on-close-set!
-            (lambda () (grep-consult-teardown)))
+            (lambda (kind)
+              (grep-consult-teardown)
+              (if (string= kind "cancel")
+                (grep-consult-cancel))))
           ;; gate r1: the snapshot write rides #307's completion
           ;; (the setter seam — module defvars are not setq-able).
           (editor/commands/grep/grep-completion-hook-set!
@@ -245,12 +258,15 @@ a VALID query arms the 200ms idle timer."
 
 (defun grep-consult-teardown ()
   "The every-close hygiene (idempotent): cancel the timer, kill the
-pending process. The session vars clear separately (accept keeps them
-for the jump; cancel clears them in grep-consult-cancel)."
+pending process, and unset the grep completion hook (gate r2: a
+leaked session let a later plain SPC s s completion write a snapshot
+into it). The session vars clear separately (accept keeps them for
+the jump; cancel clears them in grep-consult-cancel)."
   (if (not (null grep-consult-state))
     (progn
       (grep-consult-cancel-timer grep-consult-state)
       (grep-consult-kill-pending)))
+  (editor/commands/grep/grep-completion-hook-set! nil)
   nil)
 
 (defun grep-consult-cancel-timer (st)
@@ -266,19 +282,27 @@ for the jump; cancel clears them in grep-consult-cancel)."
 
 (defun grep-consult-on-complete (status)
   "The completedSnapshot write: ONLY completion updates it — a killed
-partial stream NEVER becomes the restore target. The snapshot is the
-completed generation id; the *grep* content is #307's render."
+partial stream NEVER becomes the restore target. gate r2: the
+snapshot is the completed generation id AND its rendered content
+(the restore source for the input-change rule)."
   (if (not (null grep-consult-state))
     (setq grep-consult-state
-      (hashmap-set grep-consult-state "completedSnapshot"
-        (editor/commands/grep/grep-current-gen-get))))
+      (hashmap-set
+        (hashmap-set grep-consult-state "completedSnapshot"
+          (editor/commands/grep/grep-current-gen-get))
+        "snapshotContent" (editor/commands/grep/grep-buffer-content))))
   nil)
 
 (defun grep-consult-restore-snapshot ()
-  "A killed partial never replaces the completed render: #307's
-buffer holds the COMPLETED generation's content until a new search
-streams; nothing to re-render here (the producer's own state)."
-  nil)
+  "The input-change rule (gate r2 — was a literal no-op): when a
+pending stream replaced the *grep* content, re-render the COMPLETED
+snapshot — a killed partial never stays on screen between
+keystrokes. Skips when *grep* already shows the completed render."
+  (let ((content (hashmap-get grep-consult-state "snapshotContent")))
+    (if (and (stringp content) (> (length content) 0)
+             (not (string= (editor/commands/grep/grep-buffer-content) content)))
+      (editor/commands/grep/grep-restore-content content)
+      nil)))
 
 (defun grep-consult-chomp-nl (s)
   "Drop ONE trailing newline."
@@ -331,7 +355,16 @@ glob-only queries DO run (the empty pattern registers per #307)."
         (let ((parsed (editor/commands/grep-consult/grep-consult-parse-globs glob)))
           (if (and (stringp (nth 2 parsed)) (string= (nth 2 parsed) "empty"))
             (editor-set-status "empty glob")
-            (let ((files (grep-consult-filtered-files grep-consult-scope parsed)))
+            (let ((files
+                    (if (and (= (length (nth 0 parsed)) 0) (nth 2 parsed))
+                      ;; gate r2: EVERY entry ignored → NO filtering
+                      ;; applies (all files) + the note — the issue's
+                      ;; normative clause (was inverted: zero files,
+                      ;; no run).
+                      (progn
+                        (editor-set-status "glob entries ignored — searching all files")
+                        (grep-consult-files-in grep-consult-scope))
+                      (grep-consult-filtered-files grep-consult-scope parsed))))
               (if (= (length files) 0)
                 (editor-set-status "no files match glob filters")
                 (editor/commands/grep/grep-rg-run-files pattern files grep-consult-scope)))))))))
