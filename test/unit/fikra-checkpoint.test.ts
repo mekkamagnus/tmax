@@ -215,8 +215,12 @@ describe("#217 FAEP events + async reactor", () => {
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 300));
       const log2 = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
-      const kinds2 = readFileSync(log2, "utf8").trimEnd().split("\n").map((l) => JSON.parse(l).kind);
-      if (kinds2.includes("checkpoint-ready")) break;
+      // r155: the log may not exist YET on the first poll (nothing was
+      // emitted) — a missing or half-written file means "keep waiting",
+      // not a failure (this threw ENOENT under load, three runs running).
+      try {
+        if (readFileSync(log2, "utf8").trimEnd().split("\n").map((l) => JSON.parse(l).kind).includes("checkpoint-ready")) break;
+      } catch { /* not yet */ }
     }
     const log = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
     const kinds = readFileSync(log, "utf8").trimEnd().split("\n").map((l) => JSON.parse(l).kind);

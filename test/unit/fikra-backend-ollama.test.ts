@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, beforeAll, afterAll, afterEach } fr
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
 
 // RFC-029 8.1's raw-API native loop (r108): the ollama chat backend -
@@ -2758,6 +2758,163 @@ describe("ollama allow-await ordering (r132 — codex r130 P1#2)", () => {
     expect(await untilStatus(ed, "idle", 60)).toBe("idle");
     expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).not.toContain("async");
     rmSync(release, { force: true });
+  });
+});
+
+// r155 — ORDINARY BASH GETS ITS CHECKPOINT (the codex gate's named 9-bar
+// for §8.1: "a checkpoint for each mutating action"). A non-mediated bash
+// call is bracketed with worktree snapshots taken IN THE CHILD (a
+// persistent index per thread; GIT_INDEX_FILE scoped to the snapshot
+// commands only; .tmax excluded; the two trees go to a marker FILE).
+// Different trees → the sentinel seals the pair (post → pre), exactly
+// like a mediated action: SPC a C-r reverts it. Same trees → nothing.
+describe("ollama ordinary-bash checkpoints (r155)", () => {
+  const call = (ed: Editor, id: number, command: string) => {
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name: "bash", arguments: { command } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${id} "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${id} "${r}")`);
+    e(ed, `(fikra-http-complete ${id} 200 "${hex("{}")}")`);
+  };
+  const refs = () => execFileSync("git", ["for-each-ref", "--format=%(refname)", "refs/fikra/main/"], { encoding: "utf8" })
+    .trim().split("\n").filter(Boolean);
+  const actionRefs = () => refs().filter((r) => /-a\d+$/.test(r));
+  const ckptEvents = (ed: Editor) => strip(logText(ed)).split("\n").filter((l) => l.includes('"kind":"checkpoint-ready"'));
+  const logText = (ed: Editor) => String(e(ed, `(condition-case nil (read-file-content (concat (fikra/thread/fikra-thread-field-root-of "main") "/.tmax/fikra/threads/main/events.jsonl")) (error () ""))`).value);
+
+  tt("a MUTATING ordinary bash call gets an action pair — and SPC a C-r undoes it", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "write a file")');
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    // (A `>` redirect would park at the L2 gate — the mediated path,
+    // which has its own pre/post captures. `cp` is an ordinary mutation.)
+    call(ed, 500, "cp base.txt made-by-bash.txt");
+    // A checkpoint-ready batch REBUILDS the transcript, so the marker
+    // lands INLINE on the ⚙ row at once (the replay's inline merge — the
+    // mockup's form); it never stands as a row of its own.
+    const inlineRows = (t: string) => t.split("\n").filter((l) => l.includes("[ckpt main/1-a2"));
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(inlineRows(strip(String(e(ed, "(buffer-text)").value)))).toEqual([expect.stringContaining("⚙ bash")]);
+    await settleRefireFrom(ed, before, "written");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(inlineRows(strip(String(e(ed, "(buffer-text)").value)))).toEqual([expect.stringContaining("⚙ bash")]);
+    // The pair: pre (-a1) → post (-a2), both real refs, the file in the post only.
+    expect(actionRefs()).toEqual(["refs/fikra/main/1-a1", "refs/fikra/main/1-a2"]);
+    expect(execFileSync("git", ["cat-file", "-e", "refs/fikra/main/1-a2:made-by-bash.txt"]) && true).toBe(true);
+    expect(() => execFileSync("git", ["cat-file", "-e", "refs/fikra/main/1-a1:made-by-bash.txt"], { stdio: "pipe" })).toThrow();
+    // …durable, and on the revert stack.
+    const pairs = String(e(ed, '(shell-command "cat .tmax/fikra/threads/main/actions.jsonl")').value);
+    expect(pairs).toContain("refs/fikra/main/1-a2 refs/fikra/main/1-a1");
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-action-posts-get)").value)).toContain("refs/fikra/main/1-a2");
+    // The model saw exactly its command's output.
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain('"role":"tool","content":""');
+    expect(acc).not.toContain("write-tree");
+    expect(acc).not.toContain("EXIT:");
+    // The user's index was never touched; the snapshots left nothing in the tree.
+    expect(execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim()).toBe("");
+    expect(execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim()).toBe("?? made-by-bash.txt");
+    // SPC a C-r: the action is undone — the file is gone, the stack empty.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted to refs/fikra/main/1-a1");
+    expect(existsSync(join(process.cwd(), "made-by-bash.txt"))).toBe(false);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("no action to revert");
+  });
+
+  tt("a READ-ONLY ordinary bash call gets NO checkpoint (no ref, no marker, no pair)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "just look")');
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    call(ed, 501, "echo just-looking");
+    const mid = strip(await until(ed, "(buffer-text)", "just-looking", 120));
+    expect(mid).not.toContain("[ckpt main/1-a");
+    await settleRefireFrom(ed, before, "seen");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(actionRefs()).toEqual([]);
+    expect(ckptEvents(ed).filter((l) => /-a\d+"/.test(l))).toEqual([]);
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-action-posts-get)").value)).not.toContain("-a");
+  });
+
+  // Each mutating call is its own pair: a deletion and a modification
+  // in one turn revert one at a time, newest first.
+  tt("a deleted file comes back and a modified one is restored — one action per pair", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "delete and append")');
+    call(ed, 502, "rm base.txt");
+    expect(strip(await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120))).toContain("[ckpt main/1-a2");
+    call(ed, 503, "printf 'appended\\n' >> notes.txt");
+    expect(strip(await until(ed, "(buffer-text)", "[ckpt main/1-a4", 120))).toContain("[ckpt main/1-a4");
+    expect(actionRefs()).toEqual(["refs/fikra/main/1-a1", "refs/fikra/main/1-a2", "refs/fikra/main/1-a3", "refs/fikra/main/1-a4"]);
+    expect(existsSync(join(process.cwd(), "base.txt"))).toBe(false);
+    // Newest first: the append goes…
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted to refs/fikra/main/1-a3");
+    expect(existsSync(join(process.cwd(), "notes.txt"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "base.txt"))).toBe(false);
+    // …then the deletion.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted to refs/fikra/main/1-a1");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
+  });
+
+  // The snapshots read the WORKTREE through their own index: whatever
+  // the user has staged or left uncommitted stays exactly as it was.
+  tt("the user's staged and unstaged work is untouched (and still reverts safely)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "base.txt"), "user edit\n");
+    execFileSync("git", ["add", "base.txt"]);
+    writeFileSync(join(process.cwd(), "staged-then-edited.txt"), "v1\n");
+    execFileSync("git", ["add", "staged-then-edited.txt"]);
+    writeFileSync(join(process.cwd(), "staged-then-edited.txt"), "v2\n");
+    e(ed, '(fikra/chat/fikra-turn-send "copy it")');
+    call(ed, 504, "cp base.txt made-by-bash.txt");
+    expect(strip(await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120))).toContain("[ckpt main/1-a2");
+    expect(execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim().split("\n").sort()).toEqual(["base.txt", "staged-then-edited.txt"]);
+    expect(execFileSync("git", ["show", ":base.txt"], { encoding: "utf8" })).toBe("user edit\n");
+    expect(readFileSync(join(process.cwd(), "staged-then-edited.txt"), "utf8")).toBe("v2\n");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(existsSync(join(process.cwd(), "made-by-bash.txt"))).toBe(false);
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("user edit\n");
+    expect(execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim().split("\n").sort()).toEqual(["base.txt", "staged-then-edited.txt"]);
+  });
+
+  // The marker file sits inside the working dir — the very command it
+  // describes can write it. Nothing but two 40-hex object names may
+  // reach a shell command.
+  tt("a tampered or bogus marker seals nothing and reaches no shell", async () => {
+    const ed = await armed();
+    const marker = join(process.cwd(), ".tmax", "fikra", "ckpt-trees-main");
+    mkdirSync(dirname(marker), { recursive: true });
+    writeFileSync(marker, "0; touch PWNED deadbeef");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-checkpoint)");
+    expect(existsSync(join(process.cwd(), "PWNED"))).toBe(false);
+    expect(actionRefs()).toEqual([]);
+    // Right shape, no such objects: commit-tree fails — nothing is sealed.
+    writeFileSync(marker, `${"a".repeat(40)} ${"b".repeat(40)}`);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-checkpoint)");
+    expect(actionRefs()).toEqual([]);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  // Codex gate r154 round 5 (P2): the counters ran BEFORE the append — a
+  // refused batch (held for a retry) counted every attempt.
+  tt("a held batch counts its chunks ONCE", async () => {
+    const ed = await armed();
+    e(ed, "(require-module fikra/transient)");
+    const logPath = String(e(ed, "(fikra/thread/fikra-thread-log-path)").value);
+    const aside = `${logPath}.aside`;
+    // A fresh editor has no log yet (nothing was emitted).
+    if (existsSync(logPath)) renameSync(logPath, aside);
+    mkdirSync(logPath);
+    const delta = '(list (list (list "kind" "text-delta") (list "speaker" "assistant") (list "text" "one")))';
+    e(ed, `(fikra/event/fikra-event-emit-held-for "main" ${delta} t)`);
+    e(ed, '(fikra/event/fikra-event-flush-undelivered "main")');
+    expect(Number(e(ed, '(fikra/transient/fikra-transient-chunks-of "main")').value)).toBe(0);
+    rmdirSync(logPath);
+    if (existsSync(aside)) renameSync(aside, logPath);
+    e(ed, '(fikra/event/fikra-event-flush-undelivered "main")');
+    expect(Number(e(ed, '(fikra/transient/fikra-transient-chunks-of "main")').value)).toBe(1);
   });
 });
 

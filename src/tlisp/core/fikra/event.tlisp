@@ -555,8 +555,6 @@ bumps the revision the TUI poll consumes."
 
 (defun fikra-event-emit-batch-for (id events)
   (require-module fikra/thread)
-  (fikra-event-count-tools events)
-  (fikra-event-count-chunks events id)
   (let ((target-root (fikra/thread/fikra-thread-field-root-of id))
         (target-buffer (fikra/thread/fikra-thread-buffer-name-of id)))
     ;; Gate round-2: unknown id (nil root) → DROP, never guess.
@@ -566,6 +564,11 @@ bumps the revision the TUI poll consumes."
         (append-file (concat target-root "/.tmax/fikra/threads/" id "/events.jsonl")
           (apply 'concat
             (mapcar (lambda (e) (concat (json-encode e) "\n")) events)))
+        ;; r155 (codex gate r154 round 5, P2): the counters run AFTER a
+        ;; successful append — a refused batch is held for a retry and
+        ;; must not count twice (one held delta read 3 chunks).
+        (fikra-event-count-tools events)
+        (fikra-event-count-chunks events id)
         (if (not (or (fikra-event-batch-has-tombstone-p events)
                      (fikra-event-batch-has-kind-p events "thought-collapse")
                      ;; #327: thought batches REBUILD (the live fold
@@ -639,8 +642,6 @@ text-deltas inside the batch join into the same line."
   ;; #222: per-thread buffer names live in fikra/thread — LAZY require
   ;; (thread requires event; the cycle forbids a top-level require).
   (require-module fikra/thread)
-  (fikra-event-count-tools events)
-  (fikra-event-count-chunks events (fikra/thread/fikra-thread-current))
   (if (null events)
     nil
     (progn
@@ -649,6 +650,10 @@ text-deltas inside the batch join into the same line."
         (append-file fikra-event-log
           (apply 'concat
             (mapcar (lambda (e) (concat (json-encode e) "\n")) events))))
+      ;; r155: the counters run AFTER a successful append (the thread-
+      ;; routed emitter's rule — a refused batch is held, not counted).
+      (fikra-event-count-tools events)
+      (fikra-event-count-chunks events (fikra/thread/fikra-thread-current))
       ;; 2. Render: a tombstone INVALIDATES already-rendered turns — append
       ;; would leave stale content on screen, so rebuild *Fikra* from
       ;; replay instead. Otherwise render incrementally. Read-only state is
@@ -1197,9 +1202,13 @@ id-less completed thoughts too).")
           ;; the call it would attach to.
           (let* ((ckpt-id (fikra-inline-ref-identity
                          (fikra-event-get-str e "ref")))
+                 ;; r155: a bash row carries an ACTION checkpoint (the
+                 ;; ref ends -a<k>); a turn's completion checkpoint never
+                 ;; attaches to a shell call — a read-only command would
+                 ;; otherwise claim one.
                  (call-idx (if (eq last-kind 'turn)
                              nil
-                             (fikra-inline-find-call out 0)))
+                             (fikra-inline-find-call out 0 (fikra-inline-action-ref-p (fikra-event-get-str e "ref")))))
                  (call-id (if call-idx
                             (fikra-inline-event-identity out call-idx)
                             nil)))
@@ -1273,7 +1282,7 @@ id-less completed thoughts too).")
 
 ;; The index of the nearest EDIT-like tool-call in OUT, stopping at the
 ;; turn boundary, or nil.
-(defun fikra-inline-find-call (out i)
+(defun fikra-inline-find-call (out i &optional (action-p nil))
   (if (>= i (length out))
     nil
     (let ((ev (nth i out))
@@ -1283,13 +1292,24 @@ id-less completed thoughts too).")
         ;; Any intervening TOOL activity is a nearer action — an
         ;; Edit→bash→checkpoint sequence must NOT reach past the bash
         ;; (r64: the marker implies action-level association).
+        ;; r155: a SHELL call is that nearer action when the checkpoint
+        ;; is an action's own (-a<k>) — ordinary mutating bash has real
+        ;; per-action refs now.
         ((and (string= k "tool-call")
-              (not (fikra-inline-edit-p (fikra-event-get-str ev "tool"))))
+              (not (fikra-inline-edit-p (fikra-event-get-str ev "tool")))
+              (not (and action-p (string= (fikra-event-get-str ev "tool") "bash"))))
           nil)
+        ((and action-p (string= k "tool-call") (string= (fikra-event-get-str ev "tool") "bash"))
+          i)
         ((and (string= k "tool-call")
               (fikra-inline-edit-p (fikra-event-get-str ev "tool")))
           i)
-        (t (fikra-inline-find-call out (+ i 1)))))))
+        (t (fikra-inline-find-call out (+ i 1) action-p))))))
+
+;; r155: an ACTION checkpoint's ref — <turn>-a<k> (a capture's own
+;; sequence), never a turn's bare completion ref or a baseline.
+(defun fikra-inline-action-ref-p (ref)
+  (and (stringp ref) (string-match "-a[0-9]+$" ref) t))
 
 ;; The mockup's edit-bearing tools (the claude CLI's Edit/Write/NotebookEdit
 ;; + our buffer-edit naming).

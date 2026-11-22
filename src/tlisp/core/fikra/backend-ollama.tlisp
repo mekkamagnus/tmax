@@ -13,7 +13,7 @@
           fikra-ollama-action-posts-get fikra-ollama-record-action-pair
           fikra-ollama-last-action-stash-get fikra-ollama-exchanges-file-get
           fikra-ollama-tool-exchanges-reset fikra-ollama-action-state-reset
-          fikra-ollama-set-streaming)
+          fikra-ollama-set-streaming fikra-ollama-action-checkpoint)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -598,26 +598,66 @@ with its post-exit capture.")
   "r134: set around a DECISION-executed spawn — the child was MEDIATED
 (the user allowed it); its exit lands a per-action checkpoint.")
 
+;; r155: the command's OUTPUT CONTRACT — captured, capped at 30 lines
+;; with a TRUNCATED:n notice, the command's own $? on a trailing EXIT:N
+;; line (the r113 exit-status contract; a pipe to head would report
+;; head's 0).
+(defun fikra-ollama-bash-body (cmd)
+  (concat "__o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; __t=$(echo \"$__o\" | tail -n +31 | wc -l); [ \"$__t\" -gt 0 ] && echo TRUNCATED:$__t; echo EXIT:$__e"))
+
+;; r155 (the codex gate's named 9-bar — "a checkpoint for each mutating
+;; action"): an ORDINARY bash call is bracketed with worktree snapshots
+;; taken IN THE CHILD, so the editor's thread never waits for git. Each
+;; snapshot is `git add -A` + `write-tree` through the thread's
+;; PERSISTENT index (a warm index makes the add a re-stat: ~60 ms on a
+;; 2k-file repo; a fresh one rehashes everything). GIT_INDEX_FILE is
+;; scoped to these commands ONLY — the model's own git runs see the
+;; user's index. `.tmax` is excluded: the thread's state is not the
+;; user's tree, and its logs change while the command runs. The two
+;; trees go to a marker FILE, never stdout — the model's tool result
+;; stays exactly the command's output.
+(defun fikra-ollama-snapshot-cmd (idx var)
+  (concat var "=$(GIT_INDEX_FILE=" idx " git add -A -- . ':(exclude).tmax' >/dev/null 2>&1; "
+          "GIT_INDEX_FILE=" idx " git write-tree 2>/dev/null); "))
+
+(defun fikra-ollama-snapshot-wrap (cmd dir)
+  (let* ((d (concat dir "/.tmax/fikra"))
+         (tid (fikra/thread/fikra-thread-current))
+         (idx (fikra/thread/fikra-thread-shq (concat d "/ckpt-index-" tid)))
+         (f (fikra/thread/fikra-thread-shq (concat d "/ckpt-trees-" tid))))
+    (concat "mkdir -p " (fikra/thread/fikra-thread-shq d) " ; rm -f " f " ; "
+            (fikra-ollama-snapshot-cmd idx "__p")
+            (fikra-ollama-bash-body cmd)
+            " ; " (fikra-ollama-snapshot-cmd idx "__q")
+            "echo \"$__p $__q\" > " f)))
+
 (defun fikra-ollama-run-bash-now (cmd dir)
   (fikra/event/fikra-event-emit
     (list (list "kind" "tool-call") (list "tool" "bash")
           (list "summary" cmd)))
   (let ((mediated fikra-ollama-next-mediated))
     (setq fikra-ollama-next-mediated nil)
-    (let ((pid (condition-case nil
-                (make-process
-                  :command (list "sh" "-c"
-                                 (concat "cd " (fikra/thread/fikra-thread-shq dir)
-                                         " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; __t=$(echo \"$__o\" | tail -n +31 | wc -l); [ \"$__t\" -gt 0 ] && echo TRUNCATED:$__t; echo EXIT:$__e"))
-                  :cwd dir
-                  :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
-                  :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
-                (error () nil))))
+    ;; r155: ordinary calls are snapshotted (a mediated one already gets
+    ;; its pre-capture before it runs and its post-capture at exit).
+    (let ((snap (and (not mediated) (stringp (fikra/thread/fikra-thread-current)))))
+      (let ((pid (condition-case nil
+                  (make-process
+                    :command (list "sh" "-c"
+                                   (concat "cd " (fikra/thread/fikra-thread-shq dir)
+                                           " && " (if snap
+                                                    (fikra-ollama-snapshot-wrap cmd dir)
+                                                    (fikra-ollama-bash-body cmd))))
+                    :cwd dir
+                    :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
+                    :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
+                  (error () nil))))
       (if pid
         ;; r131: stamp the OWNERSHIP entry (spawn-time epoch + home) and
         ;; return the PID — callers detect async by numberp; the round's
         ;; continuation (if any) is stashed into this entry by run-calls.
         ;; r134: MEDIATED children land an action checkpoint at exit.
+        ;; r155: SNAP children wrote their before/after trees to the
+        ;; marker file — the sentinel turns a difference into a pair.
         (progn
           (keymap-mutable-set! fikra-ollama-async-procs (number-to-string pid)
             (hashmap "epoch" fikra-ollama-epoch
@@ -626,7 +666,8 @@ with its post-exit capture.")
                               (fikra/thread/fikra-thread-current))
                      "out" ""
                      "cont" nil
-                     "mediated" mediated))
+                     "mediated" mediated
+                     "snap" (if snap t nil)))
           pid)
       ;; r127 (codex catch 4): a FAILED spawn reports an honest FAIL
       ;; row — never a pid (the turn would strand).
@@ -634,7 +675,64 @@ with its post-exit capture.")
         (fikra/event/fikra-event-emit
           (list (list "kind" "tool-result") (list "ok" nil)
                 (list "summary" "spawn failed")))
-        "{\"role\":\"tool\",\"content\":\"spawn failed\"},")))))
+        "{\"role\":\"tool\",\"content\":\"spawn failed\"},"))))))
+
+;; A 40-character lowercase-hex object name — and nothing else passes
+;; into a shell command (the marker file is writable by the very command
+;; it describes).
+(defun fikra-ollama-hex40-p (s)
+  (and (stringp s)
+       (= (length s) 40)
+       (fikra-ollama-hex40-scan s 0)))
+
+(defun fikra-ollama-hex40-scan (s i)
+  (if (>= i (length s))
+    t
+    (and (string-match "^[0-9a-f]$" (substring s i (+ i 1)))
+         (fikra-ollama-hex40-scan s (+ i 1)))))
+
+;; r155: the ordinary-bash ACTION checkpoint. Runs in the sentinel under
+;; the HOME focus. The child left "<pre> <post>" tree names in the
+;; marker file; DIFFERENT trees mean the command changed the worktree:
+;; both are sealed as refs (post → pre) exactly like a mediated action,
+;; so SPC a C-r reverts it. Identical trees (or no usable pair — not a
+;; git dir, an unborn HEAD, a killed child) mean nothing to hold: no
+;; ref, no event. A read-only call carries no checkpoint — and says so.
+(defun fikra-ollama-action-checkpoint ()
+  (condition-case nil
+    (let* ((f (concat (fikra/thread/fikra-thread-working-dir)
+                      "/.tmax/fikra/ckpt-trees-"
+                      (fikra/thread/fikra-thread-current)))
+           (raw (if (file-exists-p f) (string-trim (read-file-content f)) ""))
+           (sp (string-match " " raw))
+           (pre (if (and sp (numberp sp) (> sp 0)) (substring raw 0 sp) ""))
+           (post (if (and sp (numberp sp) (> sp 0)) (substring raw (+ sp 1) (length raw)) "")))
+      (if (file-exists-p f)
+        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq f)))
+        nil)
+      (if (and (fikra-ollama-hex40-p pre)
+               (fikra-ollama-hex40-p post)
+               (not (string= pre post)))
+        ;; r134e: this runs in the SENTINEL's eval context — the event
+        ;; emits through the explicit-path owner emitter (set here,
+        ;; cleared on every path: a leaked owner misrouted later sync
+        ;; captures).
+        (condition-case nil
+          (progn
+            (fikra/checkpoint/fikra-checkpoint-set-emit-owner (fikra/thread/fikra-thread-current))
+            (let ((names (fikra/checkpoint/fikra-checkpoint-pair-trees pre post)))
+              (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+              (if names
+                (progn
+                  (setq fikra-ollama-last-pre-name (car names))
+                  (fikra-ollama-record-action-pair (car names)))
+                nil)))
+          (error (m)
+            (condition-case nil (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil) (error () nil))
+            (editor-set-status (concat "Fikra: action checkpoint FAILED — the change is not revertable on its own (" (if (stringp m) m "error") ")"))
+            nil))
+        nil))
+    (error () nil)))
 
 (defun fikra-ollama-bash-filter (pid output)
   ;; r131: the output accumulates on the PID's own entry (concurrent
@@ -719,6 +817,12 @@ with its post-exit capture.")
                     (fikra/event/fikra-event-emit
                       (list (list "kind" "tool-result") (list "ok" ok)
                             (list "summary" (concat out (if ok "" (concat "\nexit " code))))))
+                    ;; r155: the result row first, then the action's
+                    ;; checkpoint marker (when the command changed the
+                    ;; worktree) — whatever becomes of the turn.
+                    (if (and entry (hashmap-get entry "snap"))
+                      (fikra-ollama-action-checkpoint)
+                      nil)
                     (if (not (fikra-ollama-turn-live-p))
                       ;; The turn ENDED while this child ran (e.g. the
                       ;; allow-path race): the evidence renders, nothing

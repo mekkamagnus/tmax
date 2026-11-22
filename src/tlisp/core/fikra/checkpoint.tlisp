@@ -5,7 +5,7 @@
           fikra-checkpoint-command fikra-checkpoint-tail
           fikra-checkpoint-filter fikra-checkpoint-sentinel
           fikra-checkpoint-capture-with-path fikra-checkpoint-set-emit-owner
-          fikra-checkpoint-last-ref-name-get)
+          fikra-checkpoint-last-ref-name-get fikra-checkpoint-pair-trees)
 
 ;; #217 (RFC-027 §D6, Phase 2): non-invasive git checkpoints. Every turn
 ;; gets two refs (baseline/completion) built on a TEMPORARY index — the
@@ -228,6 +228,60 @@ events; nil when disabled or failed. Never touches turn state."
               (list (list "kind" "checkpoint-error")
                     (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))
         sha))))
+
+;; r155: an EXISTING tree object as a checkpoint ref (commit-tree +
+;; update-ref — the same atomic commit point as a capture). The ordinary
+;; bash path writes its before/after trees in the child; this only seals
+;; them. TREE is validated before it can reach a shell command. Returns
+;; the commit sha, or nil when checkpointing is disabled or git fails.
+(defun fikra-checkpoint-ref-tree (tree ref kind)
+  (if (or (fikra-checkpoint-disable-p)
+          (not (stringp tree))
+          (not (= (length tree) 40))
+          (not (fikra-checkpoint-hex40-scan tree 0)))
+    nil
+    (let ((out (shell-command
+                 (concat "cd " (fikra-checkpoint-shq (fikra/thread/fikra-thread-working-dir)) " && "
+                         "commit=$(git commit-tree " tree " -p HEAD -m \"fikra checkpoint " kind "\") && "
+                         "git update-ref " ref " $commit && echo REF:$commit || echo CAPTURE-FAILED"))))
+      (fikra-checkpoint-tail out))))
+
+(defun fikra-checkpoint-hex40-scan (s i)
+  (if (>= i (length s))
+    t
+    (and (string-match "^[0-9a-f]$" (substring s i (+ i 1)))
+         (fikra-checkpoint-hex40-scan s (+ i 1)))))
+
+;; r155 (the codex gate's named 9-bar): an action's checkpoint PAIR from
+;; two tree objects — the PRE ref (<turn>-a<k>) and the POST ref
+;; (<turn>-a<k+1>), exactly the shape two captures produce, so the action
+;; pair recorder and SPC a C-r treat it like any mediated action. Emits
+;; the post ref's checkpoint-ready (context-aware, like a capture) and
+;; names it for the pair recorder. Returns (pre-name post-name), or nil
+;; — a post ref that fails to seal leaves its pre ref UNPAIRED, which is
+;; never on the revert stack.
+(defun fikra-checkpoint-pair-trees (pre-tree post-tree)
+  (let ((pre-name (fikra-checkpoint-ref "action")))
+    (let ((pre-sha (fikra-checkpoint-ref-tree pre-tree pre-name "action pre")))
+      (if (not pre-sha)
+        nil
+        (let ((post-name (fikra-checkpoint-ref "action")))
+          (let ((post-sha (fikra-checkpoint-ref-tree post-tree post-name "action post")))
+            (if (not post-sha)
+              nil
+              (progn
+                (setq fikra-checkpoint-last-ref post-sha)
+                (setq fikra-checkpoint-last-ref-name post-name)
+                (if fikra-checkpoint-emit-owner
+                  (fikra/event/fikra-event-emit-batch-for fikra-checkpoint-emit-owner
+                    (list (list (list "kind" "checkpoint-ready")
+                                (list "ref" post-name)
+                                (list "sha" post-sha))))
+                  (fikra/event/fikra-event-emit
+                    (list (list "kind" "checkpoint-ready")
+                          (list "ref" post-name)
+                          (list "sha" post-sha))))
+                (list pre-name post-name)))))))))
 
 ;; Test seam: capture with a PATH prepend — forces REAL git failures
 ;; (e.g. a write-tree stub) to verify the checkpoint-error contract.
