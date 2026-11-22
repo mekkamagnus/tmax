@@ -366,3 +366,48 @@ describe("#307 — gate r2 fixes", () => {
     expect(() => e(editor, "(grep-buffer-rollback 1.5)")).toThrow(/gen/);
   });
 });
+
+describe("#307 — valve r1 fixes", () => {
+  test("a late completion after q NEVER touches the user's buffer (content/point/ro)", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "one")})`);
+    e(editor, "(editor/commands/grep/grep-quit)");
+    // The user edits elsewhere.
+    e(editor, '(buffer-create "*mine*")');
+    e(editor, '(buffer-switch "*mine*")');
+    e(editor, '(buffer-insert "SAFE")');
+    e(editor, "(cursor-move 0 2)");
+    e(editor, '(grep-buffer-complete 1 "done" "late")');
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*mine*");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("SAFE");
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(0);
+    const ro = e(editor, "(buffer-read-only-p)");
+    expect(String(ro.value)).toBe("false");
+  });
+
+  test("the PREVIOUSLY-COMPLETED restored generation accepts NO callbacks", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("g1", 1, 1, "one")})`);
+    e(editor, '(grep-buffer-complete 1 "done" nil)'); // g1 COMPLETED
+    e(editor, `(grep-buffer-register ${reg()})`); // g2 pushes g1's (completed) snapshot
+    e(editor, `(grep-buffer-append-hit 2 ${hit("g2", 1, 1, "two")})`);
+    e(editor, "(grep-buffer-rollback 2)"); // restores g1 (previously completed)
+    expect(strip(bufferText(editor))).toContain("g1");
+    // Its callbacks DROP silently (the restored id is retired).
+    e(editor, `(grep-buffer-append-hit 1 ${hit("x", 1, 1, "no")})`);
+    const hits = String(e(editor, "(length (editor/commands/grep/grep-hits-get))").value);
+    expect(hits).toBe("1"); // unchanged
+  });
+
+  test("SNAPSHOT capture reads *grep* even when another buffer is current", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "one")})`);
+    e(editor, '(buffer-create "*else*")');
+    e(editor, '(buffer-switch "*else*")');
+    e(editor, '(buffer-insert "NOT THE SNAPSHOT")');
+    e(editor, `(grep-buffer-register ${reg()})`); // captures *grep* while *else* current
+    e(editor, "(grep-buffer-rollback 2)");
+    expect(strip(bufferText(editor))).toContain("a:1:1:one"); // g1's hits — not *else*'s text
+    expect(strip(bufferText(editor))).not.toContain("NOT THE SNAPSHOT");
+  });
+});
