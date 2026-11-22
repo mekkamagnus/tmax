@@ -162,14 +162,18 @@ separators, unicode — structural, never text-parsed)."
       (buffer-delete-range 0 0 0 (length l)))))
 
 (defun stagehand-stash-refresh ()
-  "g — re-render from git (identity re-recorded)."
+  "g — re-render from git (identity re-recorded). Any non-prefix key
+CONSUMES a pending z (valve r2: z, g, z must not create — only
+CONSECUTIVE z z does)."
+  (setq stagehand-stash-z-pending nil)
   (stagehand-stash-render
     (stagehand-stash-parse
       (stagehand-stash-list-out (stagehand-stash-list))))
   (editor-set-status "Stagehand: stash list refreshed"))
 
 (defun stagehand-stash-next ()
-  "n — next row (clamped to the last line)."
+  "n — next row (clamped to the last line). Consumes a pending z."
+  (setq stagehand-stash-z-pending nil)
   (cursor-move
     (if (< (+ (cursor-line) 1) (buffer-line-count))
       (+ (cursor-line) 1)
@@ -177,7 +181,8 @@ separators, unicode — structural, never text-parsed)."
     0))
 
 (defun stagehand-stash-quit ()
-  "q — close."
+  "q — close. Consumes a pending z."
+  (setq stagehand-stash-z-pending nil)
   (buffer-kill (stagehand-stash-buffer-name)))
 
 ;; ── selection (commit-ID anchored) ─────────────────────────────────

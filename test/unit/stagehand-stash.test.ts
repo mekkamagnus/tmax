@@ -366,3 +366,21 @@ describe("#292 — refusals + parsing", () => {
     expect(String(e(editor, "(nth 2 (nth 0 (stagehand/stash/stagehand-stash-rows-get)))").value)).toContain("A");
   });
 });
+
+describe("#292 — valve r2", () => {
+  test("an INTERRUPTED prefix never creates: z, g, z re-arms (key-driven)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    openStash();
+    await editor.handleKey("z"); // arm
+    await editor.handleKey("g"); // refresh — CONSUMES the prefix
+    expect(st(editor)).toContain("refreshed"); // g really dispatched
+    await editor.handleKey("z"); // re-arm, NOT a create
+    expect(git("stash", "list")).toBe(""); // nothing created
+    // A consecutive z z still creates.
+    await editor.handleKey("z");
+    await editor.handleKey("z");
+    expect(st(editor)).toContain("stashed stash@{0}");
+  });
+});
