@@ -1,5 +1,5 @@
 (defmodule editor/commands/grep
-  (export grep-exact-keys-p grep-coord-p grep-buffer-register grep-buffer-append-hit
+  (export grep-exact-keys-p grep-coord-p grep-test-producer-last grep-buffer-register grep-buffer-append-hit
           grep-buffer-complete grep-buffer-rollback
           grep-test-producer grep-hits-get grep-generation-get
           grep-current-gen-get grep-status-get
@@ -22,6 +22,7 @@
 (defvar grep-hits (list) "((file line col text) ...) — newest LAST.")
 (defvar grep-meta nil "The active generation's registered metadata (hashmap).")
 (defvar grep-retired (list) "The RETIRED generation ids (no callbacks).")
+(defvar grep-producer-last nil "The producer's last register result (tests poll).")
 (defvar grep-saved-content nil "The pre-register buffer content (rollback of the only generation).")
 (defvar grep-stack (list) "((gen meta hits completed status) ...) — the generation snapshots, newest LAST.")
 
@@ -338,6 +339,12 @@ and flipped it read-only).")
   (grep-switch-in)
   (buffer-set-read-only nil)
   (cond
+    ((and (string= grep-status "no-matches")
+          (> (length grep-hits) 0))
+      ;; valve r3: no-matches completing a generation that ALREADY
+      ;; streamed hits — the structured list is the truth; keep the
+      ;; hits displayed (consistency), note the status.
+      (buffer-append (concat "\n— no further matches")))
     ((and (stringp grep-message) (> (length grep-message) 0)
           (not (string= grep-status "error"))
           (= (length grep-hits) 0))
@@ -493,18 +500,22 @@ are ever deleted."
 ;; ── the test producer (drives the interface; #307's own harness) ────
 (defun grep-test-producer (script)
   "Drive the producer interface from a SCRIPT alist — the test
-surface: ((op arg ...) ...) with ops register/append/complete/rollback."
+surface: ((op arg ...) ...) with ops register/append/complete/
+rollback. Returns the LAST register's generation id (the dolist
+form returns nil; callers poll the ids they need)."
+  (setq grep-producer-last nil)
   (dolist (step script)
     (let ((op (nth 0 step)))
       (cond
         ((string= op "register")
-          (grep-buffer-register (nth 1 step)))
+          (setq grep-producer-last (grep-buffer-register (nth 1 step))))
         ((string= op "append")
           (grep-buffer-append-hit (nth 1 step) (nth 2 step)))
         ((string= op "complete")
           (grep-buffer-complete (nth 1 step) (nth 2 step) (nth 3 step)))
         ((string= op "rollback")
-          (grep-buffer-rollback (nth 1 step)))))))
+          (grep-buffer-rollback (nth 1 step))))))
+  grep-producer-last)
 
 ;; ── mode + keymap registration ──────────────────────────────────────
 (major-mode-register "grep" '() nil)
