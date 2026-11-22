@@ -141,6 +141,11 @@ With 0 or negative number, disable."
 ;; Mockup 8.1's chat hint: "SPC a R to revert" — open the viewer on the
 ;; LAST completed turn (the confirm gate still owns the revert).
 (key-bind "SPC a R" "(progn (require-module fikra/diff) (fikra/diff/fikra-turn-diff-for (fikra/diff/fikra-last-completed-turn)))" "normal")
+;; r142b (codex r142 catch): the ACTION-LEVEL revert — a production
+;; control for fikra-ollama-revert-latest-action (the displayed
+;; workflow: the ollama backend's latest action reverts to ITS pre-ref;
+;; the turn viewer on SPC a R remains for whole-turn review).
+(key-bind "SPC a C-r" "(progn (require-module fikra/backend-ollama) (fikra/backend-ollama/fikra-ollama-revert-latest-action))" "normal")
 ;; NOTE: the mockup 8.4 footer names "SPC a p previous turn" — SPC a p
 ;; is the PLAN toggle here (8.2, established); prev-turn stays on the
 ;; viewer's [ key (the footer says so honestly).

@@ -1061,6 +1061,13 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(existsSync(join(process.cwd(), "second142.txt"))).toBe(false);
     // The PRE-state content of first142 is untouched.
     expect(String(e(ed, '(shell-command "cat first142.txt")').value)).toContain("CONTENT-first142");
+    // r142b (codex r142 catch): the STASH preserves the action's own
+    // change (non-empty; git-apply restores it).
+    const stash = String(e(ed, "(fikra/backend-ollama/fikra-ollama-last-action-stash-get)").value);
+    expect(stash).toMatch(/\.patch$/);
+    const stashText = readFileSync(stash, "utf8");
+    expect(stashText.length).toBeGreaterThan(0);
+    expect(stashText).toContain("second142.txt");
     // A second revert reverts the FIRST action (its own pre-state).
     e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
     expect(existsSync(join(process.cwd(), "first142.txt"))).toBe(false);
