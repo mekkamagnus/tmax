@@ -154,6 +154,25 @@ describe("#310 — retirement + the REAL key path", () => {
     expect(s).toContain("1 hits");
   });
 
+  test("BACKEND CONFIG refusal (valve r3): grep-backend=grep → the named status at prompt-OPEN, no prompt", async () => {
+    e(editor, '(editor/commands/grep/grep-backend-set! "grep")');
+    e(editor, "(editor/commands/grep-scope/grep-scope-here)");
+    expect(st(editor)).toContain("grep backend pending");
+    // No minibuffer opened (mode still normal, no pending).
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    e(editor, '(editor/commands/grep/grep-backend-set! "auto")');
+  });
+
+  test("BACKEND CONFIG rg-missing (valve r3): the executable gone → the named status, no prompt", async () => {
+    e(editor, '(editor/commands/grep/grep-rg-executable-set! "/nonexistent/rg-310")');
+    e(editor, '(editor/commands/grep/grep-backend-set! "rg")');
+    e(editor, "(editor/commands/grep-scope/grep-scope-here)");
+    expect(st(editor)).toContain("rg is not on PATH");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    e(editor, '(editor/commands/grep/grep-backend-set! "auto")');
+    e(editor, '(editor/commands/grep/grep-rg-executable-set! "rg")');
+  });
+
   test("FULL INTERACTION (valve r2): type + submit through the minibuffer; the EXACT prompt; both cancel keys", async () => {
     writeFileSync("q.txt", "typed needle\n");
     e(editor, '(find-file "q.txt")');

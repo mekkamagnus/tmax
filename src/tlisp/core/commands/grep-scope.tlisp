@@ -86,21 +86,32 @@ scope string, or nil when 'project found no project."
   ;; branch was removed (gate r1 minor).
   (grep-scope-open-at (grep-scope-resolve binding)))
 
+(defun grep-scope-backend-label ()
+  "The prompt's backend word: the CONFIGURED backend (auto → rg —
+the only landed backend)."
+  (let ((b (editor/commands/grep/grep-backend-get)))
+    (if (and (stringp b) (string= b "auto"))
+      "rg"
+      (if (stringp b) b "rg"))))
+
 (defun grep-scope-open-at (scope)
-  ;; Backend detection BEFORE the prompt (the label is truthful).
-  (let ((backend (if (exec-lookup "rg") "rg" "none")))
-    (if (string= backend "none")
-      (editor-set-status "grep: no search backend (rg missing)")
-      (progn
-        (setq grep-scope-pending scope)
-        (completing-read
-          (grep-scope-prompt-label backend scope)
-          "editor/commands/grep-scope/grep-scope-table"
-          nil
-          nil
-          ""
-          "grep-scope-history"
-          "editor/commands/grep-scope/grep-scope-accept")))))
+  ;; Backend check BEFORE the prompt via THE SUBSYSTEM'S OWN
+  ;; availability matrix (valve r3: the old literal
+  ;; exec-lookup-of-rg bypassed grep-backend config and detection —
+  ;; a 'grep (rg)' prompt could open when the subsystem would refuse
+  ;; after submit; the refusal status now fires at prompt-open time).
+  (if (editor/commands/grep/grep-backend-available-p)
+    (progn
+      (setq grep-scope-pending scope)
+      (completing-read
+        (grep-scope-prompt-label (grep-scope-backend-label) scope)
+        "editor/commands/grep-scope/grep-scope-table"
+        nil
+        nil
+        ""
+        "grep-scope-history"
+        "editor/commands/grep-scope/grep-scope-accept"))
+    nil))
 
 (defun grep-scope-table (input action)
   ;; A free-text prompt (no candidates) — the SPEC-116 shape.
