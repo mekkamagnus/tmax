@@ -184,3 +184,4 @@
 {"ts":"2026-11-24T14:35:00Z","event":"valve-launch","issue":332,"round":3,"task":"byoc84mw3"}
 {"ts":"2026-11-24T16:00:00Z","event":"valve-round","issue":332,"round":3,"grade":"8/10","top_fixes":["tlisp.info not exercised by the gate","ADR gate-note stale"],"disposition":"both landed: file-exists-p through the binary for tlisp.info; ADR updated"}
 {"ts":"2026-11-24T16:05:00Z","event":"valve-launch","issue":332,"round":4,"task":"bld61a8t4","note":"trend 8-8-8; one round after this"}
+{"ts":"2026-11-24T17:30:00Z","event":"landed","issue":332,"head":"d6b5f2e5","valve":"8-8-8-10","incident":"never-land-red VIOLATION: pushed with 1 failing re-verify test (registered post-push); root cause = the new test's own wrong assertion (file-exists-p prints 'true' not 't'); fix-forwarded within the minute; pushed code was never broken","lesson":"READ the verify output BEFORE the push command in the SAME compound line — a trailing push races past a red tail"}
