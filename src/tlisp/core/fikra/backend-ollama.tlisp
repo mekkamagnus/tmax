@@ -49,13 +49,14 @@ completion source uses).")
   "request-id → the accumulated response body (hex-decoded chunks).")
 (defvar fikra-ollama-requests (hashmap)
   "r154 (codex re-grade): request-id → the IN-FLIGHT request's OWNERSHIP
-record {thread epoch emitted} — the thread the turn belongs to (a late
-reply must land on its own thread, never whatever is focused at land
+record {thread epoch emitted open} — the thread the turn belongs to (a
+late reply must land on its own thread, never whatever is focused at land
 time); the turn generation it was fired under (a replaced or interrupted
 turn's stream is dead the MOMENT it is superseded — not at completion);
-and how much of the streamed content the transcript already took (the
-completion renders exactly the rest). An entry exists from fire to
-completion: the map IS the in-flight set.")
+and how much of the streamed content the transcript already took as a
+contiguous PREFIX (`emitted`, while `open`) — the completion renders
+exactly the rest. An entry exists from fire to completion: the map IS
+the in-flight set.")
 (defvar fikra-ollama-messages ""
   "The turn's accumulated messages-array body (history + user, then each
 tool round's assistant tool_call + tool results — the loop's working
@@ -310,6 +311,9 @@ availability gate must be synchronous; the turn itself is async)."
     (editor/keymaps/keymap-mutable-set! entry "thread" (fikra/thread/fikra-thread-current))
     (editor/keymaps/keymap-mutable-set! entry "epoch" fikra-ollama-epoch)
     (editor/keymaps/keymap-mutable-set! entry "emitted" 0)
+    ;; t while the delivered text is still a contiguous prefix (see
+    ;; fikra-ollama-deliver).
+    (editor/keymaps/keymap-mutable-set! entry "open" t)
     (editor/keymaps/keymap-mutable-set! fikra-ollama-requests (number-to-string id) entry))
   id)
 
@@ -1467,15 +1471,19 @@ with its post-exit capture.")
   ;; after a thread switch carried NO history. Adjacent streamed deltas
   ;; merge into one message BEFORE the cut is located (the cut indexes
   ;; the list the scan walks).
+  ;; r143: durable reload FIRST — a restart rebuilt the map empty; the
+  ;; file is the durable record. r154b (codex gate P1): FIRST means
+  ;; before the budget picks its turns: a cold start sized them without
+  ;; their durable tool exchanges, then the scan included those anyway
+  ;; (14181 chars of history against the 6000 budget on the first prompt
+  ;; after a restart).
+  (fikra-ollama-load-exchanges)
   (let* ((merged (fikra-ollama-merge-deltas
                    (fikra/event/fikra-event-events-of
                      (fikra/thread/fikra-thread-current) fikra-ollama-history-window)))
          (cutoff (+ (fikra-ollama-last-turn-end merged 0 -1) 1))
          ;; r154: the most recent WHOLE turns within the budget.
          (start (fikra-ollama-history-start merged cutoff)))
-    ;; r143: durable reload FIRST (a restart rebuilt the map empty; the
-    ;; file is the durable record).
-    (fikra-ollama-load-exchanges)
     ;; r139: rounds flush one-by-one as the turn's narrations arrive
     ;; (narration1, tools1, narration2, tools2, final reply).
     (fikra-ollama-history-scan merged start cutoff "" nil nil 1)))
@@ -1562,11 +1570,12 @@ with its post-exit capture.")
 ;; turn-start line (the chat seam emits it, then the backend begins the
 ;; turn) — and closes at its turn-end; a group that never ends (a crash
 ;; mid-turn) is dropped. Its size is the message text, 300 per tool event
-;; (the rows its exchange carries) and its recorded exchange fragments.
-;; Opening on a question is also what keeps a WINDOWED read honest: a
-;; turn whose question fell outside the window never opens a group.
-;; Walks the list head-first with an index counter — `nth` per event made
-;; this quadratic in the log length.
+;; (the rows its exchange carries) and its recorded exchange fragments,
+;; keyed by the number of the turn-start inside the group. Opening on a
+;; question is also what keeps a WINDOWED read honest: a turn whose
+;; question fell outside the window never opens a group. Walks the list
+;; head-first with an index counter — `nth` per event made this quadratic
+;; in the log length.
 (defun fikra-ollama-turn-costs (rest i limit start text tools turn-n out)
   (if (or (null rest) (>= i limit))
     out
@@ -1786,22 +1795,34 @@ with its post-exit capture.")
 ;; thread-routed emitter. r154: the focused-thread emitter put a
 ;; switched-away turn's text into whatever the user was looking at, and
 ;; the completion then settled the real thread with no reply. Only a
-;; batch the transcript TOOK counts as delivered (`emitted`).
+;; batch the transcript TOOK counts as delivered (`emitted`) — and only
+;; while the delivered text is a contiguous PREFIX of the stream: the
+;; first batch that fails to land closes the stream for good (open → nil)
+;; and everything after it is WITHHELD for the completion to render as
+;; one remainder. r154b (codex gate P0): counting delivered characters
+;; across a gap made the completion treat the count as a prefix offset —
+;; "FIRST" (undeliverable) was lost and a misplaced "ECOND" rendered
+;; twice over.
 (defun fikra-ollama-deliver (k deltas)
   (let* ((entry (hashmap-get fikra-ollama-requests k))
          (thread (if entry (hashmap-get entry "thread") nil))
-         (landed (condition-case nil
-                     (and thread
-                          (fikra/event/fikra-event-emit-batch-for thread
-                            (mapcar (lambda (d)
-                                      (list (list "kind" "text-delta")
-                                            (list "speaker" "assistant")
-                                            (list "text" d)))
-                              deltas)))
-                     (error () nil))))
-    (if (and landed entry)
-      (editor/keymaps/keymap-mutable-set! entry "emitted"
-        (+ (hashmap-get entry "emitted") (fikra-ollama-deltas-length deltas 0))))
+         (landed (if (and entry (hashmap-get entry "open"))
+                     (condition-case nil
+                       (and thread
+                            (fikra/event/fikra-event-emit-batch-for thread
+                              (mapcar (lambda (d)
+                                        (list (list "kind" "text-delta")
+                                              (list "speaker" "assistant")
+                                              (list "text" d)))
+                                deltas)))
+                       (error () nil))
+                     nil)))
+    (if (not entry)
+      nil
+      (if landed
+        (editor/keymaps/keymap-mutable-set! entry "emitted"
+          (+ (hashmap-get entry "emitted") (fikra-ollama-deltas-length deltas 0)))
+        (editor/keymaps/keymap-mutable-set! entry "open" nil)))
     landed))
 
 (defun fikra-ollama-deltas-length (deltas n)

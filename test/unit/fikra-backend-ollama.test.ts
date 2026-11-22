@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -1755,6 +1755,35 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       expect(count(text(ed), "assistant › hello world")).toBe(1);
     });
 
+    // r154b (codex gate P0): a delta the transcript could NOT take. The
+    // delivered text has to stay a contiguous PREFIX — the first batch
+    // that fails closes the live stream, and the completion renders the
+    // WHOLE remainder. (Counting delivered characters across the gap
+    // lost "FIRST" and rendered a misplaced "ECOND" over "SECOND".)
+    tt("a delta the transcript could not take: the completion renders the whole remainder, once", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "with an obstructed log")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 75 "live")');
+      const logPath = String(e(ed, "(fikra/thread/fikra-thread-log-path)").value);
+      const aside = `${logPath}.aside`;
+      renameSync(logPath, aside);
+      mkdirSync(logPath); // the append fails now
+      feed(ed, 75, ndjson([{ message: { role: "assistant", content: "FIRST" } }]));
+      expect(text(ed)).not.toContain("FIRST");
+      rmdirSync(logPath);
+      renameSync(aside, logPath); // writable again
+      feed(ed, 75, ndjson([{ message: { role: "assistant", content: "SECOND" } }]));
+      // WITHHELD: a gap already sits before it.
+      expect(text(ed)).not.toContain("SECOND");
+      finish(ed, 75);
+      await idle(ed);
+      const t = text(ed);
+      expect(count(t, "assistant › FIRSTSECOND")).toBe(1);
+      expect(count(t, "FIRST")).toBe(1);
+      expect(count(t, "SECOND")).toBe(1);
+      expect(count(log(ed, "main"), "FIRSTSECOND")).toBe(1);
+    });
+
     tt("streamed deltas are ONE assistant message in the next request's history", async () => {
       const ed = await armed();
       e(ed, '(fikra/chat/fikra-turn-send "first: the history check")');
@@ -1853,6 +1882,45 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
         { role: "user", content: "second question" },
         { role: "assistant", content: "short answer" },
       ]);
+    });
+
+    // r154b (codex gate P1): the budget must size turns WITH their
+    // durable tool exchanges — on a COLD start too (after a restart the
+    // exchanges file is the only copy). Sized without them, the first
+    // prompt after a restart carried 14181 chars against the 6000 budget.
+    tt("a COLD start budgets the durable tool exchanges too (the same turns as warm)", async () => {
+      const ed = await armed();
+      const big = "x".repeat(4500);
+      const exFile = String(e(ed, "(fikra/backend-ollama/fikra-ollama-exchanges-file-get)").value);
+      const exchange = JSON.stringify({ role: "assistant", content: "", tool_calls: [
+        { function: { name: "bash", arguments: { command: "echo q" } } }] }) + "," +
+        JSON.stringify({ role: "tool", content: big }) + ",";
+      writeFileSync(exFile, [1, 2, 3].map((t) => `${hex(`main/${t}/1`)} ${hex(exchange)}`).join("\n") + "\n");
+      const questionsOf = (h: string) => [...h.matchAll(/"role":"user","content":"(QUESTION-\d)"/g)].map((m) => m[1]);
+      const historyText = () => String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value);
+      // The production order: the question is logged BEFORE its turn-start
+      // (the chat seam emits the user's line, then the backend begins the
+      // turn) — three tool turns of ~4600 chars each against the budget.
+      const rows: unknown[] = [];
+      for (let t = 1; t <= 3; t++) {
+        rows.push(
+          { kind: "text-delta", speaker: "user", text: `QUESTION-${t}` },
+          { kind: "turn-start", turn: t },
+          { kind: "tool-call", tool: "bash", summary: "echo q" },
+          { kind: "tool-result", ok: true, summary: big },
+          { kind: "text-delta", speaker: "assistant", text: `ANSWER-${t}` },
+          { kind: "turn-end", turn: t, status: "completed" });
+      }
+      writeLog(ed, rows);
+      // COLD: the in-memory exchange map wiped (a restart's effect).
+      e(ed, "(fikra/backend-ollama/fikra-ollama-tool-exchanges-reset)");
+      const cold = historyText();
+      const warm = historyText();
+      expect(cold).toBe(warm);
+      expect(questionsOf(cold)).toEqual(["QUESTION-3"]);
+      expect(cold).toContain('"role":"tool"');
+      expect(cold.length).toBeLessThanOrEqual(6000);
+      expect(cold.length).toBeGreaterThan(4000);
     });
 
     tt("a BLANK line in the stream never stalls it", async () => {
