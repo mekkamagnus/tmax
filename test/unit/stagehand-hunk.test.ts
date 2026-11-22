@@ -734,3 +734,59 @@ describe("#291 — valve r2 fixes", () => {
     expect(String(e(editor, "(buffer-name)").value)).not.toContain("Stagehand-Diff");
   });
 });
+
+describe("#291 — valve r3 fixes", () => {
+  test("a STALE discard confirm (view changed before y) cancels, never discards another view's hunk", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    writeFileSync(join(process.cwd(), "g.txt"), "w1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "CHANGED\n");
+    writeFileSync(join(process.cwd(), "g.txt"), "w2\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-discard-hunk)"); // pending, gen N
+    openDiff("g.txt"); // gen N+1 — the pending idx is now wrong
+    e(editor, '(stagehand/diff/stagehand-diff-accept "y")');
+    expect(String(e(editor, "(editor-status)").value)).toContain("the view changed");
+    // NOTHING discarded: f.txt keeps CHANGED.
+    expect(file("f.txt")).toBe("CHANGED\n");
+  });
+
+  test("a SWITCHED-AWAY view still refreshes IN PLACE (no buffer steal)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nv2\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nCHANGED\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
+    // Switch away, then the sentinel lands.
+    e(editor, '(buffer-switch "*scratch*")');
+    e(editor, "(stagehand/diff/stagehand-diff-apply-sentinel 0 0)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("hunk applied");
+    // The current buffer is STILL the user's; the diff view refreshed in place.
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*scratch*");
+    e(editor, '(buffer-switch "*Stagehand-Diff*")');
+    const view = strip(bufferText(editor));
+    expect(view).toContain("no changes on this side");
+    await waitApply(editor, 2000);
+  });
+
+  test("a FAILED refresh keeps its status (never overwritten with 'hunk applied')", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nv2\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nCHANGED\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
+    // Kill the repo's git metadata BEFORE the sentinel lands — the
+    // apply already ran (synchronous stdin write); the refresh's
+    // git diff now fails.
+    execFileSync("rm", ["-rf", join(process.cwd(), ".git")]);
+    e(editor, "(stagehand/diff/stagehand-diff-apply-sentinel 0 0)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("refresh failed");
+    expect(String(e(editor, "(editor-status)").value)).not.toContain("hunk applied");
+  });
+});

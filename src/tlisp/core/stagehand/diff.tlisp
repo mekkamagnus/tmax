@@ -348,6 +348,7 @@ the n-first y/n."
             (editor-set-status "Stagehand: no hunk at point")
             (progn
           (setq stagehand-diff-pending idx)
+          (setq stagehand-diff-pending-gen stagehand-diff-view-gen)
           (completing-read
             (concat "Discard this hunk in the worktree? (y/n)")
             "stagehand/diff/stagehand-diff-table"
@@ -356,6 +357,9 @@ the n-first y/n."
 
 (defvar stagehand-diff-pending nil
   "The hunk idx awaiting the discard y/n.")
+(defvar stagehand-diff-pending-gen nil
+  "The view generation the pending discard was opened against (a
+stale y must not discard ANOTHER view's hunk — valve r3).")
 
 (defun stagehand-diff-table (input action)
   "n FIRST (the #287 lesson: a bare Enter must CANCEL)."
@@ -370,6 +374,11 @@ the n-first y/n."
     (let ((idx stagehand-diff-pending))
       (setq stagehand-diff-pending nil)
       (cond
+        ((and idx (not (= (or stagehand-diff-pending-gen -1)
+                          (or stagehand-diff-view-gen -2))))
+          ;; valve r3: the view CHANGED since the confirm opened —
+          ;; the pending idx belongs to ANOTHER view's hunks.
+          (editor-set-status "Stagehand: the view changed — discard cancelled"))
         (stagehand-diff-apply-in-flight
           (editor-set-status "Stagehand: an apply is still running"))
         (idx (stagehand-diff-apply-hunk-at idx "discard"))
@@ -586,14 +595,15 @@ failure message's first line possible)."
   (setq stagehand-diff-apply-exit code)
   (setq stagehand-diff-apply-in-flight nil)
   (if (and (numberp code) (= code 0))
-    (if (or (not (= stagehand-diff-apply-view-gen stagehand-diff-view-gen))
-            (not (string= (buffer-name) (stagehand-diff-buffer-name))))
-      ;; valve r1/r2: the view CHANGED (gen) or is no longer the
-      ;; current buffer (quit/switch) — refreshing now would render
-      ;; the WRONG view's targets or recreate a quit view.
+    (if (not (= stagehand-diff-apply-view-gen stagehand-diff-view-gen))
+      ;; valve r1/r2: the view was quit or replaced (gen bump) —
+      ;; refreshing would recreate it against the wrong targets.
       (editor-set-status "Stagehand: hunk applied (the view changed — press g to refresh)")
-      (progn
-        (stagehand-diff-refresh-view)
+      ;; valve r3: a switched-away view still refreshes IN PLACE
+      ;; (refresh-view restores the current buffer); 'hunk applied'
+      ;; only when the refresh succeeded — a failed refresh keeps
+      ;; its own 'refresh failed' status.
+      (if (stagehand-diff-refresh-view)
         (editor-set-status "Stagehand: hunk applied")))
     (editor-set-status
       (concat "Stagehand: apply failed ("
@@ -607,7 +617,13 @@ failure message's first line possible)."
 
 (defun stagehand-diff-refresh-view ()
   "Re-render in place on the SAME side (the #289 contract; the
-refresh-and-retry hint's action — bound to g)."
+refresh-and-retry hint's action — bound to g). Returns t on
+success, nil when the underlying git diff failed (the sentinel
+then does NOT overwrite 'refresh failed' with 'hunk applied' —
+valve r3). The render happens INTO the diff buffer without
+stealing the user's current buffer (valve r3: a switched-away
+view still refreshes; only a quit/replaced view — a gen mismatch —
+does not)."
   (let* ((cached (string= stagehand-diff-side "cached"))
          (res (shell-exec-argv
                 (append (list "git" "diff" "--no-color")
@@ -622,24 +638,32 @@ refresh-and-retry hint's action — bound to g)."
                       (list))))
                 (or stagehand-diff-root "."))))
     (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
-      (if (string= (string-trim (car res)) "")
-        ;; Nothing left on this side: the clean EMPTY notice + state
-        ;; cleared (no stale silent no-op).
-        (progn
-          (setq stagehand-diff-hunks (list))
-          (setq stagehand-diff-raw nil)
-          (stagehand-diff-ensure-buffer)
-          (buffer-set-read-only nil)
-          (stagehand-diff-clear)
-          (buffer-append (concat "Stagehand-Diff: "
-            (or (car stagehand-diff-paths) "diff")
-            " — no changes on this side\n"))
-          (buffer-set-read-only t)
-          (editor-set-status "Stagehand: no changes on this side"))
-        (stagehand-diff-open (car res)
-          (concat "Stagehand-Diff: " (or (car stagehand-diff-paths) "diff"))
-          stagehand-diff-side stagehand-diff-root stagehand-diff-paths))
-      (editor-set-status "Stagehand: refresh failed"))))
+      (let ((cb (buffer-name)))
+        (if (string= (string-trim (car res)) "")
+          ;; Nothing left on this side: the clean EMPTY notice + state
+          ;; cleared (no stale silent no-op).
+          (progn
+            (setq stagehand-diff-hunks (list))
+            (setq stagehand-diff-raw nil)
+            (stagehand-diff-ensure-buffer)
+            (buffer-set-read-only nil)
+            (stagehand-diff-clear)
+            (buffer-append (concat "Stagehand-Diff: "
+              (or (car stagehand-diff-paths) "diff")
+              " — no changes on this side\n"))
+            (buffer-set-read-only t)
+            (editor-set-status "Stagehand: no changes on this side"))
+          (stagehand-diff-open (car res)
+            (concat "Stagehand-Diff: " (or (car stagehand-diff-paths) "diff"))
+            stagehand-diff-side stagehand-diff-root stagehand-diff-paths))
+        ;; Restore the user's current buffer (the render switched to
+        ;; the diff buffer); t = refreshed.
+        (if (not (string= cb (stagehand-diff-buffer-name)))
+          (buffer-switch cb))
+        t)
+      (progn
+        (editor-set-status "Stagehand: refresh failed")
+        nil))))
 
 (defun stagehand-diff-ensure-buffer ()
   (if (not (string= (buffer-current) (stagehand-diff-buffer-name)))
