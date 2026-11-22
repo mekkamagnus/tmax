@@ -4,7 +4,8 @@
           fikra-git-fikra-p fikra-git-unborn-p
           fikra-checkpoint-command fikra-checkpoint-tail
           fikra-checkpoint-filter fikra-checkpoint-sentinel
-          fikra-checkpoint-capture-with-path fikra-checkpoint-set-emit-owner)
+          fikra-checkpoint-capture-with-path fikra-checkpoint-set-emit-owner
+          fikra-checkpoint-last-ref-name-get)
 
 ;; #217 (RFC-027 §D6, Phase 2): non-invasive git checkpoints. Every turn
 ;; gets two refs (baseline/completion) built on a TEMPORARY index — the
@@ -115,6 +116,9 @@ the bash sentinel) route the sync capture's event through the
 explicit-path owner emitter — the pointer reads nil there."
   (setq fikra-checkpoint-emit-owner owner))
 
+(defvar fikra-checkpoint-last-ref-name nil
+  "r142: the last SUCCESSFUL sync capture's ref name (nil on failure) —
+pre/post pairing callers read it right after each capture.")
 (defvar fikra-checkpoint-emit-owner nil
   "r134e: set by CALLBACK contexts around a sync capture — the event
 emits through the explicit-path owner emitter instead of the pointer
@@ -194,6 +198,8 @@ events; nil when disabled or failed. Never touches turn state."
            (out (shell-command (fikra-checkpoint-command-for tmp ref kind))))
       (let ((sha (fikra-checkpoint-tail out)))
         (setq fikra-checkpoint-last-ref sha)
+        ;; r142: the ref NAME for pre/post pairing callers.
+        (setq fikra-checkpoint-last-ref-name (if sha ref nil))
         ;; r134e (codex P2): the emit is CONTEXT-aware — the pointer
         ;; emit in normal evals (it renders); the EXPLICIT-PATH owner
         ;; emit when a CALLBACK context set fikra-checkpoint-emit-owner
@@ -341,6 +347,10 @@ sentinel could adopt another process's REF sha).")
                       (list "sha" sha))
                 (list (list "kind" "checkpoint-error")
                       (list "reason" (string-trim (substring out 0 (min 200 (length out))))))))))))
+
+;; r142: the last sync capture's ref name (test/pairing accessor).
+(defun fikra-checkpoint-last-ref-name-get ()
+  (if fikra-checkpoint-last-ref-name fikra-checkpoint-last-ref-name nil))
 
 (provide "fikra-checkpoint")
 )

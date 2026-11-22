@@ -1033,6 +1033,42 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(postTree).not.toContain("pre141.txt");
   });
 
+  // r142 (codex 9-item): the ACTION-LEVEL revert — an edit's touched
+  // paths restore from ITS pre-ref (an earlier action's change stays).
+  tt("reverting the LATEST action restores its pre-state; earlier actions stay", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "two edits then revert")');
+    const fireEdits = (seed: number, paths: string[]) => {
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+      const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+        tool_calls: paths.map((p) => ({ function: { name: "buffer_edit", arguments: { path: p, content: "CONTENT-" + p + "\n" } } })) } }));
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+      e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+    };
+    fireEdits(260, ["first142.txt"]);
+    fireEdits(261, ["second142.txt"]);
+    // Both actions recorded; the LATEST is second142.
+    let posts = "";
+    for (let i = 0; i < 40; i++) {
+      posts = String(e(ed, "(fikra/backend-ollama/fikra-ollama-action-posts-get)").value);
+      if ((posts.match(/-a\d+/g) ?? []).length >= 2) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect((posts.match(/-a\d+/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // Revert the latest action.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(existsSync(join(process.cwd(), "first142.txt"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "second142.txt"))).toBe(false);
+    // The PRE-state content of first142 is untouched.
+    expect(String(e(ed, '(shell-command "cat first142.txt")').value)).toContain("CONTENT-first142");
+    // A second revert reverts the FIRST action (its own pre-state).
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(existsSync(join(process.cwd(), "first142.txt"))).toBe(false);
+    // Nothing left to revert: an honest status, not a throw.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("no action");
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —

@@ -9,7 +9,8 @@
           fikra-backend-ollama-pending-p fikra-backend-ollama-decide
           fikra-ollama-parked-rest-get fikra-ollama-latest-id-get
           fikra-ollama-bash-filter fikra-ollama-bash-sentinel
-          fikra-ollama-path-contained-p)
+          fikra-ollama-path-contained-p fikra-ollama-revert-latest-action
+          fikra-ollama-action-posts-get fikra-ollama-record-action-pair)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -81,6 +82,13 @@ it belonged to is gone).")
 (defvar fikra-ollama-last-parked-calls nil
   "r139b: the parked call + its remainder (the exchange's TRUE assistant
 message — the reject/approve-with-empty-rest path records from here).")
+(defvar fikra-ollama-action-pairs (hashmap)
+  "r142 (codex 9-item): post-ref → pre-ref per action (recorded when
+both captures run back-to-back). The action-level revert restores an
+action's touched paths from ITS pre-ref — the turn baseline is not the
+pre-state when earlier actions changed the tree.")
+(defvar fikra-ollama-action-posts (list)
+  "r142: the action post-refs newest-first (the revert target picker).")
 (defvar fikra-ollama-turn-home nil
   "r131b (codex r131 catch): the thread that OWNS the running turn —
 stamped at start-turn. Async spawns stamp their HOME from THIS (the
@@ -470,6 +478,9 @@ availability gate must be synchronous; the turn itself is async)."
 ;; make-process with a filter/sentinel; the daemon NEVER blocks on a
 ;; long command. The r113 exit-status contract is preserved (the
 ;; command's own $? rides the output tail).
+(defvar fikra-ollama-last-pre-name nil
+  "r142: the mediated action's PRE ref name — the sentinel pairs it
+with its post-exit capture.")
 (defvar fikra-ollama-next-mediated nil
   "r134: set around a DECISION-executed spawn — the child was MEDIATED
 (the user allowed it); its exit lands a per-action checkpoint.")
@@ -597,7 +608,10 @@ availability gate must be synchronous; the turn itself is async)."
                                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner
                                      (if home home (fikra/thread/fikra-thread-current)))
                                    (fikra/checkpoint/fikra-checkpoint-capture "action")
-                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil))
+                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+                                   ;; r142: the post→pre pair.
+                                   (fikra-ollama-record-action-pair fikra-ollama-last-pre-name)
+                                   (setq fikra-ollama-last-pre-name nil))
                             (error () nil)))
                         (if (not cont)
                           (progn
@@ -827,54 +841,52 @@ availability gate must be synchronous; the turn itself is async)."
       (progn
         (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                              (fikra/thread/fikra-thread-dirname abs))))
-        ;; r137+r139 (codex): the action ref captures the PRE state —
-        ;; BEFORE the write (the ref is what a revert restores TO). An
-        ;; HONEST outcome when capture fails: the checkpoint-error event
-        ;; already rides; surface it in the status too (the write is
-        ;; best-effort by design — but the user must see it).
-        (condition-case nil
-          (let ((sha (progn (require-module fikra/checkpoint)
-                            (fikra/checkpoint/fikra-checkpoint-capture "action"))))
-            (if (not sha)
-              (editor-set-status "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref")))
-          (error (m)
-            (editor-set-status
-              (concat "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref ("
-                      (if (stringp m) m "capture error") ")"))))
-        (let ((written (condition-case nil
-                        (progn (write-file-content abs content) t)
-                        (error () nil))))
-          ;; r135c (codex catch): the GEAR row + its preview emit AFTER
-          ;; the verified write — a FAILED write (the path is a
-          ;; directory, a permission failure) must not display
-          ;; additions that never landed.
-          (fikra/event/fikra-event-emit
-            (list (list "kind" "tool-call") (list "tool" "buffer-edit")
-                  (list "summary" (concat path " @" (number-to-string (length content))))
-                  (list "preview"
-                    (if written
-                      (fikra-ollama-diff-preview
-                        (if (and old-content (stringp old-content)) old-content "")
-                        content)
-                      ""))))
-          (if (not written)
-            (progn
-              (fikra/event/fikra-event-emit
-                (list (list "kind" "tool-result") (list "ok" nil)
-                      (list "summary" (concat "WRITE FAILED: " path))))
-              (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "write failed: " path)) "},"))
-            (progn
-              ;; r137 gate resolution: the POST-write ref remains (the
-              ;; evidence + inline marker; the PRE ref above is the
-              ;; revert target — both states pinned per action).
-              (condition-case nil
-                (progn (require-module fikra/checkpoint)
-                       (fikra/checkpoint/fikra-checkpoint-capture "action"))
-                (error () nil))
-              (fikra/event/fikra-event-emit
-                (list (list "kind" "tool-result") (list "ok" t)
-                      (list "summary" (concat "wrote " path))))
-              (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "wrote " path)) "},"))))))))
+        ;; r137+r139: the PRE-state ref (BEFORE the write — the revert
+        ;; target). r142: its NAME is kept for the post→pre pair.
+        (let ((pre-name nil))
+          (condition-case nil
+            (let ((sha (progn (require-module fikra/checkpoint)
+                              (fikra/checkpoint/fikra-checkpoint-capture "action")))
+                  (n (fikra/checkpoint/fikra-checkpoint-last-ref-name-get)))
+              (setq pre-name n)
+              (if (not sha)
+                (editor-set-status "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref")))
+            (error (m)
+              (editor-set-status
+                (concat "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref ("
+                        (if (stringp m) m "capture error") ")"))))
+          (let ((written (condition-case nil
+                          (progn (write-file-content abs content) t)
+                          (error () nil))))
+            ;; r135c: the GEAR row + preview emit AFTER the verified
+            ;; write (a failed write shows nothing it didn't do).
+            (fikra/event/fikra-event-emit
+              (list (list "kind" "tool-call") (list "tool" "buffer-edit")
+                    (list "summary" (concat path " @" (number-to-string (length content))))
+                    (list "preview"
+                      (if written
+                        (fikra-ollama-diff-preview
+                          (if (and old-content (stringp old-content)) old-content "")
+                          content)
+                        ""))))
+            (if (not written)
+              (progn
+                (fikra/event/fikra-event-emit
+                  (list (list "kind" "tool-result") (list "ok" nil)
+                        (list "summary" (concat "WRITE FAILED: " path))))
+                (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "write failed: " path)) "},"))
+              (progn
+                ;; The POST-write ref (evidence + inline marker). r142:
+                ;; the post→pre pair (the action-level revert).
+                (condition-case nil
+                  (progn (require-module fikra/checkpoint)
+                         (fikra/checkpoint/fikra-checkpoint-capture "action")
+                         (fikra-ollama-record-action-pair pre-name))
+                  (error () nil))
+                (fikra/event/fikra-event-emit
+                  (list (list "kind" "tool-result") (list "ok" t)
+                        (list "summary" (concat "wrote " path))))
+                (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "wrote " path)) "},")))))))))
 
 ;; r135c (codex catch): the fragment must be VALID JSON — the content
 ;; string was never closed, and the tool name rode in unescaped.
@@ -887,6 +899,99 @@ availability gate must be synchronous; the turn itself is async)."
 ;; everything up to and including the LAST turn-end (the in-flight
 ;; user message is emitted BEFORE its turn-start — a turn-start cut
 ;; would double it; the turn-end boundary excludes the whole open turn).
+;; r142: the action post-refs (newest-first) as a NEWLINE-joined string
+;; (list values stringify as [object Object] across the eval boundary).
+(defun fikra-ollama-action-posts-get ()
+  (fikra-ollama-join-strings fikra-ollama-action-posts ""))
+
+(defun fikra-ollama-join-strings (items acc)
+  (if (or (not items) (= (length items) 0))
+    acc
+    (fikra-ollama-join-strings (cdr items)
+      (concat acc (if (> (length acc) 0) (hex-decode "0a") "") (car items)))))
+
+;; r142: pair an action's post-ref with its pre-ref (called right
+;; after the post capture; both names read from the checkpoint module's
+;; last-ref-name stash).
+(defun fikra-ollama-record-action-pair (pre)
+  (let* ((post (fikra/checkpoint/fikra-checkpoint-last-ref-name-get))
+         (pre-ref (if pre pre nil)))
+    (if (and post pre-ref)
+      (progn
+        (keymap-mutable-set! fikra-ollama-action-pairs post pre-ref)
+        (setq fikra-ollama-action-posts (append (list post) fikra-ollama-action-posts)))
+      nil)))
+
+;; r142: THE ACTION-LEVEL REVERT — restore the LATEST action's touched
+;; paths from ITS pre-ref (checkout when the pre-ref has the path,
+;; remove when the action ADDED it). A verified stash patch lands first
+;; (the turn-revert discipline).
+(defun fikra-ollama-revert-latest-action ()
+  (require-module fikra/checkpoint)
+  (if (or (not fikra-ollama-action-posts) (= (length fikra-ollama-action-posts) 0))
+    (editor-set-status "Fikra: no action to revert")
+    (let* ((post (car fikra-ollama-action-posts))
+           (pre (hashmap-get fikra-ollama-action-pairs post))
+           (root (fikra/thread/fikra-thread-working-dir)))
+      (if (not pre)
+        (editor-set-status (concat "Fikra: no pre-ref recorded for " post))
+        (let* ((stash (concat root "/.tmax/fikra/stash/action-"
+                              (number-to-string (current-time)) ".patch"))
+               (paths-text (string-trim
+                             (shell-command
+                               (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                       " diff --name-only " pre " " post))))
+               (paths (if (string= paths-text "") (list)
+                        (string-split paths-text (hex-decode "0a")))))
+          (cond
+            ((= (length paths) 0)
+              (editor-set-status "Fikra: the action changed nothing"))
+            (t (progn
+              (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
+                               (concat root "/.tmax/fikra/stash"))))
+              (let ((patch-out (shell-command
+                                 (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                         " diff --binary " post " -- "
+                                         (fikra-ollama-paths-args paths)
+                                         " > " (fikra/thread/fikra-thread-shq stash)))))
+                (let ((fails (fikra-ollama-restore-paths root pre paths (list))))
+                  (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
+                  (keymap-mutable-set! fikra-ollama-action-pairs post nil)
+                  (editor-set-status
+                    (concat "Fikra: action reverted to " pre
+                            (if (> (length fails) 0)
+                              (concat " — " (number-to-string (length fails)) " path(s) FAILED")
+                              "")))
+                  fails))))))))))
+
+;; Paths as sh-quoted argv text.
+(defun fikra-ollama-paths-args (paths)
+  (if (or (not paths) (= (length paths) 0))
+    ""
+    (concat (fikra/thread/fikra-thread-shq (car paths))
+            (if (> (length paths) 1) (concat " " (fikra-ollama-paths-args (cdr paths))) ""))))
+
+;; Restore each PATH from REF (checkout when REF has it; remove when
+;; REF lacks it — the action ADDED it). Returns the failure list.
+(defun fikra-ollama-restore-paths (root ref paths fails)
+  (if (or (not paths) (= (length paths) 0))
+    fails
+    (let* ((p (car paths))
+           (has (string= (string-trim (shell-command
+                          (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                  " cat-file -e " ref ":" (fikra/thread/fikra-thread-shq p)
+                                  " 2>/dev/null && echo YES || echo NO"))) "YES"))
+           (out (if has
+                  (shell-command
+                    (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                            " checkout " ref " -- " (fikra/thread/fikra-thread-shq p) " 2>&1"))
+                  (shell-command
+                    (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p)) " 2>/dev/null; true")))))
+      (fikra-ollama-restore-paths root ref (cdr paths)
+        (if (and has (not (string= (string-trim out) "")))
+          (append fails (list p))
+          fails)))))
+
 ;; r138: append FRAGMENT into the CURRENT turn's exchange slot.
 ;; r139: the slot key is THREAD/TURN/ROUND — every round flushes in
 ;; event order (the walker appends them at the turn's end in key
@@ -1293,6 +1398,11 @@ availability gate must be synchronous; the turn itself is async)."
                   (editor-set-status
                     (concat "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref ("
                             (if (stringp m) m "capture error") ")"))))
+              ;; r142: the pre-name for the sentinel's pair record.
+              (setq fikra-ollama-last-pre-name
+                (condition-case nil
+                  (progn (fikra/checkpoint/fikra-checkpoint-last-ref-name-get))
+                  (error () nil)))
               (setq fikra-ollama-next-mediated t)
               (let ((approved (fikra-ollama-run-bash-now cmd dir)))
                 ;; r131: an async spawn returns the PID — the result
