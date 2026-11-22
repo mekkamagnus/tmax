@@ -107,10 +107,29 @@ const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
       socket.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: " + body.length + "\\r\\nConnection: close\\r\\n\\r\\n" + body);
       socket.end();
     }
-    // POST /api/chat: RECORD the body, never respond (r136 codex
-    // re-grade P1: the request boundary must be TESTED — a malformed
-    // body 400s on every real ollama while a swallower hid it).
-    require("node:fs").appendFileSync(process.argv[2], chunk.toString().slice(chunk.toString().indexOf("\\r\\n\\r\\n") + 4) + "\\n");
+    // POST /api/chat: RECORD the body (r136 codex re-grade P1: the
+    // request boundary must be TESTED) — and answer STREAMING requests
+    // with NDJSON deltas (r153: the progressive render needs real
+    // chunks arriving over time).
+    const text = chunk.toString();
+    require("node:fs").appendFileSync(process.argv[2], text.slice(text.indexOf("\\r\\n\\r\\n") + 4) + "\\n");
+    if (text.includes('"stream":true') && text.includes("STREAM-PROBE")) {
+      const lines = [
+        '{"message":{"role":"assistant","content":"Str"}}',
+        '{"message":{"role":"assistant","content":"eaming"}}',
+        '{"message":{"role":"assistant","content":" DONE"}}',
+        '{"done":true}',
+      ];
+      socket.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/x-ndjson\\r\\nConnection: close\\r\\n\\r\\n");
+      let i = 0;
+      const tick = () => {
+        if (i >= lines.length) { socket.end(); return; }
+        socket.write(lines[i] + "\\n");
+        i += 1;
+        setTimeout(tick, 250);
+      };
+      setTimeout(tick, 100);
+    }
   },
 } });
 console.log(l.port);
@@ -1436,6 +1455,29 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       expect(msgs).toContain("FAILAPPEND-CTX");
       expect(msgs).toContain('"role":"tool"');
     });
+  });
+
+  // r153 — STREAMING (the mockup's active transcript): the reply renders
+  // PROGRESSIVELY (the first delta lands while the stream is open) and
+  // exactly once (no duplicate at completion).
+  tt("a streaming reply renders progressively and exactly once", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "STREAM-PROBE please")');
+    // The FIRST delta renders while the stream is still open.
+    const first = strip(await until(ed, "(buffer-text)", "Str", 80));
+    expect(first).toContain("Str");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    // The full reply lands and the turn completes.
+    const full = strip(await until(ed, "(buffer-text)", "DONE", 80));
+    expect(full).toContain("Streaming DONE");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    // EXACTLY ONCE (no completion re-render).
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text.split("Streaming DONE").length - 1).toBe(1);
+    // The request asked for streaming.
+    const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
+    const last = lines[lines.length - 1] ?? "";
+    expect(last).toContain('"stream":true');
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the

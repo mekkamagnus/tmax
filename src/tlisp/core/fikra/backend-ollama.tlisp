@@ -56,6 +56,23 @@ context; rebuilt per turn).")
 (defvar fikra-ollama-round-text ""
   "r137: the round's accompanying text (scope bridge into the results
 let).")
+;; r153 — STREAMING (the mockup's active transcript): the chat request
+;; asks ollama for NDJSON; the FILTER renders each content delta as it
+;; arrives (adjacent text-deltas join — the transcript grows live); the
+;; completion ends the turn without re-rendering.
+(defvar fikra-ollama-stream-rendered nil
+  "r153: t when THIS request's content already rendered via deltas (the
+plain-content branch then skips the re-render).")
+(defvar fikra-ollama-streaming t
+  "t: stream:true on /api/chat (progressive rendering); nil: one-shot.")
+(defvar fikra-ollama-stream-bufs (hashmap)
+  "r153: request-id → the partial (unterminated) NDJSON line buffer.")
+(defvar fikra-ollama-stream-content (hashmap)
+  "r153: request-id → the accumulated streamed content (the final
+message's text).")
+(defvar fikra-ollama-stream-tools (hashmap)
+  "r153: request-id → the RAW NDJSON line carrying tool_calls (the
+arguments ride verbatim — re-encoding loses the exact shape).")
 (defvar fikra-ollama-tool-exchanges (hashmap)
   "r137-r139 (codex): the tool exchanges keyed THREAD/TURN/ROUND — each
 completed round's tool_calls fragment + its results (the accompanying
@@ -230,7 +247,7 @@ availability gate must be synchronous; the turn itself is async)."
   ;; r135e (codex r135d catch): the model name ESCAPES (a quote in a
   ;; configured name broke the request body).
   (let* ((body (concat "{\"model\":" (fikra-ollama-json-string fikra-ollama-model)
-                       ",\"stream\":false,\"messages\":["
+                       ",\"stream\":" (if fikra-ollama-streaming "true" "false") ",\"messages\":["
                        "{\"role\":\"system\",\"content\":\"You are a concise coding assistant inside the tmax editor. Reply briefly. Use the provided tools when they help.\"},"
                        (fikra-ollama-chomp fikra-ollama-messages)
                        "],\"tools\":["
@@ -1518,7 +1535,46 @@ with its post-exit capture.")
       "fikra/backend-ollama/fikra-backend-ollama-complete")
     (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k
       (concat (hashmap-get fikra-ollama-bodies k) (hex-decode chunk-hex)))
+    ;; r153: STREAM — render every complete NDJSON line's content delta.
+    (if fikra-ollama-streaming
+      (fikra-ollama-stream-lines k
+        (concat (or (hashmap-get fikra-ollama-stream-bufs k) "") (hex-decode chunk-hex))))
     t))
+
+;; Consume complete lines from BUF (the tail stays in the buffer map);
+;; each line: content delta → render + accumulate; a tool_calls line →
+;; keep the RAW line (verbatim arguments).
+(defun fikra-ollama-stream-lines (k buf)
+  (let ((nl (string-match (hex-decode "0a") buf)))
+    (if (and nl (numberp nl) (> nl 0))
+      (progn
+        (fikra-ollama-stream-line k (substring buf 0 nl))
+        (fikra-ollama-stream-lines k (substring buf (+ nl 1) (length buf))))
+      ;; No complete line: stash the tail.
+      (keymap-mutable-set! fikra-ollama-stream-bufs k buf))))
+
+(defun fikra-ollama-stream-line (k line)
+  (if (> (length (string-trim line)) 0)
+    (progn
+      ;; A tool_calls line rides RAW (the complete handler parses it).
+      (if (string-match "tool_calls" line)
+        (keymap-mutable-set! fikra-ollama-stream-tools k line)
+        nil)
+      (condition-case nil
+        (let* ((obj (json-read-from-string line))
+               (c (fikra-ollama-alist-get "content"
+                     (fikra-ollama-alist-get "message" obj))))
+          (if (and c (stringp c) (> (length c) 0))
+            (progn
+              (keymap-mutable-set! fikra-ollama-stream-content k
+                (concat (or (hashmap-get fikra-ollama-stream-content k) "") c))
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "text-delta")
+                      (list "speaker" "assistant")
+                      (list "text" c))))
+            nil))
+        (error () nil)))
+    nil))
 
 ;; The completion handler (ownership-routed): a tags reply adopts the
 ;; model and re-fires; a chat reply renders the assistant turn + ENDS it.
@@ -1528,6 +1584,28 @@ with its post-exit capture.")
          (body (hashmap-get fikra-ollama-bodies k)))
     (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k nil)
     (editor/keymaps/keymap-mutable-set! fikra-ollama-threads k nil)
+    ;; r153: STREAMING — the reply's body is the streamed content (a
+    ;; tool_calls line rides raw; the turn-end then skips re-rendering).
+    (if (and fikra-ollama-streaming (= status 200))
+      (let ((tools-line (hashmap-get fikra-ollama-stream-tools k))
+            (content (hashmap-get fikra-ollama-stream-content k)))
+        (cond
+          (tools-line (progn
+            (setq body tools-line)
+            (setq fikra-ollama-stream-rendered nil)))
+          ;; Streamed content: synthesize; already rendered.
+          ((and content (> (length content) 0)) (progn
+            (setq body
+              (concat "{\"message\":{\"role\":\"assistant\",\"content\":"
+                      (fikra-ollama-json-string content) "}}"))
+            (setq fikra-ollama-stream-rendered t)))
+          ;; NOTHING streamed (a non-NDJSON body — the synthetic-test and
+          ;; one-shot-server shapes): the raw accumulated body IS the reply.
+          (t (setq fikra-ollama-stream-rendered nil))))
+      (setq fikra-ollama-stream-rendered nil))
+    (keymap-mutable-set! fikra-ollama-stream-bufs k nil)
+    (keymap-mutable-set! fikra-ollama-stream-content k nil)
+    (keymap-mutable-set! fikra-ollama-stream-tools k nil)
     ;; r109-r110: only the LATEST fired request may land; a gone turn
     ;; discards. r111 (codex r110 P2): a SWITCHED-AWAY thread no longer
     ;; discards — the reply SETTLES ITS OWN THREAD via the bg-settle
@@ -1620,19 +1698,28 @@ with its post-exit capture.")
           (fikra-ollama-tool-round msg tool-calls)
           (progn
         (setq fikra-ollama-pending-message nil)
-        (if (and content (stringp content) (> (length content) 0))
+        ;; r153: under streaming the content already rendered delta by
+        ;; delta — re-emitting would DUPLICATE the reply.
+        ;; r153: the STREAMED turn already rendered — settle as completed.
+        (if (and content (stringp content) (> (length content) 0)
+                 fikra-ollama-stream-rendered)
           (progn
-            (fikra/event/fikra-event-emit
-              (list (list "kind" "text-delta")
-                    (list "speaker" "assistant")
-                    (list "text" content)))
-            ;; The thread state machine settles the turn (emits turn-end).
             (fikra/thread/fikra-thread-turn-end "completed")
             (editor-set-status
               (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
-          (progn
-            (fikra/thread/fikra-thread-turn-end "error")
-            (editor-set-status "Fikra-ollama: empty reply"))))))))
+          (if (and content (stringp content) (> (length content) 0))
+            (progn
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "text-delta")
+                      (list "speaker" "assistant")
+                      (list "text" content)))
+              ;; The thread state machine settles the turn (emits turn-end).
+              (fikra/thread/fikra-thread-turn-end "completed")
+              (editor-set-status
+                (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
+            (progn
+              (fikra/thread/fikra-thread-turn-end "error")
+              (editor-set-status "Fikra-ollama: empty reply")))))))))
 
 ;; Model resolution: the tags body is small — the filter DID accumulate
 ;; nothing for tags (marker-shaped); resolve via one sync curl instead
