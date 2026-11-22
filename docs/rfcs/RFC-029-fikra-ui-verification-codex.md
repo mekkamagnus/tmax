@@ -1033,3 +1033,7 @@ The re-grade caught a **critical regression from r135e**: the model-name escape 
 ## Rounds 138-138c — the named r137 findings — gate PASS
 
 Tool exchanges ride in the TRUE conversation order: per-turn keyed, flushed before the first assistant text following the tools (user → tools → final reply → next user), and rebuild-stable (the walk reads without consuming; a per-walk flag guards double-flush). The edit preview is change-focused: common prefix/suffix lines trim away and only the changed middles render (a middle change shows exactly its lines; unchanged context is absent from the row). Unit 52/52 throughout; codex's triple-rebuild probe carried the exchange in all three histories.
+
+## Round 139 — the conversation-history cluster — closed-partial at the cap
+
+Multi-round history rides in true order with zero duplication (thread/turn/round-scoped slots; one round flushed per post-tool narration); the rejection appears exactly once and before the final reply; the capture-failure status is honest on both the nil and exception paths. DECLARED: a single-call park's fragment serializes an empty calls array (the remember call provably never fires in that flow — the stash is correct at decide time; a focused dialect debug is named); exchange durability across restarts; the action-level revert wiring; mediated-bash pre-capture verification.
