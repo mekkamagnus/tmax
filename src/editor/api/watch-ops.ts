@@ -53,10 +53,16 @@ export function createWatchOps(
       ));
     }
     try {
-      const watcher = watch(path, {}, (_eventType: string, filename: string | null) => {
+      // #329 valve r3: ATOMIC SAVES (write-temp + rename) swap the
+      // inode — fs.watch keeps following the OLD one and later
+      // changes go silent. On a rename event the watcher is
+      // RE-ESTABLISHED on the same path (self-referencing closure
+      // through the table entry).
+      const idHolder = { value: -1 };
+      const emit = (_eventType: string): void => {
         // The event payload: the WATCHED path (fs.watch's filename is
-        // basename-only/unreliable across platforms — the registered
-        // path is the stable identity) + the fs event word.
+        // basename-only/unreliable — the registered path is the
+        // stable identity) + the fs event word.
         // #224's boundary rule: the path crosses as HEX (the reader
         // strips backslash escapes in literals).
         const hex = Buffer.from(path, "utf8").toString("hex");
@@ -81,9 +87,30 @@ export function createWatchOps(
             path,
           });
         }
-      });
+      };
+      const establish = (): { close: () => void } => {
+        const w = watch(path, {}, (ev: string, _filename: string | null) => {
+          if (ev === "rename") {
+            // Re-establish: the old watcher is exhausted after the
+            // rename; a fresh one follows the new inode. The event
+            // still fires so the T-Lisp side can react.
+            try { w.close(); } catch { /* gone */ }
+            try {
+              const fresh = establish();
+              const entry = watches.get(idHolder.value);
+              if (entry) entry.stop = () => fresh.close();
+            } catch { /* path gone — the old behavior */ }
+          }
+          emit(ev);
+        });
+        return w;
+      };
+      const watcher = establish();
       const id = nextWatchId++;
       watches.set(id, { stop: () => watcher.close(), path, callback });
+      // The rename branch needs the id to update the entry — bind it
+      // via a mutable holder the closure reads.
+      idHolder.value = id;
       logProgram?.("watch", { level: "info", text: `▶ watch ${id} started: ${path}`, id, path });
       return Either.right(createNumber(id));
     } catch (e: unknown) {

@@ -167,6 +167,37 @@ describe("#329 — auto-revert integration", () => {
     e(editor, "(auto-revert-mode nil)");
   });
 
+  test("ATOMIC SAVE (write-temp + rename): the watch re-establishes; later changes still revert (valve r3)", async () => {
+    writeFileSync("at.txt", "v1\n");
+    e(editor, '(find-file "at.txt")');
+    e(editor, "(auto-revert-mode t)");
+    // Atomic save: write a temp file, rename over (the inode swaps).
+    writeFileSync("at.tmp", "v2\n");
+    require("node:fs").renameSync(join(process.cwd(), "at.tmp"), join(process.cwd(), "at.txt"));
+    let reverted = await waitFor(() => strip(String(bufferText(editor))).includes("v2"));
+    expect(reverted).toBe(true);
+    // A SECOND change after the rename — the re-established watch fires.
+    writeFileSync("at2.tmp", "v3\n");
+    require("node:fs").renameSync(join(process.cwd(), "at2.tmp"), join(process.cwd(), "at.txt"));
+    reverted = await waitFor(() => strip(String(bufferText(editor))).includes("v3"));
+    expect(reverted).toBe(true);
+    e(editor, "(auto-revert-mode nil)");
+  });
+
+  test("a CANCELLED kill prompt does NOT prune (valve r3)", async () => {
+    writeFileSync("ck.txt", "v1\n");
+    e(editor, '(find-file "ck.txt")');
+    e(editor, "(auto-revert-mode t)");
+    // Dirty the buffer so kill prompts; a bare Enter cancels.
+    e(editor, '(buffer-insert "unsaved")');
+    e(editor, '(buffer-switch "*scratch*")');
+    e(editor, '(kill-buffer "ck.txt")');
+    await editor.handleKey("Escape"); // C-g cancels the prompt
+    // The watch survives (the kill never happened).
+    expect(String(e(editor, '(if (member "ck.txt" (file-watch-list)) "t" "nil")').value)).toContain("t");
+    e(editor, "(auto-revert-mode nil)");
+  });
+
   test("KILL retires the registration; the last buffer stops the watch (valve r2)", async () => {
     writeFileSync("k.txt", "v1\n");
     e(editor, '(find-file "k.txt")');
