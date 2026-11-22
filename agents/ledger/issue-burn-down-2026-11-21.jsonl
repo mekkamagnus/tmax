@@ -172,3 +172,5 @@
 {"ts":"2026-11-23T10:25:00Z","event":"valve-launch","issue":292,"round":2,"task":"b2ocosg22"}
 {"ts":"2026-11-23T11:30:00Z","event":"valve-round","issue":292,"round":2,"grade":"9/10","disposition":"THRESHOLD MET; TOP_FIX (interrupted z prefix consumed by any non-prefix key) applied as dd629ab before landing"}
 {"ts":"2026-11-23T11:40:00Z","event":"landed","issue":292,"head":"4b470cf","rebase":"11 commits re-verified (21/21, 99/99, typecheck full)","close":"receipts + gate r1-r3 history + valve 7/9 + follow-ups (TOCTOU, create-status race, prompt-echo coverage)"}
+{"ts":"2026-11-23T12:00:00Z","event":"blocked","issue":295,"reason":"depends on #293's :pty t (criterion 'PTY path exercised by the reword stop'); #293 blocked, primitive not on main","order_advance":"row 25 → #296"}
+{"ts":"2026-11-23T12:05:00Z","event":"unit-start","issue":296,"title":"Stagehand T2: span/overlay API + blame mode","spec":"docs/specs/SPEC-289-stagehand-span-blame.md","base":"3decb46"}
