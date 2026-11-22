@@ -268,6 +268,9 @@ export interface EditorState {
   highlightSpans?: HighlightSpan[][];
   /** #231: transient vim-goggles flash spans (TTL-cleared, merged at render). */
   flashSpans?: HighlightSpan[][];
+  /** #296: persistent per-buffer span grids (the merged overlay layer;
+   *  lazily invalidated by shape identity at render). */
+  bufferSpans?: Map<string, { spans: HighlightSpan[][]; shape: { lineCount: number; firstLineLength: number; lastLineLength: number } }>;
   /** RFC-029 §8.8 ghost text: the dim inline completion at the cursor
    * (single line; rendered after the cursor column on the cursor row). */
   ghostText?: string;

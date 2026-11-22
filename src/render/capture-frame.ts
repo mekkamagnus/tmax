@@ -5,6 +5,7 @@
  */
 
 import type { EditorState } from "../core/contracts/editor.ts";
+import type { HighlightSpan } from "../core/contracts/editor.ts";
 import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop } from "../frontend/render/buffer-lines.ts";
 import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";
@@ -56,7 +57,13 @@ export function captureFrame(state: EditorState, width: number, height: number):
     : undefined;
   // #231: merge the transient goggles flash on top of the syntax spans so
   // every capture-frame consumer (Steep embedded, capture RPC) shows it.
-  const spans = mergeFlashSpans(syntaxSpans, state.flashSpans);
+  // #296: the persistent per-buffer span layer — LAZY invalidation by
+  // shape identity (any mutation that changes the buffer's shape
+  // skips the grid; consumers re-apply).
+  const spanLayer = state.currentBuffer && state.currentBufferName
+    ? bufferSpanLayer(state, state.currentBufferName)
+    : undefined;
+  const spans = mergeFlashSpans(mergeFlashSpans(syntaxSpans, spanLayer), state.flashSpans);
 
   const screen: string[] = [];
 
@@ -190,4 +197,33 @@ function sliceByVisibleWidth(line: string, maxCols: number): string {
     i += chLen;
   }
   return out;
+}
+
+/** #296: the current buffer's persistent span grid — only when its
+ * recorded shape identity still matches the live buffer (the
+ * conservative v1 invalidation: shape change ⇒ dropped). */
+function bufferSpanLayer(
+  state: EditorState,
+  bufferName: string,
+): HighlightSpan[][] | undefined {
+  const entry = state.bufferSpans?.get(bufferName);
+  const buf = state.buffers?.get(bufferName);
+  if (!entry || !buf) return undefined;
+  // Either-returning probes (the buffer contract).
+  const countR = buf.getLineCount();
+  const lineCount = "right" in countR && typeof countR.right === "number" ? countR.right : -1;
+  const lenOf = (r: unknown): number =>
+    r && typeof r === "object" && "right" in (r as Record<string, unknown>) && typeof (r as { right?: unknown }).right === "string"
+      ? ((r as { right: string }).right).length
+      : 0;
+  const firstR = buf.getLine(0);
+  const lastR = lineCount > 0 ? buf.getLine(lineCount - 1) : firstR;
+  if (
+    lineCount !== entry.shape.lineCount ||
+    lenOf(firstR) !== entry.shape.firstLineLength ||
+    lenOf(lastR) !== entry.shape.lastLineLength
+  ) {
+    return undefined;
+  }
+  return entry.spans;
 }

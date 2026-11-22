@@ -115,6 +115,18 @@ export function update(model: EditorModel, msg: Msg): UpdateResult {
 
     case "SetHighlightSpans":
       return { model: patch(model, { highlightSpans: msg.spans ? msg.spans.map((s: HighlightSpan[]) => [...s]) : undefined }), cmds: noCmds };
+    case "SetBufferSpans": {
+      const next = new Map(model.bufferSpans ?? []);
+      if (msg.spans && msg.shape) next.set(msg.buffer, { spans: msg.spans.map((s: HighlightSpan[]) => [...s]), shape: msg.shape });
+      else next.delete(msg.buffer);
+      return { model: patch(model, { bufferSpans: next }), cmds: noCmds };
+    }
+    case "ClearBufferSpans": {
+      if (!model.bufferSpans?.has(msg.buffer)) return { model, cmds: noCmds };
+      const next = new Map(model.bufferSpans);
+      next.delete(msg.buffer);
+      return { model: patch(model, { bufferSpans: next }), cmds: noCmds };
+    }
     case "SetFlashSpans":
       return { model: patch(model, { flashSpans: msg.spans ? msg.spans.map((s: HighlightSpan[]) => [...s]) : undefined }), cmds: noCmds };
     case "SetGhostText":

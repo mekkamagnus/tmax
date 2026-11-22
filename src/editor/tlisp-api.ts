@@ -44,6 +44,7 @@ import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps } from "./api/visual-ops.ts";
 import { createFlashOps } from "./api/flash-ops.ts";
+import { createSpanOps } from "./api/span-ops.ts";
 import { createGhostOps } from "./api/ghost-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
@@ -515,6 +516,35 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         const write = (msg: Msg): void => { ctx.applyUpdate(msg); };
         return createFlashOps(write);
+      },
+    },
+
+    // ── persistent spans (#296 — SPEC-289) ───────────────────────────
+    {
+      name: "span",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        const write = (msg: Msg): void => { ctx.applyUpdate(msg); };
+        const getModel = (): EditorModel => ctx.access.getModel();
+        // The shape probe: the buffer's live identity for lazy
+        // invalidation (undefined when the buffer no longer exists).
+        const probeShape = (bufferName: string) => {
+          const buffers = getModel().buffers;
+          const buf = buffers?.get(bufferName);
+          if (!buf) return undefined;
+          const countR = buf.getLineCount();
+          const lineCount = "right" in countR && typeof countR.right === "number" ? countR.right : -1;
+          const lenOf = (r: unknown): number =>
+            r && typeof r === "object" && "right" in (r as Record<string, unknown>) && typeof (r as { right?: unknown }).right === "string"
+              ? ((r as { right: string }).right).length
+              : 0;
+          if (lineCount < 0) return undefined;
+          return {
+            lineCount,
+            firstLineLength: lenOf(buf.getLine(0)),
+            lastLineLength: lenOf(buf.getLine(lineCount - 1)),
+          };
+        };
+        return createSpanOps(write, probeShape);
       },
     },
 

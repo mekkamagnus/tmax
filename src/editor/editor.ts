@@ -3723,6 +3723,8 @@ export class Editor {
     if (!this.buffers.has(name)) return null;
     this.buffers.delete(name);
     this.bufferMetadata.delete(name);
+    // #296: a killed buffer's span registry drops silently (SPEC-289).
+    this.applyUpdate({ type: "ClearBufferSpans", buffer: name });
 
     // Pick a recency-correct survivor: the most-recently-used OTHER buffer.
     // Prefer non-special buffers; fall back to *scratch*. If only special

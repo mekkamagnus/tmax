@@ -71,6 +71,8 @@ export type Msg =
   // Syntax / search / folds
   | { readonly type: "SetHighlightSpans"; readonly spans: readonly HighlightSpan[][] | undefined }
   | { readonly type: "SetFlashSpans"; readonly spans: readonly HighlightSpan[][] | undefined }
+  | { readonly type: "SetBufferSpans"; readonly buffer: string; readonly spans: readonly HighlightSpan[][] | undefined; readonly shape: { lineCount: number; firstLineLength: number; lastLineLength: number } | undefined }
+  | { readonly type: "ClearBufferSpans"; readonly buffer: string }
   | { readonly type: "SetGhostText"; readonly text: string | undefined }
   | { readonly type: "SetGhostAnchor"; readonly line: number; readonly column: number }
   | { readonly type: "SetSearchMatches"; readonly matches: readonly Range[] | undefined }
