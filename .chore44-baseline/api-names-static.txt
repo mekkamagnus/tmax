@@ -4,6 +4,9 @@
 # #319: 433 -> 434 — editor-time-now (the transient clock primitive).
 # #287: 434 -> 435 — shell-exec-argv (the argv-list exec: no shell in the path).
 # #291: 435 -> 436 — process-close-stdin (the EOF primitive; git apply - reads until EOF).
+# #338 (drift catch-up): 436 -> 439 — the ANCHOR carries #308's rg-event->hit +
+# exec-lookup (frozen on its branch; the anchor lagged) and scan-visible-column
+# (an earlier landing's unfrozen addition; +1 file line, 438 -> 439).
 add-hook
 append-file
 aref

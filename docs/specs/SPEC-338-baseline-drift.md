@@ -16,7 +16,9 @@ its branch but not frozen here.
       own derivation (every public markdown-* defun across
       markdown.tlisp + commands/markdown/*): 131 → 143 names.
 - [x] `.chore44-baseline/api-names-static.txt` +scan-visible-column
-      (+ #308's two, carried from its branch): 436 → 439 names.
+      (a +1 file line, 438 → 439 — #308's two names were already
+      frozen on its branch; only the AC7.1 ANCHOR count lagged by
+      three): anchor 436 → 439.
 - [x] The AC7.1 anchor count updated with the landing-history
       comment convention (436 → 439).
 - [x] test/unit/editor-api-registry.test.ts +
