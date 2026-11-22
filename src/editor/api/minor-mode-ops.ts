@@ -75,15 +75,26 @@ export function createMinorModeOps(
     (value.type === "boolean" ? value.value === true : true) &&
     (value.type === "number" ? (value.value as number) > 0 : true);
 
+  // #334: modes that drive a config-backed render flag. visual-line turns ON
+  // display-only word wrapping; truncate-lines turns it OFF (clip at the
+  // viewport edge). auto-fill rides the same flag (historical bridge).
+  const CONFIG_BACKED_MODES: Record<string, { key: "showLineNumbers" | "wordWrap"; enable: boolean }> = {
+    "line-numbers": { key: "showLineNumbers", enable: true },
+    "auto-fill": { key: "wordWrap", enable: true },
+    "visual-line": { key: "wordWrap", enable: true },
+    "truncate-lines": { key: "wordWrap", enable: false },
+  };
+
   const applyBuiltinModeEffect = (
     state: BufferModeState,
     name: string,
     enable: boolean
   ): void => {
     if (!hasConfigAccess) return;
-    if (name !== "line-numbers" && name !== "auto-fill") return;
+    const spec = CONFIG_BACKED_MODES[name];
+    if (!spec) return;
 
-    const key = name === "line-numbers" ? "showLineNumbers" : "wordWrap";
+    const key = spec.key;
     const config = getConfig();
     const saved = state.minorModeSavedConfig[name] ?? {};
 
@@ -91,7 +102,7 @@ export function createMinorModeOps(
       if (!(key in saved)) {
         state.minorModeSavedConfig[name] = { ...saved, [key]: Boolean(config[key]) };
       }
-      setConfig({ ...config, [key]: true });
+      setConfig({ ...config, [key]: spec.enable });
       return;
     }
 
@@ -110,9 +121,23 @@ export function createMinorModeOps(
     }
   };
 
+  // #334: visual-line and truncate-lines are opposite settings of the one
+  // wordWrap render flag — activating either deactivates the other so the
+  // mode line and the renderer can never both claim to be on. The disabled
+  // mode's config restore runs BEFORE the enabling mode saves its baseline,
+  // so the flag ends at the newly-activated mode's value.
+  const EXCLUSIVE_MODE_PAIRS: Record<string, string> = {
+    "visual-line": "truncate-lines",
+    "truncate-lines": "visual-line",
+  };
+
   const activate = (state: BufferModeState, name: string, source: "local" | "global"): void => {
     const config = getMinorModeRegistry().get(name)!;
     const wasActive = state.activeMinorModes.includes(name);
+    const exclusive = EXCLUSIVE_MODE_PAIRS[name];
+    if (exclusive && state.activeMinorModes.includes(exclusive)) {
+      deactivate(state, exclusive);
+    }
     const newState = activateMinorMode(state, name, source);
     Object.assign(state, newState);
     applyBuiltinModeEffect(state, name, true);

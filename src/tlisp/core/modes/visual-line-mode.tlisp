@@ -1,0 +1,43 @@
+(defmodule editor/modes/visual-line
+  (export visual-line-mode global-visual-line-mode)
+
+;; visual-line-mode.tlisp — display-only word wrapping (#334)
+;; Emacs visual-line-mode parity: long lines wrap at word boundaries for
+;; DISPLAY ONLY — the buffer text is never modified; one buffer line may
+;; occupy several screen rows. The render path (the config wordWrap flag,
+;; which the minor-mode-ops config bridge sets while this mode is active)
+;; wraps at the last space before the viewport edge and hard-splits words
+;; longer than the width. Mutually exclusive with truncate-lines (they are
+;; opposite settings of the same render flag; the bridge deactivates the
+;; other on activation). Default OFF. Toggle: SPC v / M-x visual-line-mode.
+
+(define-minor-mode "visual-line" "Display-only word wrapping" "Wrap")
+
+(defun visual-line-mode (&optional (arg nil arg-supplied-p))
+  "Toggle visual-line mode (display-only word wrapping). No arg toggle; t/positive on; 0/negative off."
+  (interactive)
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "visual-line")
+    (if (equal arg t)
+      (minor-mode-set "visual-line" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (minor-mode-set "visual-line" t)
+          (minor-mode-set "visual-line" nil))
+        (minor-mode-set "visual-line" nil)))))
+
+(defun global-visual-line-mode (&optional (arg nil arg-supplied-p))
+  "Toggle visual-line mode globally (all buffers). No arg toggle; t/positive on; 0/negative off."
+  (interactive)
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "visual-line" (not (global-minor-mode-active-p "visual-line")))
+    (if (equal arg t)
+      (global-minor-mode-set "visual-line" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (global-minor-mode-set "visual-line" t)
+          (global-minor-mode-set "visual-line" nil))
+        (global-minor-mode-set "visual-line" nil)))))
+
+(provide "visual-line-mode")
+)

@@ -34,6 +34,8 @@
   (require-module editor/modes/electric-pair)
   (require-module editor/modes/electric-indent)
   (require-module editor/modes/truncate-lines)
+  ;; #334: display-only word wrapping (default OFF; SPC v).
+  (require-module editor/modes/visual-line)
   ;; SPEC-119: [[wiki-link]] display transform toggle (default ON).
   (require-module editor/modes/wiki-link-display)
   ;; SPEC-120: instant fuzzy [[ note finder (default ON).
@@ -317,6 +319,10 @@
 (key-bind "SPC x b" "(switch-buffer)" "normal")
 (key-bind "SPC x u" "(undo)" "normal")
 (key-bind "SPC x C-c" "(editor-quit)" "normal")
+
+;; #334: display-only word wrapping (Emacs visual-line-mode parity,
+;; mutually exclusive with truncate-lines).
+(key-bind "SPC v" "(visual-line-mode)" "normal")
 
 ;; =================================================================
 ;; HELP SYSTEM (US-1.11.1 - US-1.11.3)
