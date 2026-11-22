@@ -274,4 +274,29 @@ describe("#308 — the backend", () => {
     expect(v).toContain("line one");
     expect(v).toContain("line two"); // not first-line-truncated
   });
+
+  // ── valve r2 fixes ──────────────────────────────────────────────────
+
+  test("DECODER EOF FLUSH: an incomplete final UTF-8 sequence becomes replacement text", async () => {
+    // A child that emits a lone 0xC3 (an incomplete UTF-8 lead byte)
+    // and exits — the streaming decoder holds the partial; the EOF
+    // flush must deliver it as U+FFFD, not silence (valve r2). The
+    // filter/sentinel are GLOBAL defuns (the TS filter evals
+    // globally — module fns are invisible there).
+    e(editor, '(defvar mp308-out "")');
+    e(editor, '(defvar mp308-done nil)');
+    e(editor, '(setq mp308-out "")');
+    e(editor, '(setq mp308-done nil)');
+    e(editor, '(defun mp308-filter (pid out) (setq mp308-out (concat mp308-out out)))');
+    e(editor, '(defun mp308-sentinel (pid code) (setq mp308-done t))');
+    const r = e(editor, `(make-process :command (list "sh" "-c" (hex-decode "${Buffer.from("printf '\\303'", "utf8").toString("hex")}")) :filter "mp308-filter" :sentinel "mp308-sentinel")`);
+    expect(String(r.value)).toMatch(/^\d+$/);
+    for (let i = 0; i < 80; i++) {
+      if (String(e(editor, '(if mp308-done "t" "nil")').value).includes("t")) break;
+      await new Promise((res) => setTimeout(res, 25));
+    }
+    expect(String(e(editor, '(if mp308-done "t" "nil")').value)).toContain("t");
+    const out = String(e(editor, "mp308-out").value);
+    expect(out).toContain("�");
+  });
 });

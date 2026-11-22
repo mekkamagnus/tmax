@@ -15,6 +15,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../tlisp/values.ts";
 import { renameSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { constants as osConstants } from "node:os";
 import { dirname, resolve } from "node:path";
 import type { TextBuffer } from "../core/contracts/buffer.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
@@ -82,19 +83,12 @@ import { TerminalManager } from "../core/terminal-manager.ts";
 import { createComintOps, ComintManager } from "./api/comint-ops.ts";
 import { createSnippetOps, SnippetManager } from "./api/snippet-ops.ts";
 
-/** #308 (valve r1): signal name → number for the 128+N exit-code
- *  synthesis (make-process sentinels; shell convention). The full
- *  Node/Bun table — an unknown name synthesizes 128 (no invented
- *  signal number). */
-const SIGNAL_NUM: Record<string, number> = {
-  SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGILL: 4, SIGTRAP: 5,
-  SIGABRT: 6, SIGBUS: 7, SIGFPE: 8, SIGKILL: 9, SIGUSR1: 10,
-  SIGSEGV: 11, SIGUSR2: 12, SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15,
-  SIGCHLD: 17, SIGCONT: 18, SIGSTOP: 19, SIGTSTP: 20, SIGTTIN: 21,
-  SIGTTOU: 22, SIGURG: 23, SIGXCPU: 24, SIGXFSZ: 25, SIGVTALRM: 26,
-  SIGPROF: 27, SIGWINCH: 28, SIGIO: 29, SIGPOLL: 29, SIGPWR: 30,
-  SIGSYS: 31, SIGUNUSED: 31,
-};
+/** #308 (valve r2): signal name → the PLATFORM's number (macOS
+ *  SIGUSR1 is 30, Linux 10 — a hardcoded table lied per-platform)
+ *  for the 128+N exit-code synthesis. An unknown name → 128 (no
+ *  invented signal). */
+const signalNum = (name: string): number =>
+  ((osConstants.signals as Record<string, number>)[name] ?? 0);
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -1788,32 +1782,54 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // runs last, by construction). A rejected filter eval is logged
               // and does not kill the stream.
               let filterChain: Promise<unknown> = Promise.resolve();
+              // #308 valve r2: pipe READS are DECOUPLED from the
+              // serialized evals — the loops used to await each chunk's
+              // eval before reading the NEXT chunk, so under a large
+              // backlog the reads lagged the evals and the 150ms grace
+              // could expire with buffered-but-unread output (discarded).
+              // The enqueue-into-chain shape keeps the #208 serialization
+              // (chunk N's eval settles before chunk N+1's begins) while
+              // reads race ahead; the post-grace `await filterChain`
+              // settles every eval enqueued before the sentinel.
+              const enqueueEval = (name: string, text: string) => {
+                tailBuf += text;
+                if (!ctx.evalTlisp) return;
+                // #224 gate catch: the chunk must cross the READER-SAFE
+                // boundary — interpolating JSON into a T-Lisp string
+                // literal lets the reader strip backslash escapes
+                // (escaped quotes become real quotes → the JSON parse
+                // drops the event). HEX-ENCODE the chunk (hex chars are
+                // reader-safe) and let hex-decode restore the exact
+                // bytes inside the filter call.
+                const hex = Buffer.from(text, "utf8").toString("hex");
+                const expr = `(${name} ${pid} (hex-decode "${hex}"))`;
+                filterChain = filterChain
+                  .then(() => ctx.evalTlisp!(expr))
+                  .catch((e: unknown) => {
+                    ctx.logProgram?.('process', {
+                      level: 'error',
+                      text: `filter eval failed: ${e instanceof Error ? e.message : String(e)}`,
+                      pid,
+                    });
+                  });
+              };
               const errLoop = (async () => {
                 if (!errReader) return;
                 try {
                   while (true) {
                     const { done, value } = await errReader.read();
                     if (done) break;
-                    const text = errDecoder.decode(value, { stream: true });
-                    tailBuf += text;
-                    // #308: stderr chunks join the SAME serialized chain
-                    // (hex-encoded — the reader-safe boundary) so they
-                    // interleave deterministically with stdout filters.
-                    if (errFilterName && ctx.evalTlisp) {
-                      const hex = Buffer.from(text, "utf8").toString("hex");
-                      const expr = `(${errFilterName} ${pid} (hex-decode "${hex}"))`;
-                      filterChain = filterChain
-                        .then(() => ctx.evalTlisp!(expr))
-                        .catch((e: unknown) => {
-                          ctx.logProgram?.('process', {
-                            level: 'error',
-                            text: `stderr filter eval failed: ${e instanceof Error ? e.message : String(e)}`,
-                            pid,
-                          });
-                        });
-                      await filterChain;
-                    }
+                    // stderr joins the SAME serialized chain (hex-encoded)
+                    // so it interleaves deterministically with stdout.
+                    if (errFilterName) enqueueEval(errFilterName, errDecoder.decode(value, { stream: true }));
+                    else tailBuf += errDecoder.decode(value, { stream: true });
                   }
+                  // #308 valve r2: flush the streaming decoder at EOF —
+                  // an incomplete final UTF-8 sequence becomes replacement
+                  // text instead of silently disappearing.
+                  const errTail = errDecoder.decode();
+                  if (errTail.length > 0 && errFilterName) enqueueEval(errFilterName, errTail);
+                  else if (errTail.length > 0) tailBuf += errTail;
                 } catch { /* stderr closed */ }
               })();
               // SENTINEL-PIPE-HOLD (fikra live catch): the stdout/stderr
@@ -1831,30 +1847,13 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                   while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    const text = decoder.decode(value, { stream: true });
-                    tailBuf += text;
-                    if (filterName && ctx.evalTlisp) {
-                      // #224 gate catch: the chunk must cross the READER-SAFE
-                      // boundary — interpolating JSON into a T-Lisp string
-                      // literal lets the reader strip backslash escapes
-                      // (escaped quotes become real quotes → the JSON parse
-                      // drops the event). HEX-ENCODE the chunk (hex chars are
-                      // reader-safe) and let hex-decode restore the exact
-                      // bytes inside the filter call.
-                      const hex = Buffer.from(text, "utf8").toString("hex");
-                      const expr = `(${filterName} ${pid} (hex-decode "${hex}"))`;
-                      filterChain = filterChain
-                        .then(() => ctx.evalTlisp!(expr))
-                        .catch((e: unknown) => {
-                          ctx.logProgram?.('process', {
-                            level: 'error',
-                            text: `filter eval failed: ${e instanceof Error ? e.message : String(e)}`,
-                            pid,
-                          });
-                        });
-                      await filterChain;
-                    }
+                    if (filterName) enqueueEval(filterName, decoder.decode(value, { stream: true }));
+                    else tailBuf += decoder.decode(value, { stream: true });
                   }
+                  // #308 valve r2: the stdout decoder flushes at EOF too.
+                  const outTail = decoder.decode();
+                  if (outTail.length > 0 && filterName) enqueueEval(filterName, outTail);
+                  else if (outTail.length > 0) tailBuf += outTail;
                 } catch { /* stream closed */ }
               })();
 
@@ -1880,7 +1879,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // external kills (OOM, pkill). An exited child reports
               // its own code; only the signal case synthesizes.
               const exitCode = proc.exitCode ??
-                (proc.signalCode ? 128 + (SIGNAL_NUM[proc.signalCode] ?? 0) : 0);
+                (proc.signalCode ? 128 + signalNum(String(proc.signalCode)) : 0);
               ctx.logProgram?.('process', {
                 level: exitCode === 0 ? 'info' : 'error',
                 text: `◀ pid ${pid} exited: ${exitCode}`,
