@@ -957,17 +957,25 @@ with its post-exit capture.")
             (t (progn
               (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                (concat root "/.tmax/fikra/stash"))))
-              ;; r142b (codex r142 catch): the stash preserves the ACTION's
-              ;; own change (pre→post per path) — git-apply restores it;
-              ;; a worktree-vs-ref diff was EMPTY whenever the worktree
-              ;; matched the post tree (nothing was "saved").
-              (let ((patch-out (shell-command
-                                 (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                                         " diff --binary " pre " " post " -- "
-                                         (fikra-ollama-paths-args paths)
-                                         " > " (fikra/thread/fikra-thread-shq stash)
-                                         " && test -s " (fikra/thread/fikra-thread-shq stash)
-                                         " || echo EMPTY"))))
+              ;; r142b/r142c (codex catches): the stash preserves the
+              ;; ACTION'S OWN change (pre→post per path — git-apply
+              ;; restores it). A FAILED stash-write ABORTS the revert —
+              ;; an unrecoverable restore must never proceed silently.
+              (let* ((stash-q (fikra/thread/fikra-thread-shq stash))
+                     (patch-out (shell-command
+                                  (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                                          " diff --binary " pre " " post " -- "
+                                          (fikra-ollama-paths-args paths)
+                                          " > " stash-q " 2>/dev/null"
+                                          " && test -s " stash-q " && echo STASH-OK"
+                                          " || echo STASH-FAILED"))))
+                (if (not (string= (string-trim patch-out) "STASH-OK"))
+                  (progn
+                    (editor-set-status
+                      (concat "Fikra: action revert ABORTED — the stash patch could not be written ("
+                              (string-trim patch-out) "); nothing was changed"))
+                    'stash-failed)
+                  (progn
                 (setq fikra-ollama-last-action-stash stash)
                 (let ((fails (fikra-ollama-restore-paths root pre paths (list))))
                   (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
@@ -977,7 +985,7 @@ with its post-exit capture.")
                             (if (> (length fails) 0)
                               (concat " — " (number-to-string (length fails)) " path(s) FAILED")
                               "")))
-                  fails))))))))))
+                  fails))))))))))))
 
 ;; Paths as sh-quoted argv text.
 (defun fikra-ollama-paths-args (paths)
