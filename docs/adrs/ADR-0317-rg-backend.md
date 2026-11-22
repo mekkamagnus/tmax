@@ -79,6 +79,16 @@ calls follow). `grep-backend-available-p` coalesces a non-string
 `grep-backend` to `auto` — `string=` on nil throws (the same hazard
 class as the filter's flag).
 
+### 6. Hit-path resolution is scope-aware and NORMALIZED (valve r3 / gate r8)
+
+rg `--json` paths are cwd-relative and CARRY the scope prefix; RET
+resolution joins the scope only for synthetic hits that LACK it.
+The scope is normalized first (trailing slashes stripped — rg
+normalizes its emitted paths, so `"sub/"` must compare as `"sub"`)
+— the spelling invariant is dissolved in code rather than
+documented as a caller duty, which matters once #310's scope
+commands feed user-typed spellings.
+
 ## Consequences
 
 - The provisional protocol is now real: no failed spawn leaves a
