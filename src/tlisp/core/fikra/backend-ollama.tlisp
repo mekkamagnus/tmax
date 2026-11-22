@@ -1284,6 +1284,12 @@ availability gate must be synchronous; the turn itself is async)."
                     (editor-set-status
                       "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref")))
                 (error (m)
+                  ;; r141c (codex r141b catch): the owner flag clears on
+                  ;; the THROW path too (a leaked owner routed later sync
+                  ;; captures through the stale owner emitter).
+                  (condition-case nil
+                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+                    (error () nil))
                   (editor-set-status
                     (concat "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref ("
                             (if (stringp m) m "capture error") ")"))))
