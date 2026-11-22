@@ -511,7 +511,9 @@ export function createFileOps(
     if (!filename) {
       return Either.right(createList([]));
     }
-    const rootDir = filename.slice(0, Math.max(0, filename.lastIndexOf("/"))) || ".";
+    // #275 class: expand a leading ~ (the journal home is ~/... — the
+    // vault walker hit readdirSync("~/...") = ENOENT → 0 candidates).
+    const rootDir = expandHomePath(filename.slice(0, Math.max(0, filename.lastIndexOf("/"))) || ".");
     const notes: { name: string; path: string }[] = [];
     const walk = (dir: string): void => {
       let entries: fs.Dirent[];
