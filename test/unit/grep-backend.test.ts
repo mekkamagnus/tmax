@@ -299,4 +299,45 @@ describe("#308 — the backend", () => {
     const out = String(e(editor, "mp308-out").value);
     expect(out).toContain("�");
   });
+
+  test("SIGNAL-KILLED sentinel exit: SIGTERM through make-process reports 128+15=143", async () => {
+    // The platform-correct 128+N synthesis (valve r2 fix 1) — a REAL
+    // signal kill through the make-process path, not a synthetic
+    // exit-code argument.
+    e(editor, '(defvar mp308k-exit nil)');
+    e(editor, '(defun mp308k-sentinel (pid code) (setq mp308k-exit code))');
+    const r = e(editor, '(make-process :command (list "sleep" "30") :sentinel "mp308k-sentinel")');
+    const pid = Number(r.value);
+    expect(Number.isFinite(pid)).toBe(true);
+    e(editor, `(signal ${pid} "SIGTERM")`);
+    for (let i = 0; i < 120; i++) {
+      if (!String(e(editor, '(if mp308k-exit "t" "nil")').value).includes("nil")) break;
+      await new Promise((res) => setTimeout(res, 25));
+    }
+    // SIGTERM is 15 on every platform → 143 (not 0, not the adw
+    // supervisor's own mapping — THIS is the make-process synthesis).
+    expect(Number(e(editor, "mp308k-exit").value)).toBe(143);
+  });
+
+  test("BACKLOG: the sentinel observes the COMPLETE output of an in-grace producer", async () => {
+    // 20000 lines (60KB) written near-instantly: reads EOF well
+    // inside the 150ms grace, so completion must see every byte
+    // (valve r2 fix 2's invariant — re-coupling reads to serialized
+    // evals would fire the sentinel with a partial buffer).
+    e(editor, '(defvar mp308b-out "")');
+    e(editor, '(defvar mp308b-len-at-done nil)');
+    e(editor, '(defvar mp308b-done nil)');
+    e(editor, '(defun mp308b-filter (pid out) (setq mp308b-out (concat mp308b-out out)))');
+    e(editor, '(defun mp308b-sentinel (pid code) (setq mp308b-done t) (setq mp308b-len-at-done (length mp308b-out)))');
+    const r = e(editor, `(make-process :command (list "sh" "-c" (hex-decode "${Buffer.from("yes ab | head -n 20000", "utf8").toString("hex")}")) :filter "mp308b-filter" :sentinel "mp308b-sentinel")`);
+    expect(Number.isFinite(Number(r.value))).toBe(true);
+    for (let i = 0; i < 160; i++) {
+      if (String(e(editor, '(if mp308b-done "t" "nil")').value).includes("t")) break;
+      await new Promise((res) => setTimeout(res, 25));
+    }
+    expect(String(e(editor, '(if mp308b-done "t" "nil")').value)).toContain("t");
+    // "ab\n" × 20000 = 60000 bytes — COMPLETE at sentinel time.
+    expect(Number(e(editor, "mp308b-len-at-done").value)).toBe(60000);
+    expect(Number(e(editor, "(length mp308b-out)").value)).toBe(60000);
+  });
 });
