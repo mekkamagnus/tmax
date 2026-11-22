@@ -1,9 +1,25 @@
 (defmodule editor/completion/minibuffer
-  (export minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-exact-selection-index-recursive minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key)
+  (export minibuffer-on-input-set! minibuffer-on-close-set!
+          minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-exact-selection-index-recursive minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key)
 
 (defvar minibuffer-on-input-hook nil
   "The per-keystroke input callback (#311, SPEC-116 shape): set at
 prompt open, cleared on EVERY close; late callbacks drop silently.")
+(defvar minibuffer-on-close-hook nil
+  "The EVERY-close teardown callback (#311 gate r1): minibuffer-close
+funcalls it condition-cased BEFORE clearing — the owner's timer/
+process hygiene runs on accept, cancel AND error exits alike.")
+
+(defun minibuffer-on-input-set! (fn)
+  "Set the input callback (module defvars are NOT setq-able across
+the module boundary — the function seam)."
+  (setq minibuffer-on-input-hook fn)
+  fn)
+
+(defun minibuffer-on-close-set! (fn)
+  "Set the close-teardown callback (the same seam class)."
+  (setq minibuffer-on-close-hook fn)
+  fn)
 
 ;; minibuffer.tlisp --- Serializable Lisp-owned minibuffer state machine
 
@@ -210,9 +226,14 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
 (defun minibuffer-close ()
   (let ((session (minibuffer-state-get)))
     (progn
-      ;; #311: EVERY close (accept, cancel, error) tears the input
-      ;; hook down — late callbacks drop.
+      ;; #311 gate r1: EVERY close (accept, cancel, error) runs the
+      ;; owner's teardown (timers, processes) FIRST — a nil hook
+      ;; drops silently.
+      (condition-case nil
+        (if minibuffer-on-close-hook (funcall minibuffer-on-close-hook))
+        (error () nil))
       (setq minibuffer-on-input-hook nil)
+      (setq minibuffer-on-close-hook nil)
       (minibuffer-state-clear)
       (minibuffer-view-clear)
       (minibuffer-clear)

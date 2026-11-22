@@ -3,6 +3,7 @@
           grep-consult-accept grep-consult-cancel grep-consult-table
           grep-consult-glob->regex grep-consult-glob-match-p
           grep-consult-test-end grep-consult-pattern-of grep-consult-glob-of
+          grep-consult-files-in grep-consult-filtered-files
           grep-consult-fire
           grep-consult-test-begin
           grep-consult-parse-globs
@@ -16,6 +17,7 @@
 ;;   everything after (incl. further #s) → the glob side
 ;; 'foo#bar#baz' → pattern "foo", glob "bar#baz".
 (require-module editor/commands/grep)
+(require-module editor/completion/minibuffer)
 
 (defvar grep-consult-state nil
   "The consult session: {query, pendingGen, completedSnapshot,
@@ -70,10 +72,21 @@ Returns (pattern glob|nil)."
 ;; ── glob translation (fnmatch-style → T-Lisp regex) ───────────────
 (defun grep-consult-glob->regex (glob)
   "Translate ONE glob entry: * → .*; ? → .; [class] kept. Returns
-nil when untranslatable."
-  (condition-case nil
-    (concat "^" (grep-consult-glob-scan glob "") "$")
-    (error () nil)))
+nil when UNTRANSLATABLE — an unbalanced [ (gate r1: concat cannot
+fail, so an invalid regex used to silently no-match at match time)."
+  (if (grep-consult-unbalanced-class-p glob 0)
+    nil
+    (concat "^" (grep-consult-glob-scan glob "") "$")))
+
+(defun grep-consult-unbalanced-class-p (rest depth)
+  ;; [ without a matching ] anywhere → untranslatable.
+  (if (= (length rest) 0)
+    (> depth 0)
+    (let ((c (substring rest 0 1)))
+      (cond
+        ((string= c "[") (grep-consult-unbalanced-class-p (substring rest 1 (length rest)) (+ depth 1)))
+        ((string= c "]") (grep-consult-unbalanced-class-p (substring rest 1 (length rest)) (- depth 1)))
+        (t (grep-consult-unbalanced-class-p (substring rest 1 (length rest)) depth))))))
 
 (defun grep-consult-glob-scan (rest acc)
   (if (= (length rest) 0)
@@ -115,7 +128,7 @@ plus a validity note. An EMPTY entry or wholly empty side → the
 'empty glob' marker."
   (if (or (null glob-str) (= (length glob-str) 0))
     (list nil nil "empty")
-    (grep-consult-parse-glob-scan (string-split glob-str ",") nil nil nil)))
+    (grep-consult-parse-glob-scan (string-split glob-str ",") (list) (list) nil)))
 
 (defun grep-consult-parse-glob-scan (entries pos neg note)
   (if (null entries)
@@ -164,8 +177,16 @@ backend preflight, then the debounced live prompt."
               "timerId" nil "preview-pane" nil "preview-borrowed" nil
               "preview-prior" nil))
           ;; The input hook + the prompt (SPEC-116 shape, free text).
-          (setq minibuffer-on-input-hook
+          (editor/completion/minibuffer/minibuffer-on-input-set!
             (lambda (input) (grep-consult-on-input input)))
+          ;; gate r1: the EVERY-close teardown — timers + processes
+          ;; die on accept/cancel/error alike (the dead-code finding).
+          (editor/completion/minibuffer/minibuffer-on-close-set!
+            (lambda () (grep-consult-teardown)))
+          ;; gate r1: the snapshot write rides #307's completion
+          ;; (the setter seam — module defvars are not setq-able).
+          (editor/commands/grep/grep-completion-hook-set!
+            (lambda (status) (grep-consult-on-complete status)))
           (completing-read
             (concat "grep (" (grep-scope-backend-label) ") " scope ": ")
             "editor/commands/grep-consult/grep-consult-table"
@@ -222,6 +243,16 @@ a VALID query arms the 200ms idle timer."
 (defun grep-consult-glob-of (input)
   (nth 1 (grep-consult-parse-query input)))
 
+(defun grep-consult-teardown ()
+  "The every-close hygiene (idempotent): cancel the timer, kill the
+pending process. The session vars clear separately (accept keeps them
+for the jump; cancel clears them in grep-consult-cancel)."
+  (if (not (null grep-consult-state))
+    (progn
+      (grep-consult-cancel-timer grep-consult-state)
+      (grep-consult-kill-pending)))
+  nil)
+
 (defun grep-consult-cancel-timer (st)
   (let ((tid (hashmap-get st "timerId")))
     (if (numberp tid)
@@ -233,18 +264,77 @@ a VALID query arms the 200ms idle timer."
   (setq grep-consult-state
     (hashmap-set grep-consult-state "pendingGen" nil)))
 
-(defun grep-consult-restore-snapshot ()
+(defun grep-consult-on-complete (status)
+  "The completedSnapshot write: ONLY completion updates it — a killed
+partial stream NEVER becomes the restore target. The snapshot is the
+completed generation id; the *grep* content is #307's render."
+  (if (not (null grep-consult-state))
+    (setq grep-consult-state
+      (hashmap-set grep-consult-state "completedSnapshot"
+        (editor/commands/grep/grep-current-gen-get))))
   nil)
+
+(defun grep-consult-restore-snapshot ()
+  "A killed partial never replaces the completed render: #307's
+buffer holds the COMPLETED generation's content until a new search
+streams; nothing to re-render here (the producer's own state)."
+  nil)
+
+(defun grep-consult-chomp-nl (s)
+  "Drop ONE trailing newline."
+  (if (and (stringp s) (> (length s) 0)
+           (string= (substring s (- (length s) 1) (length s)) "\n"))
+    (substring s 0 (- (length s) 1))
+    s))
+
+(defun grep-consult-files-in (scope)
+  "Enumerate the tracked+untracked files under SCOPE (the glob side
+matches against full relative path strings)."
+  (condition-case nil
+    (grep-consult-split-lines
+      (nth 0 (shell-exec-argv
+                (list "git" "-C" scope "ls-files"
+                      "--others" "--exclude-standard" "--cached")
+                scope)))
+    (error () (list))))
+
+(defun grep-consult-split-lines (s)
+  (if (or (not (stringp s)) (= (length s) 0)
+          (and (= (length s) 1) (string= s "\n")))
+    (list)
+    (string-split (grep-consult-chomp-nl s) "\n")))
+
+(defun grep-consult-filtered-files (scope entries)
+  ;; The combination: ≥1 positive AND no negative, against the FULL
+  ;; relative path strings.
+  (grep-consult-filter-scan (grep-consult-files-in scope) entries (list)))
+
+(defun grep-consult-filter-scan (files entries acc)
+  (if (null files)
+    (reverse-of acc)
+    (if (editor/commands/grep-consult/grep-consult-glob-match-p (car files) entries)
+      (grep-consult-filter-scan (cdr files) entries (cons (car files) acc))
+      (grep-consult-filter-scan (cdr files) entries acc))))
 
 (defun grep-consult-fire ()
   "The debounce fired: run the parsed query through the #308
-backend (the scope resolved at entry)."
+backend (the scope resolved at entry). GLOB FILTERING applies when
+the query has a glob side (gate r1: it was never applied); zero
+files after filtering → NO process spawns (the status names it);
+glob-only queries DO run (the empty pattern registers per #307)."
   (if (null grep-consult-state)
     nil
-    (let ((pattern (grep-consult-pattern-of (hashmap-get grep-consult-state "query"))))
-      (if (= (length pattern) 0)
-        nil
-        (editor/commands/grep/grep-search pattern grep-consult-scope)))))
+    (let ((pattern (grep-consult-pattern-of (hashmap-get grep-consult-state "query")))
+          (glob (grep-consult-glob-of (hashmap-get grep-consult-state "query"))))
+      (if (null glob)
+        (editor/commands/grep/grep-search pattern grep-consult-scope)
+        (let ((parsed (editor/commands/grep-consult/grep-consult-parse-globs glob)))
+          (if (and (stringp (nth 2 parsed)) (string= (nth 2 parsed) "empty"))
+            (editor-set-status "empty glob")
+            (let ((files (grep-consult-filtered-files grep-consult-scope parsed)))
+              (if (= (length files) 0)
+                (editor-set-status "no files match glob filters")
+                (editor/commands/grep/grep-rg-run-files pattern files grep-consult-scope)))))))))
 
 (defun grep-consult-accept (value)
   "RET: kill pending + cancel the timer, jump via #307 from the
@@ -253,7 +343,7 @@ CURRENT selection; the hook tears down with the close."
     (if (not (null st))
       (progn
         (grep-consult-cancel-timer st)
-        (grep-consult-kill-pending st)))
+        (grep-consult-kill-pending)))
     (setq grep-consult-state nil)
     (setq grep-consult-scope nil)
     ;; Jump from the current selection in *grep* (#307's RET).
@@ -270,7 +360,7 @@ snapshot (or close the results buffer when no search completed)."
     (if (not (null st))
       (progn
         (grep-consult-cancel-timer st)
-        (grep-consult-kill-pending st)
+        (grep-consult-kill-pending)
         (let ((snap (hashmap-get st "completedSnapshot")))
           (if (and (null snap) (member "*grep*" (buffer-list)))
             (buffer-kill "*grep*")))))

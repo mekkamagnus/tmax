@@ -173,6 +173,72 @@ describe("#311 — the on-input state machine", () => {
     expect(String(r.value)).toContain("ok");
   });
 
+  test("ENTRY end-to-end (gate r1): (grep-consult) opens the truthful prompt; typing streams hits", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    const r = e(editor, '(condition-case nil (progn (editor/commands/grep-consult/grep-consult) "ok") (error (m) (concat "THREW:" m)))');
+    expect(String(r.value)).toContain("ok");
+    const mb = (editor.getState() as unknown as { minibufferView?: { prompt?: string } }).minibufferView;
+    expect(mb?.prompt ?? "").toContain("grep (rg) ");
+    expect(mb?.prompt ?? "").toContain(": ");
+    // Type through the minibuffer → the on-input hook debounces → hits.
+    for (const key of "consult") await editor.handleKey(key);
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("1");
+    for (let i = 0; i < 240; i++) {
+      const s2 = st(editor);
+      if (s2.includes("hits") || s2.includes("no matches")) break;
+      await new Promise((r2) => setTimeout(r2, 25));
+    }
+    expect(st(editor)).toContain("2 hits");
+    // The completedSnapshot was WRITTEN (only completion writes it).
+    e(editor, "(editor/commands/grep-consult/grep-consult-state-get)");
+    // Accept via Enter: the prompt closes, the jump lands.
+    await editor.handleKey("Enter");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
+  });
+
+  test("C-g through the REAL minibuffer cancels: timer dead, session cleared (gate r1's dead-code finding)", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult)');
+    for (const key of "cons") await editor.handleKey(key);
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("1");
+    await editor.handleKey("Escape");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    // The every-close teardown ran: the timer is DEAD (the armed
+    // 200ms timer no longer fires a post-close search).
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
+  });
+
+  test("GLOB FILTERING applied: #*.lisp runs rg on the .lisp file ONLY (gate r1)", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
+    e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult#*.lisp")');
+    for (let i = 0; i < 240; i++) {
+      const s2 = st(editor);
+      if (s2.includes("hits") || s2.includes("no matches") || s2.includes("no files")) break;
+      await new Promise((r2) => setTimeout(r2, 25));
+    }
+    expect(st(editor)).toContain("1 hits"); // only b.lisp
+    e(editor, '(buffer-switch "*grep*")');
+    const v = strip(bufferText(editor));
+    expect(v).toContain("b.lisp");
+    expect(v).not.toContain("a.txt");
+  });
+
+  test("ZERO files after glob filtering: NO process, the named status", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
+    e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult#*.nomatch")');
+    for (let i = 0; i < 120; i++) {
+      const s2 = st(editor);
+      if (s2.includes("no files")) break;
+      await new Promise((r2) => setTimeout(r2, 25));
+    }
+    expect(st(editor)).toContain("no files match glob filters");
+  });
+
   test("the debounce FIRES: the search runs, hits land in *grep*", async () => {
     e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
     e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult")');

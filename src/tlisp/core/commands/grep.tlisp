@@ -4,6 +4,8 @@
           grep-test-producer grep-hits-get grep-generation-get
           grep-current-gen-get grep-status-get
           grep-rg-replay-pending grep-rg-kill-prior grep-rg-stderr-filter
+          grep-rg-run-files
+          grep-completion-hook-set!
           grep-rg-executable-set! grep-rg-test-state!
           grep-ret grep-next grep-prev grep-rerun grep-quit)
 
@@ -131,6 +133,14 @@ rerun. Returns the generation id."
       (grep-render-append (length grep-hits)))
     nil))
 
+(defvar grep-completion-hook nil
+  "A post-completion callback (#311): funcalls (status) after the
+render — the consult layer's completedSnapshot discipline.")
+
+(defun grep-completion-hook-set! (fn)
+  (setq grep-completion-hook fn)
+  fn)
+
 (defun grep-buffer-complete (gen status message)
   "Complete generation GEN: done | error | no-matches."
   (if (not (grep-coord-p gen))
@@ -150,7 +160,10 @@ rerun. Returns the generation id."
       (setq grep-completed t)
       (setq grep-status status)
       (setq grep-message
-        (if (stringp message) message nil))))
+        (if (stringp message) message nil))
+      (condition-case nil
+        (if grep-completion-hook (funcall grep-completion-hook status))
+        (error () nil))))
   nil)
 
 (defun grep-buffer-rollback (gen)
@@ -778,6 +791,53 @@ registration (valve r1: they used to drop)."
     (setq grep-rg-stderr-pending
       (cons (list pid output) (grep-rg-stderr-pending-as-list))))
   nil)
+
+(defun grep-rg-run-files (pattern files scope)
+  "The FILE-LIST variant of grep-rg-run (#311): the glob-filtered
+files REPLACE the scope argument in the rg argv (-- still
+terminates options). Zero-file callers are refused upstream (an
+empty list would read stdin)."
+  (if (= (length files) 0)
+    (progn
+      (editor-set-status "grep: no files match glob filters")
+      nil)
+    (progn
+      (grep-rg-kill-prior)
+      (let ((gen (grep-buffer-register
+                   (hashmap "backend" "rg" "pattern" pattern "scope" scope
+                     "rerun" (lambda () nil)))))
+        (setq grep-rg-gen gen)
+        (setq grep-rg-partial "")
+        (setq grep-rg-pending nil)
+        (setq grep-rg-stderr-pending nil)
+        (setq grep-rg-stderr "")
+        (setq grep-rg-undecodable 0)
+        (setq grep-rg-malformed 0)
+        (setq grep-rg-filter-calls 0)
+        (setq grep-rg-append-calls 0)
+        (setq grep-rg-last-exit -99)
+        (setq grep-rg-last-flag "??")
+        (setq grep-rg-last-line "??")
+        (let ((pid (condition-case nil
+                      (make-process
+                        :command (append (list grep-rg-executable "--json" "--smart-case" "--" pattern) files)
+                        :cwd "."
+                        :filter "editor/commands/grep/grep-rg-filter"
+                        :stderr-filter "editor/commands/grep/grep-rg-stderr-filter"
+                        :sentinel "editor/commands/grep/grep-rg-sentinel")
+                    (error (m) (concat "spawn error: " m)))))
+          (cond
+            ((numberp pid)
+              (progn
+                (setq grep-rg-pid pid)
+                (grep-rg-replay-pending)))
+            (t
+              (progn
+                (setq grep-rg-gen nil)
+                (grep-buffer-rollback gen)
+                (editor-set-status
+                  (concat "grep: rg spawn failed — "
+                    (if (stringp pid) pid "unknown error")))))))))))
 
 (defun grep-rg-filter (pid output)
   (setq grep-rg-filter-calls (+ grep-rg-filter-calls 1))
