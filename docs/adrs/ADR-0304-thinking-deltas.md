@@ -33,7 +33,12 @@ emission would fragment.
   the rebuild now clears the WHOLE buffer). Replay merges runs into
   single `thought` events and derives collapse from lengths — parity
   holds under default collapse; TAB toggles are display-only
-  (first-line-keyed) and explicitly not a parity input.
+  (first-line-keyed — SUPERSEDED by #327's per-segment run-id keys)
+  and explicitly not a parity input.
+- **#327 amendment**: replay does NOT wipe in-session toggle state
+  (parity only). Every thought fragment rebuilds the buffer, so a
+  wipe would collapse the segment the user just expanded mid-stream;
+  toggles never enter the event log.
 
 ## Consequences
 

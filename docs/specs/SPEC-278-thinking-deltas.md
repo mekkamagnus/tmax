@@ -60,3 +60,10 @@ replay.
       rebuild); TAB toggle both directions; replay parity
       (byte-compare live-final vs replayed under default collapse,
       toggles excluded — tested)
+- [x] #327 AMENDMENT (the documented divergence): the #320
+      normative's "replay RESETS collapse to the default" is honored
+      for PARITY only — in-session toggles persist across rebuilds
+      and replays (display-only, per-segment run-id keys — #327;
+      never in the log). Rationale: every thought fragment rebuilds
+      the view; a wipe would collapse the segment the user just
+      expanded mid-stream. A fresh session replays under the default.
