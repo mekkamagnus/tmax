@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { TextBufferImpl } from "../../src/core/buffer.ts";
-import type { EditorState } from "../../src/functional/model.ts";
+import type { EditorState } from "../../src/core/contracts/editor.ts";
 import { renderBufferLines, getWrappedCursorRow, getWrappedCursorColumn } from "../../src/frontend/render/buffer-lines.ts";
 
 
