@@ -1076,6 +1076,43 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(String(e(ed, "(editor-status)").value)).toContain("no action");
   });
 
+  // r143 (codex 9-item): DURABLE exchanges — a simulated restart (the
+  // in-memory map wiped) loses nothing; the next turn's recorded body
+  // still carries the prior tool exchange from the file.
+  tt("exchanges survive a simulated restart (the map wiped; the file reloads)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "durable turn")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 270 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "echo DURABLE-CTX" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 270 "${r}")`);
+    e(ed, `(fikra-http-complete 270 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "DURABLE-CTX", 60);
+    await settleRefireFrom(ed, "270", "durable done");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // The durable file exists and names the exchange.
+    const exFile = String(e(ed, "(fikra/backend-ollama/fikra-ollama-exchanges-file-get)").value);
+    expect(exFile).toMatch(/exchanges\.jsonl$/);
+    const exText = readFileSync(exFile, "utf8");
+    expect(exText.length).toBeGreaterThan(0);
+    // SIMULATED RESTART: wipe the in-memory map (the daemon restart's
+    // effect on this state) — the reload must restore it.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-tool-exchanges-reset)");
+    // Turn 2's body still carries the exchange.
+    e(ed, '(fikra/chat/fikra-turn-send "after restart")');
+    let body = "";
+    for (let i = 0; i < 60; i++) {
+      try {
+        const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
+        const last = lines[lines.length - 1];
+        if (last && last.includes("after restart")) { body = last; break; }
+      } catch { /* wait */ }
+      await new Promise((r2) => setTimeout(r2, 100));
+    }
+    expect(body).toContain("DURABLE-CTX");
+    expect(body).toContain('"role":"tool"');
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —

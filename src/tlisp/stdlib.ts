@@ -354,6 +354,15 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     return Either.right(createString(new TextDecoder().decode(bytes)));
   });
 
+  // r143: the ENCODE mirror of hex-decode (persistence layers store
+  // reader-unsafe payloads as hex; decoding existed, encoding didn't).
+  interpreter.defineBuiltin("hex-encode", (args: TLispValue[]) => {
+    if (args.length !== 1 || !args[0] || args[0].type !== "string") {
+      return Either.left({ type: "EvalError", variant: "TypeError", message: "hex-encode requires a string" });
+    }
+    return Either.right(createString(Buffer.from(String(args[0].value), "utf8").toString("hex")));
+  });
+
   interpreter.defineBuiltin("promise-resolved-p", (args: TLispValue[]) => {
     if (args.length !== 1 || !args[0] || !isPromise(args[0])) {
       return Either.left({ type: "EvalError", variant: "TypeError", message: "promise-resolved-p requires a promise" });

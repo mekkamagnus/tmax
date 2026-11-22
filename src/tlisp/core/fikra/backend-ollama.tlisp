@@ -11,7 +11,8 @@
           fikra-ollama-bash-filter fikra-ollama-bash-sentinel
           fikra-ollama-path-contained-p fikra-ollama-revert-latest-action
           fikra-ollama-action-posts-get fikra-ollama-record-action-pair
-          fikra-ollama-last-action-stash-get)
+          fikra-ollama-last-action-stash-get fikra-ollama-exchanges-file-get
+          fikra-ollama-tool-exchanges-reset)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -1019,17 +1020,72 @@ with its post-exit capture.")
 ;; r139: the slot key is THREAD/TURN/ROUND — every round flushes in
 ;; event order (the walker appends them at the turn's end in key
 ;; order), and no fragment re-embeds the narration text.
+;; r143 (codex 9-item): the exchanges are DURABLE — every remember also
+;; appends a hex-encoded line to the thread's exchanges.jsonl (hex is
+;; reader-safe both directions; JSON round-trips hit the escape gaps),
+;; and history-build reloads missing keys from it. A daemon restart
+;; loses nothing.
+(defun fikra-ollama-exchanges-file ()
+  (concat (fikra/thread/fikra-thread-field "root")
+          "/.tmax/fikra/threads/" (fikra/thread/fikra-thread-current)
+          "/exchanges.jsonl"))
+
 (defun fikra-ollama-remember-exchange (fragment)
   (let* ((key (concat (fikra/thread/fikra-thread-current) "/"
                       (number-to-string (fikra/thread/fikra-thread-turn-count))
                       "/" (number-to-string fikra-ollama-round)))
          (prior (hashmap-get fikra-ollama-tool-exchanges key)))
     (keymap-mutable-set! fikra-ollama-tool-exchanges key
-      (concat (if prior prior "") fragment))))
+      (concat (if prior prior "") fragment))
+    ;; r143: the durable append (best-effort — an unwritable log never
+    ;; breaks the turn; the map is the in-flight source of truth).
+    (condition-case nil
+      (append-file (fikra-ollama-exchanges-file)
+        (concat (hex-encode key) " " (hex-encode fragment) (hex-decode "0a")))
+      (error () nil))))
+
+;; r143: accessors for the durability regression.
+(defun fikra-ollama-exchanges-file-get ()
+  (fikra-ollama-exchanges-file))
+
+(defun fikra-ollama-tool-exchanges-reset ()
+  (setq fikra-ollama-tool-exchanges (hashmap)))
+
+;; r143: reload file entries the in-memory map lacks (idempotent; the
+;; map wins for in-flight turns).
+(defun fikra-ollama-load-exchanges ()
+  (condition-case nil
+    (let ((text (condition-case nil
+                  (read-file-content (fikra-ollama-exchanges-file))
+                  (error () nil))))
+      (if (and text (stringp text) (> (length text) 0))
+        (fikra-ollama-load-exchange-lines (string-split text (hex-decode "0a")))
+        nil))
+    (error () nil)))
+
+(defun fikra-ollama-load-exchange-lines (lines)
+  (if (or (not lines) (= (length lines) 0))
+    nil
+    (progn
+      (condition-case nil
+        (let* ((line (car lines))
+               (sp (string-match " " line)))
+          (if (and sp (numberp sp) (> sp 0))
+            (let* ((k (hex-decode (substring line 0 sp)))
+                   (frag (hex-decode (substring line (+ sp 1) (length line))))
+                   (have (hashmap-get fikra-ollama-tool-exchanges k)))
+              (if (not have)
+                (keymap-mutable-set! fikra-ollama-tool-exchanges k frag)
+                nil))))
+        (error () nil))
+      (fikra-ollama-load-exchange-lines (cdr lines)))))
 
 (defun fikra-ollama-history-messages ()
   (let* ((events (fikra/event/fikra-event-events))
          (cutoff (+ (fikra-ollama-last-turn-end events 0 -1) 1)))
+    ;; r143: durable reload FIRST (a restart rebuilt the map empty; the
+    ;; file is the durable record).
+    (fikra-ollama-load-exchanges)
     ;; r139: rounds flush one-by-one as the turn's narrations arrive
     ;; (narration1, tools1, narration2, tools2, final reply).
     (fikra-ollama-history-scan events 0 cutoff "" nil nil 1)))
