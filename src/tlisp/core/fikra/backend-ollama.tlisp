@@ -649,23 +649,29 @@ with its post-exit capture.")
          (f (fikra/thread/fikra-thread-shq (concat d "/ckpt-trees-" tid)))
          (stamp (fikra/thread/fikra-thread-shq (concat d "/ckpt-stamp-" tid)))
          (changed (fikra/thread/fikra-thread-shq (concat d "/ckpt-changed-" tid)))
+         (ignored (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-" tid)))
          (ign-a (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-" tid)))
          (ign-b (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-after-" tid))))
     ;; The caller has cd'ed into the working dir.
-    (concat "mkdir -p " dq " ; rm -f " f " " changed " ; "
+    (concat "mkdir -p " dq " ; rm -f " f " " changed " " ignored " ; "
             (fikra-ollama-ignored-listing-cmd ign-a)
             (fikra-ollama-snapshot-cmd idx "__p")
-            ;; r155c: everything the command modifies is listed by
-            ;; modification time — the snapshot's view excludes ignored
-            ;; paths, so a write to one is reported instead of vanishing.
+            ;; r155c: everything the command modifies is listed — the
+            ;; snapshot's view excludes ignored paths, so a write to one
+            ;; is reported instead of vanishing.
             "touch " stamp " ; "
             (fikra-ollama-bash-body cmd)
             " ; " (fikra-ollama-snapshot-cmd idx "__q")
-            "find . -newer " stamp " -type f -not -path './.git/*' -not -path './.tmax/*' | head -400 > " changed " ; "
-            ;; r155d: ignored entries that appeared or vanished (a kept
-            ;; timestamp hides a write from the scan above).
+            ;; r155e (codex gate): by STATUS-CHANGE time, not
+            ;; modification time — `cp -p` and `touch -d` keep the old
+            ;; mtime but cannot keep a file's ctime (a new inode, or any
+            ;; write, sets it to now). NUL-separated: a name may contain
+            ;; a newline.
+            "find . -cnewer " stamp " -type f -not -path './.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
+            ;; r155d: ignored entries that appeared or vanished (the scan
+            ;; above cannot see a deletion).
             (fikra-ollama-ignored-listing-cmd ign-b)
-            "diff " ign-a " " ign-b " | grep '^[<>]' | cut -c3- | head -100 >> " changed " ; "
+            "diff " ign-a " " ign-b " | grep '^[<>]' | cut -c3- | head -100 > " ignored " ; "
             "echo \"$__p $__q\" > " f)))
 
 (defun fikra-ollama-run-bash-now (cmd dir)
@@ -766,14 +772,23 @@ with its post-exit capture.")
            (tid (fikra/thread/fikra-thread-current))
            (f (concat base "trees-" tid))
            (changed (concat base "changed-" tid))
+           (ignored (concat base "ignored-" tid))
            (toks (fikra-ollama-marker-tokens
                    (if (file-exists-p f) (string-trim (read-file-content f)) "")))
            (pre (if (> (length toks) 0) (nth 0 toks) ""))
            (post (if (> (length toks) 1) (nth 1 toks) ""))
            (usable (and (fikra-ollama-hex40-p pre) (fikra-ollama-hex40-p post)))
-           (changed-lines (if (file-exists-p changed)
-                            (string-split (string-trim (read-file-content changed)) (hex-decode "0a"))
-                            (list))))
+           (changed-lines
+             (append
+               ;; The scan's list is NUL-separated (a name may contain a
+               ;; newline — r155e, codex gate); the ignored-entry diff is
+               ;; newline-separated (git's own listing).
+               (if (file-exists-p changed)
+                 (fikra-ollama-split-paths (read-file-content changed))
+                 (list))
+               (if (file-exists-p ignored)
+                 (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
+                 (list)))))
       ;; The markers are consumed whatever they held — a stale or useless
       ;; one must not be reported again by an unrelated later call.
       (if (file-exists-p f)
@@ -781,6 +796,9 @@ with its post-exit capture.")
         nil)
       (if (file-exists-p changed)
         (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq changed)))
+        nil)
+      (if (file-exists-p ignored)
+        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq ignored)))
         nil)
       (cond
         ((fikra/checkpoint/fikra-checkpoint-disable-p) nil)
@@ -1377,7 +1395,14 @@ with its post-exit capture.")
                (sp (string-match " " line)))
           (if (and sp (numberp sp) (> sp 0))
             (let* ((post (substring line 0 sp))
-                   (pre (substring line (+ sp 1) (length line)))
+                   ;; r155e (codex gate): a never-landed build wrote an
+                   ;; optional " ix" token after the pre-ref — read as part
+                   ;; of the ref it made every such pair unloadable.
+                   (pre0 (substring line (+ sp 1) (length line)))
+                   (pre (if (and (> (length pre0) 3)
+                                 (string= (substring pre0 (- (length pre0) 3) (length pre0)) " ix"))
+                          (substring pre0 0 (- (length pre0) 3))
+                          pre0))
                    (have (hashmap-get fikra-ollama-action-pairs post)))
               ;; r150: a REVERTED tombstone (newest line for the post)
               ;; stays reverted — the loader never resurrects it.
@@ -1743,6 +1768,23 @@ with its post-exit capture.")
         (shell-command (concat "chmod +x "
                       (fikra/thread/fikra-thread-shq (concat root "/" p))))
         nil)
+      ;; r155e (codex gate P0): a RESTORED path can leave staging behind
+      ;; too — the user staged the action's result, the worktree went back
+      ;; to the pre-action content, and the index still holds what the
+      ;; action wrote: a later commit would silently bring it back. Any
+      ;; staged entry that no longer matches the restored content is
+      ;; counted for the status and the transcript note.
+      (let ((__ix (fikra-ollama-index-state root p)))
+        ;; Only an entry that EXISTS is staging (an untracked path has
+        ;; none — its restored content is simply untracked again), and
+        ;; only one holding the ACTION's result: an index still at HEAD
+        ;; under a pre ref that was the user's own unstaged work is not
+        ;; staging at all (a commit there records HEAD, not the action).
+        (if (and ok has __ix
+                 (fikra-ollama-state-eq __ix (fikra-ollama-path-state root post p)))
+          (setq fikra-ollama-revert-preserved-count
+            (+ 1 fikra-ollama-revert-preserved-count))
+          nil))
       (fikra-ollama-restore-paths root ref post (cdr paths)
         (if ok fails (append fails (list p)))))))
 

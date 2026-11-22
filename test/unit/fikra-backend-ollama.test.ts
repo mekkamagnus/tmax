@@ -2985,7 +2985,11 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     call(ed, 509, "printf 'more\\n' >> base.txt");
     await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
     e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
-    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    const status = String(e(ed, "(editor-status)").value);
+    expect(status).toContain("action reverted");
+    // Nothing was staged here (the index still holds HEAD's version): the
+    // restored file is the user's own unstaged work again — no note.
+    expect(status).not.toContain("left staged");
     expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("user edit\n");
     expect(execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim()).toBe("");
   });
@@ -3195,9 +3199,84 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     call(ed, 518, "touch 'line\nbreak'");
     await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
     expect(existsSync(join(process.cwd(), "line\nbreak"))).toBe(true);
+    // …and it is CHECKPOINTED: no false "cannot hold" warning for the two
+    // halves of the name (the scan's list is NUL-separated now).
+    expect(strip(String(e(ed, "(buffer-text)").value))).not.toContain("cannot hold");
     e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
     expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
     expect(existsSync(join(process.cwd(), "line\nbreak"))).toBe(false);
+  });
+
+  // Codex gate round 4 (P1): a new file inside an EXISTING ignored
+  // directory, with a preserved timestamp — the collapsed listing did not
+  // change and the modification-time scan saw nothing. The scan now keys
+  // on status-change time, which `cp -p` cannot preserve.
+  tt("a preserved-timestamp write INSIDE an existing ignored directory is reported", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), ".gitignore"), ".tmax/\ncache/\n");
+    execFileSync("git", ["add", ".gitignore"]);
+    execFileSync("git", ["commit", "-qm", "ignore cache"]);
+    mkdirSync(join(process.cwd(), "cache"));
+    execFileSync("touch", ["-t", "202001010000", "old-source.txt"]);
+    e(ed, '(fikra/chat/fikra-turn-send "copy into the cache")');
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    call(ed, 522, "cp -p old-source.txt cache/new");
+    const mid = strip(await until(ed, "(buffer-text)", "cannot hold", 120));
+    expect(mid.split("\n").filter((l) => l.includes("not revertable: cache/new")).length).toBe(1);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, before, "copied");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // Codex gate round 4 (P0): the user stages the action's RESULT; the
+  // revert restores the worktree but the index still holds what the
+  // action wrote — a later commit would silently bring it back. The
+  // status and the transcript must say so.
+  tt("a staged MODIFICATION left behind by a revert is announced (status AND transcript)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "append to it")');
+    call(ed, 523, "printf 'more\\n' >> base.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    execFileSync("git", ["add", "base.txt"]);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    const status = String(e(ed, "(editor-status)").value);
+    expect(status).toContain("action reverted");
+    expect(status).toContain("1 path(s) left staged (unstage to drop them for good)");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
+    expect(execFileSync("git", ["show", ":base.txt"], { encoding: "utf8" })).toBe("base\nmore\n");
+    expect(strip(String(e(ed, "(buffer-text)").value)).replace(/\n/g, " ")).toContain("1 staged path(s) left staged by the revert");
+  });
+
+  // The mirror image: an UNTRACKED path restored by the revert is not
+  // staging — nothing is announced.
+  tt("an untracked path restored by a revert raises no staged note", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "append to an untracked file")');
+    execFileSync("touch", ["fresh.txt"]);
+    call(ed, 524, "printf 'more\\n' >> fresh.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    const status = String(e(ed, "(editor-status)").value);
+    expect(status).toContain("action reverted");
+    expect(status).not.toContain("left staged");
+    expect(readFileSync(join(process.cwd(), "fresh.txt"), "utf8")).toBe("");
+  });
+
+  // Codex gate round 4 (P1): a never-landed build wrote an optional
+  // " ix" token on the durable pair line; the loader took it for part of
+  // the pre-ref and the pair was lost on reload.
+  tt("a durable pair line carrying the old ix token still reverts after a reload", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "make a file")');
+    call(ed, 525, "touch ix-suffix.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    const pairs = join(process.cwd(), ".tmax", "fikra", "threads", "main", "actions.jsonl");
+    writeFileSync(pairs, readFileSync(pairs, "utf8").trimEnd() + " ix\n");
+    // A restart: the in-memory pairs and stack are gone; the file is all.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-state-reset)");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(existsSync(join(process.cwd(), "ix-suffix.txt"))).toBe(false);
   });
 
   // Codex gate round 3: `cp -p` keeps the old timestamp — invisible to
