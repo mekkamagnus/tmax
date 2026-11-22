@@ -43,6 +43,10 @@ interface SpanRecord {
   style: HighlightSpan["style"];
   /** The buffer object at registration (kill+recreate detection). */
   token: unknown;
+  /** The buffer's content checksum at registration — a text change
+   * DROPS the record permanently (valve r1: a render-side skip let
+   * records revive when the text returned to the old shape). */
+  checksum: number;
 }
 
 /** The buffer shape a merged grid was built against (the lazy
@@ -84,8 +88,10 @@ export function createSpanOps(
     for (const r of [...records.values()]) {
       if (!shapes.has(r.buffer)) shapes.set(r.buffer, probeShape(r.buffer));
       const live = shapes.get(r.buffer);
-      const recToken = r.token;
-      if (!live || live.token !== recToken) records.delete(r.id);
+      // Drop on: buffer gone, replaced (token), or text CHANGED since
+      // registration (checksum) — the drop is STICKY (the record is
+      // deleted; restoring the old text cannot revive it).
+      if (!live || live.token !== r.token || live.checksum !== r.checksum) records.delete(r.id);
     }
     const perLine = new Map<number, HighlightSpan[]>();
     let maxLine = -1;
@@ -177,7 +183,7 @@ export function createSpanOps(
       ));
     }
     const id = nextId++;
-    records.set(id, { id, buffer: bufArg.value as string, startLine: sl, startCol: sc, endLine: el, endCol: ec, style: { ...face }, token: shapeNow.token });
+    records.set(id, { id, buffer: bufArg.value as string, startLine: sl, startCol: sc, endLine: el, endCol: ec, style: { ...face }, token: shapeNow.token, checksum: shapeNow.checksum });
     publish(bufArg.value as string);
     return Either.right(createNumber(id));
   });

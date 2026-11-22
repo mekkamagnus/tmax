@@ -177,12 +177,16 @@ describe("#296 — gate r1 fixes", () => {
     expect(st(editor)).toContain("commit first");
   });
 
-  test("the STABLE-HEAD branch of g re-applies the tint", async () => {
+  test("g with a STABLE head RE-RUNS (preflight + blame — valve r1: one always-correct path)", async () => {
     writeFileSync(join(process.cwd(), "f.txt"), "one\n");
     commit("c1");
     blame("f.txt");
     e(editor, "(stagehand/blame/stagehand-blame-refresh)");
-    expect(st(editor)).toContain("re-applied");
+    // The re-run re-rendered the blame view (still current) and the
+    // attribution survives.
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*Stagehand-Blame*");
+    e(editor, "(cursor-move 0 0)");
+    expect(String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value)).toContain("c1");
     const { captureFrame } = await import("../../src/render/capture-frame.ts");
     const frame = captureFrame(editor.getEditorState() as never, 40, 8);
     expect(frame.join("\n")).toContain("48;2;58;50;38"); // the tint lives
@@ -225,3 +229,47 @@ describe("#296 — gate r2 fixes (blame)", () => {
     expect(String(e(editor, "(buffer-name)").value)).toBe("*Stagehand-Blame*");
   });
 });
+
+describe("#296 — valve r1 fixes", () => {
+  test("REPEATED commits keep their OWN metadata (the porcelain cache)", () => {
+    // c1 writes 3 lines; c2 changes the MIDDLE — c1's lines are
+    // NON-CONTIGUOUS: its second appearance is a BARE header after
+    // c2's full block (the leak shape).
+    writeFileSync(join(process.cwd(), "f.txt"), "one\ntwo\nthree\n");
+    commit("first commit");
+    writeFileSync(join(process.cwd(), "f.txt"), "one\nTWO\nthree\n");
+    commit("second commit");
+    blame("f.txt");
+    e(editor, "(cursor-move 1 0)");
+    expect(String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value)).toContain("second commit");
+    // Line 3: c1 REPEATS as a bare header — its summary must be its
+    // OWN, not c2's leaked group state.
+    e(editor, "(cursor-move 2 0)");
+    const att2 = String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value);
+    expect(att2).toContain("first commit");
+    expect(att2).not.toContain("second commit");
+  });
+
+  test("an EDIT + RESTORE does not REVIVE dropped span records (sticky invalidation)", async () => {
+    const { captureFrame } = await import("../../src/render/capture-frame.ts");
+    setText2("hello\nworld\n");
+    e(editor, '(span-make "test" 0 0 0 5 "region")');
+    setText2("HELLO\nworld\n"); // the edit invalidates
+    setText2("hello\nworld\n"); // restore — the drop must STICK
+    // A new span re-publishes: the OLD record was deleted (its
+    // checksum mismatches), only the NEW one renders.
+    e(editor, '(span-make "test" 1 0 1 5 "match")');
+    const entry = (editor as unknown as { model: { bufferSpans?: Map<string, { spans: unknown[][] }> } }).model.bufferSpans?.get("test");
+    const line0 = entry?.spans[0] ?? [];
+    expect(line0.length).toBe(0); // the restored region is GONE
+  });
+});
+
+/** Set the CURRENT buffer text (the clear+append idiom). */
+function setText2(text: string): void {
+  const count = Number(String(e(editor, "(buffer-line-count)").value));
+  if (count > 1) e(editor, `(buffer-delete-range 0 0 ${count - 1} 0)`);
+  const first = String(e(editor, "(buffer-line 0)").value);
+  if (first.length > 0) e(editor, `(buffer-delete-range 0 0 0 ${first.length})`);
+  e(editor, `(buffer-append ${JSON.stringify(text)})`);
+}

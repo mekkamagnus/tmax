@@ -1,5 +1,5 @@
 (defmodule stagehand/blame
-  (export stagehand-blame-file stagehand-blame-row stagehand-blame-buffer-name
+  (export stagehand-blame-file stagehand-blame-row stagehand-blame-parse stagehand-blame-buffer-name
           stagehand-blame-next stagehand-blame-prev
           stagehand-blame-quit stagehand-blame-show
           stagehand-blame-refresh stagehand-blame-attribution-get
@@ -30,44 +30,62 @@
 (defun stagehand-blame-rows-get () stagehand-blame-rows)
 
 ;; ── the porcelain parse ─────────────────────────────────────────────
+(defvar stagehand-blame-meta nil
+  "The sha → (author date summary) cache (valve r1: porcelain emits
+the FULL header block only on a commit's FIRST occurrence — later
+lines of the SAME commit carry a BARE header, and the group state
+would otherwise leak the PREVIOUS commit's metadata).")
+
 (defun stagehand-blame-parse (out)
   "The porcelain stream → ((sha author date summary content) ...) —
 one entry per SOURCE line, in display order."
+  (setq stagehand-blame-meta (hashmap))
   ;; ROWS starts as an EMPTY LIST (cons onto nil is a type error in
   ;; T-Lisp — the stash-parse lesson).
   (stagehand-blame-scan (string-split (or out "") "\n")
-    nil nil nil nil (list) nil))
+    nil nil nil nil (list)))
 
-(defun stagehand-blame-scan (lines sha author date summary rows acc)
-  ;; SHA/AUTHOR/DATE/SUMMARY: the current group; ROWS: the completed
-  ;; entries; ACC: the pending content lines (reversed).
+(defun stagehand-blame-scan (lines sha author date summary rows)
+  ;; SHA/AUTHOR/DATE/SUMMARY: the CURRENT group (a REPEATED commit's
+  ;; bare header reuses its CACHED metadata); ROWS: the completed
+  ;; entries.
   (if (null lines)
     (reverse rows)
     (let ((line (car lines)))
       (cond
         ((stagehand-blame-header-p line)
-          (stagehand-blame-scan (cdr lines)
-            (nth 0 (string-split line " "))
-            author date summary rows acc))
+          (let* ((h (nth 0 (string-split line " ")))
+                 (m (hashmap-get stagehand-blame-meta h)))
+            (if m
+              (stagehand-blame-scan (cdr lines) h
+                (nth 0 m) (nth 1 m) (nth 2 m) rows)
+              (stagehand-blame-scan (cdr lines) h
+                nil nil nil rows))))
         ((string-prefix-p "author " line)
           ;; author-mail does NOT match (hyphen after 'author').
           (stagehand-blame-scan (cdr lines) sha
-            (substring line 7 (length line)) date summary rows acc))
+            (substring line 7 (length line)) date summary rows))
         ((string-prefix-p "author-time " line)
           (stagehand-blame-scan (cdr lines) sha author
-            (substring line 12 (length line)) summary rows acc))
+            (substring line 12 (length line)) summary rows))
         ((string-prefix-p "summary " line)
           (stagehand-blame-scan (cdr lines) sha author date
-            (substring line 8 (length line)) rows acc))
+            (substring line 8 (length line)) rows))
         ((string-prefix-p (hex-decode "09") line)
-          ;; The source line — flush the group entry.
-          (stagehand-blame-scan (cdr lines) sha author date summary
-            (cons (list sha author date summary
-                     (substring line 1 (length line)))
-              rows)
-            acc))
+          ;; The source line — cache the completed group, then flush
+          ;; (progn: a cond clause is exactly 2 elements).
+          (progn
+            ;; hashmap-set is IMMUTABLE (returns a new map) — the
+            ;; defvar must be REBOUND.
+            (setq stagehand-blame-meta
+              (hashmap-set stagehand-blame-meta sha
+                (list author date summary)))
+            (stagehand-blame-scan (cdr lines) sha author date summary
+              (cons (list sha author date summary
+                       (substring line 1 (length line)))
+                rows))))
         (t
-          (stagehand-blame-scan (cdr lines) sha author date summary rows acc))))))
+          (stagehand-blame-scan (cdr lines) sha author date summary rows))))))
 
 (defun stagehand-blame-header-p (line)
   ;; '<40-hex> <num> <num>' — structural (never a content line: those
@@ -274,24 +292,10 @@ rows refuse in the preflight)."
 
 ;; ── re-run (HEAD moved / spans invalidated by an edit) ─────────────
 (defun stagehand-blame-refresh ()
-  "g — re-run: a moved HEAD re-preflights + re-blames; a stable HEAD
-just re-applies (an edit invalidated the tint — the API contract)."
-  (let ((now (stagehand-blame-current-head)))
-    (cond
-      ((not (string= (or now "") (or stagehand-blame-head "")))
-        ;; HEAD moved: the full path (preflight + blame) against it.
-        (stagehand-blame-file stagehand-blame-path))
-      (t
-        (progn
-          ;; Stable HEAD: re-apply the tint (the buffer may have
-          ;; been edited — the preflight would refuse a diverged
-          ;; file, so only the span refresh is needed).
-          (if stagehand-blame-span-id
-            (span-remove stagehand-blame-span-id))
-          (setq stagehand-blame-span-id
-            (span-make (stagehand-blame-buffer-name)
-              0 0 (- (length stagehand-blame-rows) 1) 1000000 "blame"))
-          (editor-set-status "Stagehand: blame re-applied"))))))
+  "g — re-run: preflight + blame against the CURRENT HEAD (valve r1:
+the stable-HEAD re-apply-only branch could leave stale attribution
+after an edit; the distinction is gone — one always-correct path)."
+  (stagehand-blame-file stagehand-blame-path))
 
 ;; ── mode + keymap ───────────────────────────────────────────────────
 (major-mode-register "stagehand-blame" '() nil)
