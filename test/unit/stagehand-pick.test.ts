@@ -93,6 +93,11 @@ describe("#330 — cherry-pick + revert (the log view)", () => {
     expect(st).not.toContain("conflict —");
     expect(git("status", "--porcelain")).toBe(""); // structurally clean
     expect(git("log", "-1", "--format=%s")).toContain("feature"); // HEAD still unmoved
+    // GATE R2: OUR op's CHERRY_PICK_HEAD residue is ABORTED (the
+    // repo is not left mid-pick over a clean porcelain).
+    let residue = "";
+    try { residue = execFileSync("git", ["rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"], { cwd: process.cwd() }).toString().trim(); } catch { residue = ""; }
+    expect(residue).toBe("");
   });
 
 

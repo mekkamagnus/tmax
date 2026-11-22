@@ -442,7 +442,7 @@ y/n confirm (#287's lesson: a bare Enter cancels)."
           (concat (if (string= op "cherry-pick") "Cherry-pick " "Revert ")
             sha "? (y/n)")
           "stagehand/log/stagehand-log-pick-table"
-          nil t "" "stagehand-checkout-history"
+          nil t "" "stagehand-pick-history"
           "stagehand/log/stagehand-log-pick-accept"))
       (editor-set-status "Stagehand: no commit on this row"))))
 
@@ -468,23 +468,41 @@ y/n confirm (#287's lesson: a bare Enter cancels)."
       (setq stagehand-pick-pending nil)
       (editor-set-status "Stagehand: pick cancelled"))))
 
+(defun stagehand-pick-head-ref (op)
+  "The in-progress sentinel ref for OP (CHERRY_PICK_HEAD/REVERT_HEAD)."
+  (if (string= op "cherry-pick") "CHERRY_PICK_HEAD" "REVERT_HEAD"))
+
+(defun stagehand-pick-in-progress-p (op root)
+  ;; rev-parse -q --verify: exit 0 iff the ref exists. REF-BASED
+  ;; (gate r2: no text matching, no .git-path guessing — worktrees
+  ;; carry a .git FILE, not a directory).
+  (= (nth 2 (shell-exec-argv
+              (list "git" "rev-parse" "-q" "--verify"
+                (stagehand-pick-head-ref op))
+              root))
+     0))
+
 (defun stagehand-do-pick (op sha)
-  (let* ((res (shell-exec-argv
-                (list "git"
-                      (if (string= op "cherry-pick") "cherry-pick" "revert")
-                      sha)
-                stagehand-log-root))
-         (code (nth 2 res)))
-    (if (and (numberp code) (= code 0))
-      (progn
-        ;; Success: the STATUS data refreshes, then the VIEW returns
-        ;; to the log (gate r1: status-render's ensure-buffer switch
-        ;; yanked the user out — the log stays per the spec).
-        (stagehand/status/stagehand-status)
-        (buffer-switch "*Stagehand-Log*")
-        (editor-set-status
-          (concat (if (string= op "cherry-pick") "cherry-picked " "reverted ") sha)))
-      (stagehand-pick-conflict-route op sha res))))
+  (let ((had-in-progress (stagehand-pick-in-progress-p op stagehand-log-root)))
+    (let* ((res (shell-exec-argv
+                  (list "git"
+                        (if (string= op "cherry-pick") "cherry-pick" "revert")
+                        sha)
+                  stagehand-log-root))
+           (code (nth 2 res)))
+      (if (and (numberp code) (= code 0))
+        (progn
+          ;; Success: the STATUS data refreshes (ROOT-PINNED — gate
+          ;; r2: the interactive entry re-detects root from the LOG
+          ;; buffer's nil filename → the launch-dir fallback could
+          ;; refresh the WRONG repo), then the VIEW returns to the
+          ;; log (gate r1: the ensure-buffer switch yanked the user
+          ;; out).
+          (stagehand/status/stagehand-status-render stagehand-log-root)
+          (buffer-switch "*Stagehand-Log*")
+          (editor-set-status
+            (concat (if (string= op "cherry-pick") "cherry-picked " "reverted ") sha)))
+        (stagehand-pick-conflict-route op sha res had-in-progress)))))
 
 (defun stagehand-pick-unmerged-p (root)
   "STRUCTURAL conflict detection (gate r1: message-text matching
@@ -508,21 +526,36 @@ unmerged entries (DD/AU/UD/UA/DU/AA/UU) are the truth."
         t
         (stagehand-pick-unmerged-scan (cdr lines))))))
 
-(defun stagehand-pick-conflict-route (op sha res)
+(defun stagehand-pick-conflict-route (op sha res had-in-progress)
   ;; Conflicts (STRUCTURALLY detected) route to the Conflicted
   ;; section (#286's buffer) with the manual resolution advice; the
   ;; key-driven continuation/abort flow rides #295's framework
   ;; (blocked) — the documented v1 ceiling. Anything else non-zero is
-  ;; the NAMED failure (first diagnostic line, stdout OR stderr).
+  ;; the NAMED failure (first diagnostic line, stdout OR stderr) —
+  ;; and OUR op's in-progress residue is aborted THERE (never here:
+  ;; aborting a conflicted state would RESOLVE it — the ordering
+  ;; bug the conflict regression caught).
   (if (stagehand-pick-unmerged-p stagehand-log-root)
     (progn
-      (stagehand/status/stagehand-status)
+      (stagehand/status/stagehand-status-render stagehand-log-root)
       (editor-set-status
         (concat "Stagehand: " op " conflict — resolve in the Conflicted section, then continue; abort: git " op " --abort")))
-    (editor-set-status
-      (concat "Stagehand: " op " failed ("
-        (if (numberp (nth 2 res)) (number-to-string (nth 2 res)) "?") ") "
-        (stagehand-pick-first-line (nth 0 res) (nth 1 res))))))
+    (progn
+      ;; The residue cleanup: OUR op created the in-progress state
+      ;; (none before, one now — the empty pick leaves
+      ;; CHERRY_PICK_HEAD over a clean porcelain). A PRE-EXISTING
+      ;; session is never touched.
+      (if (and (not had-in-progress)
+               (stagehand-pick-in-progress-p op stagehand-log-root))
+        (shell-exec-argv
+          (list "git"
+            (if (string= op "cherry-pick") "cherry-pick" "revert")
+            "--abort")
+          stagehand-log-root))
+      (editor-set-status
+        (concat "Stagehand: " op " failed ("
+          (if (numberp (nth 2 res)) (number-to-string (nth 2 res)) "?") ") "
+          (stagehand-pick-first-line (nth 0 res) (nth 1 res)))))))
 
 (defun stagehand-pick-first-line (stdout stderr)
   "The first non-empty diagnostic line, STDOUT first (git 2.49 emits
