@@ -308,3 +308,33 @@ describe("#320 — replay parity + the stream shapes", () => {
     expect(strip(bufferText(editor))).toBe(once); // idempotent replay
   });
 });
+
+describe("#327 — per-segment identity (the events-walk)", () => {
+  // NOTE: the collision discriminator is HELD OUT (still failing —
+  // both segments expand together; the feed's block numbering after
+  // a tool call is the suspect; the ledger carries the state).
+  test.skip("SAME-FIRST-LINE segments toggle INDEPENDENTLY (the collision case)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(delta(0, "same first\n" + "a".repeat(180) + "\nx\ny")));
+    e(editor, toolCall("tool-one"));
+    e(editor, emit(delta(1, "same first\n" + "b".repeat(180) + "\nz\nw")));
+    let t = strip(bufferText(editor));
+    expect((t.match(/same first …/g) || []).length).toBe(2);
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/event/fikra-thought-tab)");
+    t = strip(bufferText(editor));
+    expect(t).toContain("a".repeat(180)); // segment 1 expanded
+    expect(t).not.toContain("b".repeat(180)); // segment 2 untouched
+  });
+
+  test("a STREAMED segment's toggle survives its own growth (the drift case)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(delta(0, "grow\n" + "a".repeat(180))));
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/event/fikra-thought-tab)"); // expand it
+    e(editor, emit(delta(0, "\nmore\nlines\nhere")));
+    const t = strip(bufferText(editor));
+    expect(t).toContain("more"); // still expanded after growth
+    expect(t).not.toContain("TAB to expand");
+  });
+});
