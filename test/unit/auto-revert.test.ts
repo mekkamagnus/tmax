@@ -137,6 +137,18 @@ describe("#329 — auto-revert integration", () => {
   });
 
 
+  test("ALIAS forwards the full arg shape; M-x discoverable; loaded at startup (valve r1)", () => {
+    // The old alias passed arg-supplied-p positionally as ARG — the
+    // no-arg toggle turned ON a nil ARG instead.
+    e(editor, "(editor/modes/auto-revert/global-auto-revert-mode)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("enabled");
+    e(editor, "(editor/modes/auto-revert/global-auto-revert-mode)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("disabled");
+    // Loaded WITHOUT the test's explicit require (normal.tlisp loads it).
+    const r = e(editor, "(condition-case nil (editor/modes/auto-revert/auto-revert-mode) (error (m) (concat \"ERR:\" m)))");
+    expect(String(r.value)).not.toContain("ERR:");
+  });
+
   test("mode OFF stops all watches (the registry clears)", () => {
     writeFileSync("h.txt", "x\n");
     e(editor, '(find-file "h.txt")');

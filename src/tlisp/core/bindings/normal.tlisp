@@ -36,6 +36,8 @@
   (require-module editor/modes/truncate-lines)
   ;; #334: display-only word wrapping (default OFF; SPC v).
   (require-module editor/modes/visual-line)
+  ;; #329: revert-on-external-change (default OFF).
+  (require-module editor/modes/auto-revert)
   ;; SPEC-119: [[wiki-link]] display transform toggle (default ON).
   (require-module editor/modes/wiki-link-display)
   ;; SPEC-120: instant fuzzy [[ note finder (default ON).

@@ -31,7 +31,11 @@ globally as the watch callback; the path arrives via hex-decode."
   nil)
 
 (defun auto-revert-revert-buffer (bufname)
-  "Revert BUFNAME unless it is modified (the guard) or already gone."
+  "Revert BUFNAME IN PLACE unless it is modified (the guard) or
+already gone. Valve r1: revert-buffer re-FINDS the filename —
+buffer-create replaces same-named buffers, so with several buffers
+on one file a re-find could clobber a DIFFERENT buffer. The in-place
+shape clears + refills the TARGET buffer only."
   (if (member bufname (buffer-list))
     (let ((cur (buffer-current)))
       ;; Switch-scan-revert-restore: the T-Lisp buffer primitives are
@@ -39,12 +43,32 @@ globally as the watch callback; the path arrives via hex-decode."
       (buffer-switch bufname)
       (if (buffer-modified-p)
         (editor-set-status (concat "auto-revert: " bufname " modified — not reverted"))
-        (progn
-          (revert-buffer)
-          (setq auto-revert-buffers (+ auto-revert-buffers 1))
-          (editor-set-status (concat "auto-revert: " bufname " reverted"))))
+        (let ((fn (buffer-filename)))
+          (if (and (stringp fn) (file-exists-p fn))
+            (let ((content (read-file-content fn)))
+              (if (stringp content)
+                (progn
+                  (buffer-set-read-only nil)
+                  (stagehand-clear-buffer-329)
+                  (buffer-insert content)
+                  (set-buffer-modified-p false)
+                  (setq auto-revert-buffers (+ auto-revert-buffers 1))
+                  (editor-set-status (concat "auto-revert: " bufname " reverted")))
+                (editor-set-status (concat "auto-revert: " bufname " unreadable")))
+              nil)
+            (editor-set-status (concat "auto-revert: " bufname " file gone")))))
       (buffer-switch cur))
     nil))
+
+(defun stagehand-clear-buffer-329 ()
+  ;; A local all-lines delete (the stagehand clear shape — no
+  ;; cross-module dependency for a three-line helper).
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
 
 (defun auto-revert-register-1 (bufname cur)
   ;; In BUFNAME's context: read its filename, restore, register.
@@ -131,6 +155,7 @@ and the test seam)."
   "Toggle auto-revert mode (GLOBAL in v1 — buffer-local scoping
 rides a consumer need). On = scan+watch every file-backed buffer;
 OFF = stop all. Dirty buffers are never clobbered."
+  (interactive)
   (if (not arg-supplied-p)
     (auto-revert-mode (not (auto-revert-active-p)))
     (if (equal arg t)
@@ -144,8 +169,13 @@ OFF = stop all. Dirty buffers are never clobbered."
         (editor-set-status "auto-revert mode disabled")))))
 
 (defun global-auto-revert-mode (&optional (arg nil arg-supplied-p))
-  "The global alias (v1 IS global; kept for emacs muscle memory)."
-  (auto-revert-mode arg arg-supplied-p))
+  "The global alias (v1 IS global; kept for emacs muscle memory).
+Valve r1: the alias FORWARDS the full arg shape (the old two-arg
+call passed arg-supplied-p as a POSITIONAL second arg — the mode's
+&optional binds it as ARG)."
+  (if (not arg-supplied-p)
+    (auto-revert-mode)
+    (auto-revert-mode arg)))
 
 (defvar auto-revert-enabled nil
   "Whether auto-revert mode is on.")
