@@ -103,10 +103,15 @@ buffer's point is not retained by the engine at all)."
       (buffer-delete-range 0 0 0 (length l)))))
 
 (defun auto-revert-register-1 (bufname cur)
-  ;; In BUFNAME's context: read its filename, restore, register.
-  (buffer-switch bufname)
-  (let ((fn (buffer-filename)))
-    (buffer-switch cur)
+  ;; In BUFNAME's context: read its filename, restore, register —
+  ;; POINT-SAFE (#127: both switches reset point; valve r4: the
+  ;; registration scan was stomping the user's cursor).
+  (let ((pl (cursor-line))
+        (pc (cursor-column)))
+    (buffer-switch bufname)
+    (let ((fn (buffer-filename)))
+      (auto-revert-restore-cur cur)
+      (cursor-move pl pc)
     (if (and (stringp fn) (> (length fn) 0)
              (file-exists-p fn))
       (if (auto-revert-watched-p fn)
@@ -125,7 +130,8 @@ buffer's point is not retained by the engine at all)."
               (append (or auto-revert-watches (list))
                 (list (list fn id bufname))))
             nil)))
-      nil)))
+      nil))))
+
 
 (defun auto-revert-entry-of (entries path)
   (if (null entries)
@@ -262,12 +268,16 @@ are NOT in setq's lookup chain, so the bridge is a function)."
         (auto-revert-prune-path (cdr entries) b (cons e acc))))))
 
 (defun auto-revert-buffer-backs-p (bufname path)
+  ;; POINT-SAFE (#127: both switches reset point — valve r4).
   (if (not (member bufname (buffer-list)))
     nil
-    (let ((cur (buffer-current)))
+    (let ((cur (buffer-current))
+          (pl (cursor-line))
+          (pc (cursor-column)))
       (buffer-switch bufname)
       (let ((fn (buffer-filename)))
-        (buffer-switch cur)
+        (auto-revert-restore-cur cur)
+        (cursor-move pl pc)
         (and (stringp fn) (string= fn path))))))
 
 (defun auto-revert-without (lst name acc)

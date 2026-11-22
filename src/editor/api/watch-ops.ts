@@ -95,11 +95,24 @@ export function createWatchOps(
             // rename; a fresh one follows the new inode. The event
             // still fires so the T-Lisp side can react.
             try { w.close(); } catch { /* gone */ }
-            try {
-              const fresh = establish();
-              const entry = watches.get(idHolder.value);
-              if (entry) entry.stop = () => fresh.close();
-            } catch { /* path gone — the old behavior */ }
+            // A rename may land the path ABSENT momentarily (move-
+            // away-then-create). Retry briefly; if it stays gone,
+            // DROP the registration (the registry stays honest —
+            // valve r4's stale-live finding).
+            setTimeout(() => {
+              try {
+                const fresh = establish();
+                const entry = watches.get(idHolder.value);
+                if (entry) entry.stop = () => fresh.close();
+              } catch {
+                watches.delete(idHolder.value);
+                logProgram?.("watch", {
+                  level: "warn",
+                  text: `watch ${idHolder.value} dropped: path removed`,
+                  path,
+                });
+              }
+            }, 120);
           }
           emit(ev);
         });

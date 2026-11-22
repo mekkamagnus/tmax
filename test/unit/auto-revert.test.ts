@@ -167,6 +167,30 @@ describe("#329 — auto-revert integration", () => {
     e(editor, "(auto-revert-mode nil)");
   });
 
+  test("DELETION then RECREATION: the absent window survives; the next edit still reverts (valve r4)", async () => {
+    writeFileSync("dr.txt", "v1\n");
+    e(editor, '(find-file "dr.txt")');
+    e(editor, "(auto-revert-mode t)");
+    // Delete (the path goes ABSENT), then recreate.
+    require("node:fs").unlinkSync(join(process.cwd(), "dr.txt"));
+    await new Promise((r) => setTimeout(r, 300));
+    writeFileSync("dr.txt", "v2\n");
+    const reverted = await waitFor(() => strip(String(bufferText(editor))).includes("v2"));
+    expect(reverted).toBe(true);
+    e(editor, "(auto-revert-mode nil)");
+  });
+
+  test("the REGISTRATION SCAN preserves the user's cursor (valve r4)", () => {
+    writeFileSync("ps.txt", "l1\nl2\nl3\nl4\nl5\nl6\n");
+    e(editor, '(find-file "ps.txt")');
+    e(editor, "(cursor-move 4 1)");
+    // The scan (mode ON) switches through buffers registering.
+    e(editor, "(auto-revert-mode t)");
+    expect(Number(e(editor, "(cursor-line)").value)).toBe(4);
+    expect(Number(e(editor, "(cursor-column)").value)).toBe(1);
+    e(editor, "(auto-revert-mode nil)");
+  });
+
   test("ATOMIC SAVE (write-temp + rename): the watch re-establishes; later changes still revert (valve r3)", async () => {
     writeFileSync("at.txt", "v1\n");
     e(editor, '(find-file "at.txt")');
