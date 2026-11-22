@@ -20,9 +20,12 @@ that naive approaches get wrong.
    block (`-b -c +B +C` — the `-` run precedes the `+` run), so a
    converted `-` is HELD while kept `+` lines jump over it:
    selecting b→B yields `-b +B ' c'`, not `-b ' c' +B`. Context
-   lines, kept `-` lines, markers and the hunk end flush the held
+   lines, kept `-` lines and the hunk end flush the held
    lines (old-side order stays ascending: b(k) c(conv) d(k) →
-   `-b ' c' -d`).
+   `-b ' c' -d`). A MARKER arriving with held context REFUSES by
+   name — flushing between a kept line and its marker re-attaches
+   the marker to the converted line (the gate's live-probed index
+   corruption; the marker must be ADJACENT to its kept line).
 3. **The sign-swap mirror for the cached side.** Unstaging a subset
    builds the patch with the body's signs swapped and the header
    starts exchanged: a dropped change STAYS in the index (its `+`

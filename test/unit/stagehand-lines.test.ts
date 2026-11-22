@@ -171,7 +171,10 @@ describe("#331 — partial-patch construction (round-trips vs REAL git)", () => 
     // Selected → applies.
     const patch = applyPartial("t t t t");
     expect(patch).toContain(hexBs());
-    expect(git("show", ":f.txt")).toBe("a\nB"); // git() trims
+    // BYTE-exact (no trim): the index ends 'B' with NO trailing
+    // newline — the property this feature exists to protect.
+    const bytes = execFileSync("git", ["show", ":f.txt"], { cwd: process.cwd() });
+    expect(new TextDecoder().decode(bytes)).toBe("a\nB");
   });
 
   test("the heading TAIL survives the rebuild (real C function context)", () => {
@@ -219,7 +222,7 @@ function hexBs(): string {
 const waitApply = async (ed: Editor, ms = 6000) => {
   for (let i = 0; i < ms / 25; i++) {
     const st = String(e(ed, "(editor-status)").value);
-    if (st.includes("hunk applied") || st.includes("apply failed") || st.includes("refused") || st.includes("stay selected") || st.includes("nothing selected")) return st;
+    if (st.includes("hunk applied") || st.includes("apply failed") || st.includes("refused") || st.includes("stay selected") || st.includes("nothing selected") || st.includes("no-newline")) return st;
     await new Promise((r) => setTimeout(r, 25));
   }
   return "TIMEOUT:" + String(e(ed, "(editor-status)").value);

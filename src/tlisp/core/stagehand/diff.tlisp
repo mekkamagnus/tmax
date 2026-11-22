@@ -156,12 +156,13 @@ context passes through bare)."
 (defun stagehand-diff-buffer-name () "*Stagehand-Diff*")
 
 (defun stagehand-diff-open (text title &optional (side "worktree" side-supplied-p) (root nil root-supplied-p) (paths nil paths-supplied-p))
-  (setq stagehand-diff-mark nil) ;; refresh-safe: line numbers shift
   "Render the parsed, FACED diff into *Stagehand-Diff* and switch to
 it. TEXT is raw `git diff --no-color` output; TITLE rides the first
 line. SIDE ('worktree'|'cached') selects which hunk ops apply; ROOT
 is the apply cwd; PATHS the diff's -- arguments (nil = the whole
 diff)."
+  ;; refresh-safe: line numbers shift (the gate's stale-mark probe).
+  (setq stagehand-diff-mark nil)
   (let ((pairs (stagehand-diff-parse text)))
     (if (and (null (cdr pairs)) (string= (car (car pairs)) "context") (string= (car (cdr (car pairs))) ""))
       (editor-set-status "Stagehand: empty diff")
@@ -465,7 +466,7 @@ omits entirely."
           ;; refuse this configuration by name.
           (progn
             (setq stagehand-diff-partial-refusal
-              "the no-newline line must stay selected")
+              "no-newline adjacency: kept lines and their marker must be contiguous")
             nil))
         (marker
           ;; Rides its kept line ADJACENTLY; counts toward NEITHER side.
