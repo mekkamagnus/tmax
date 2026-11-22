@@ -515,3 +515,69 @@ describe("#307 — valve r3 fixes", () => {
     expect(v).not.toContain("no matches for pat\n");
   });
 });
+
+describe("#307 — valve r4 fixes", () => {
+  test("an away-render keeps *grep*'s RECORDED selection (return + n resumes there)", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "one")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("b", 1, 1, "two")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("c", 1, 1, "three")})`);
+    // STILL STREAMING (no complete yet — a post-completion append
+    // would legitimately drop).
+    e(editor, "(editor/commands/grep/grep-next)"); // → hit 2
+    e(editor, "(editor/commands/grep/grep-next)"); // → hit 3
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(2);
+    e(editor, '(buffer-create "*away*")');
+    e(editor, '(buffer-switch "*away*")');
+    // A late hit lands (the away render).
+    e(editor, `(grep-buffer-append-hit 1 ${hit("d", 1, 1, "four")})`);
+    // Returning: the recorded selection resumes from hit 3.
+    e(editor, '(buffer-switch "*grep*")');
+    e(editor, "(editor/commands/grep/grep-next)"); // 3 → 4
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(3); // hit 4
+    expect(st(editor)).toContain("4 of 4");
+    e(editor, '(grep-buffer-complete 1 "done" nil)');
+  });
+
+  test("p wraps across MULTIPLE hits; count strides BOTH directions", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    for (const t of ["1", "2", "3", "4"]) {
+      e(editor, `(grep-buffer-append-hit 1 ${hit(`f${t}`, 1, 1, t)})`);
+    }
+    e(editor, '(grep-buffer-complete 1 "done" nil)');
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(editor/commands/grep/grep-prev)"); // wraps 1 → 4
+    expect(st(editor)).toContain("4 of 4");
+    e(editor, "(count-set 2)");
+    e(editor, "(editor/commands/grep/grep-prev)"); // 4 - 2 = 2
+    expect(st(editor)).toContain("2 of 4");
+    e(editor, "(count-set 2)");
+    e(editor, "(editor/commands/grep/grep-next)"); // 2 + 2 = 4
+    expect(st(editor)).toContain("4 of 4");
+  });
+
+  test("q restores ONE specifically expected most-recent buffer", () => {
+    writeFileSync(join(process.cwd(), "expected.txt"), "content\n");
+    e(editor, '(find-file "expected.txt")'); // most recent
+    e(editor, '(buffer-switch "*scratch*")'); // then scratch (older)
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, '(grep-buffer-complete 1 "no-matches" nil)');
+    e(editor, "(editor/commands/grep/grep-quit)");
+    // The Editor's recency survivor picks the most-recently-used
+    // non-grep buffer — find-file's touch makes expected.txt the
+    // most recent TOUCHED even though scratch was visited last.
+    expect(String(e(editor, "(buffer-name)").value)).toBe("expected.txt");
+  });
+
+  test("the PRODUCER drives the full lifecycle (register→append→complete→rollback)", () => {
+    const mk = `(hashmap "backend" "t" "pattern" "p" "scope" "." "rerun" (lambda () nil))`;
+    const g = Number(String(e(editor, `(grep-test-producer (list (list "register" ${mk})))`).value));
+    expect(g).toBeGreaterThan(0);
+    e(editor, `(grep-test-producer (list (list "append" ${g} ${hit("a", 1, 1, "one")})))`);
+    e(editor, `(grep-test-producer (list (list "complete" ${g} "done" nil)))`);
+    expect(strip(bufferText(editor))).toContain("a:1:1:one");
+    e(editor, `(grep-test-producer (list (list "register" ${mk})))`);
+    e(editor, `(grep-test-producer (list (list "rollback" ${g + 1})))`);
+    expect(strip(bufferText(editor))).toContain("a:1:1:one"); // restored
+  });
+});
