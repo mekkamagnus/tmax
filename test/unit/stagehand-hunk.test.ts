@@ -505,3 +505,62 @@ describe("#291 — the cursor-line/raw-line seam", () => {
     expect(git("diff", "--cached")).not.toContain("+Y"); // f1's hunk unstaged
   });
 });
+
+describe("#291 — gate r5 residuals", () => {
+  test("MODE+CONTENT: the content hunk stages; the mode change stays worktree-only", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nv2\nv3\n");
+    commit("base");
+    // A WORKTREE-only mode change (a plain chmod — update-index
+    // would stage the mode into the index and ruin the shape).
+    execFileSync("chmod", ["+x", "f.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\nCHANGED\nv3\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied"); // NOT 'mode-only changes'
+    expect(git("diff", "--cached")).toContain("CHANGED");
+    expect(git("diff", "--cached")).not.toContain("new mode"); // content only
+    // The index keeps mode 100644; the worktree keeps 755.
+    expect(git("ls-files", "-s", "f.txt")).toMatch(/^100644 /);
+  });
+
+  test("END-TO-END on a SPACE path: the content hunk applies through git apply", async () => {
+    writeFileSync(join(process.cwd(), "my file.txt"), "a\nb\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "my file.txt"), "a\nB\n");
+    openDiff("my file.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("diff", "--cached")).toContain("+B");
+    expect(file("my file.txt")).toBe("a\nB\n"); // worktree intact
+  });
+
+  test("END-TO-END on a QUOTED (non-ASCII) path: the content hunk applies", async () => {
+    writeFileSync(join(process.cwd(), "café.txt"), "x\ny\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "café.txt"), "x\nY\n");
+    openDiff("café.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("diff", "--cached")).toContain("+Y");
+  });
+
+  test("D refuses on a refusal-class block (binary) — no y/n prompt", async () => {
+    writeFileSync(join(process.cwd(), "b.bin"), Buffer.from([0, 1, 2, 3]));
+    commit("base");
+    writeFileSync(join(process.cwd(), "b.bin"), Buffer.from([0, 1, 2, 9]));
+    openDiff("b.bin");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-discard-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("binary files not supported");
+    expect(git("diff", "--cached")).toBe(""); // nothing applied
+  });
+});

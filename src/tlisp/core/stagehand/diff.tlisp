@@ -235,15 +235,15 @@ source diff's FILE HEADER (diff --git/index/---/+++ — the block
 since the last 'diff --git') verbatim + the hunk verbatim (@@ header
 + body + the no-newline marker carried WITH it)."
   (stagehand-diff-collect (stagehand-diff-parse (or stagehand-diff-raw ""))
-    (list) 0 idx nil (list)))
+    (list) 0 idx nil))
 
-(defun stagehand-diff-collect (pairs header count target cur out)
+(defun stagehand-diff-collect (pairs header count target cur)
   ;; Walk the CLASSIFIED pairs. COUNT is the number of hunk headers
   ;; seen so far; CUR is the current hunk's accumulating lines (nil
   ;; between hunks).
   (if (null pairs)
     (string-join "\n"
-      (append header (if cur (reverse cur) out)))
+      (append header (if cur (reverse cur) (list))))
     (let* ((pair (car pairs))
            (cls (car pair))
            (line (car (cdr pair))))
@@ -256,10 +256,10 @@ since the last 'diff --git') verbatim + the hunk verbatim (@@ header
             ;; Inside a hunk: a new file header ends it.
             (if (= (- count 1) target)
               (string-join "\n" (append header (reverse cur)))
-            (stagehand-diff-collect (cdr pairs) header count target nil (list)))
+            (stagehand-diff-collect (cdr pairs) header count target nil))
             (if (string-prefix-p "diff --git " line)
-              (stagehand-diff-collect (cdr pairs) (list line) count target nil (list))
-              (stagehand-diff-collect (cdr pairs) (append header (list line)) count target nil (list)))))
+              (stagehand-diff-collect (cdr pairs) (list line) count target nil)
+              (stagehand-diff-collect (cdr pairs) (append header (list line)) count target nil))))
         ((or (string-prefix-p "new file mode" line)
              (string-prefix-p "deleted file mode" line)
              (string-prefix-p "similarity index" line)
@@ -279,29 +279,29 @@ since the last 'diff --git') verbatim + the hunk verbatim (@@ header
           (if (and cur (= (- count 1) target))
             (string-join "\n" (append header (reverse cur)))
             (stagehand-diff-collect (cdr pairs) (append header (list line))
-              count target nil (list))))
+              count target nil)))
         ((string= cls "hunk-header")
           (if (= count target)
             ;; The TARGET hunk starts.
-            (stagehand-diff-collect (cdr pairs) header (+ count 1) target (list line) (list))
+            (stagehand-diff-collect (cdr pairs) header (+ count 1) target (list line))
             (if (and cur (= (- count 1) target))
               (string-join "\n" (append header (reverse cur)))
-              (stagehand-diff-collect (cdr pairs) header (+ count 1) target nil (list)))))
+              (stagehand-diff-collect (cdr pairs) header (+ count 1) target nil))))
         ((string= cls "meta")
           (if (string-prefix-p (hex-decode "5c204e6f") line)
             ;; The no-newline marker rides WITH its hunk.
             (if (and cur (= (- count 1) target))
-              (stagehand-diff-collect (cdr pairs) header count target (cons line cur) (list))
-              (stagehand-diff-collect (cdr pairs) header count target cur out))
+              (stagehand-diff-collect (cdr pairs) header count target (cons line cur))
+              (stagehand-diff-collect (cdr pairs) header count target cur))
             ;; Other meta (rename/mode/binary): ends any hunk.
             (if (and cur (= (- count 1) target))
               (string-join "\n" (append header (reverse cur)))
-              (stagehand-diff-collect (cdr pairs) header count target nil (list)))))
+              (stagehand-diff-collect (cdr pairs) header count target nil))))
         (t
           ;; add/remove/context: hunk BODY.
           (if (and cur (= (- count 1) target))
-            (stagehand-diff-collect (cdr pairs) header count target (cons line cur) (list))
-            (stagehand-diff-collect (cdr pairs) header count target cur out)))))))
+            (stagehand-diff-collect (cdr pairs) header count target (cons line cur))
+            (stagehand-diff-collect (cdr pairs) header count target cur)))))))
 
 ;; ── the hunk ops ────────────────────────────────────────────────────
 (defun stagehand-diff-stage-hunk ()
@@ -425,15 +425,23 @@ the n-first y/n."
     ((stagehand-diff-patch-has "rename to ") "rename hunks: use file-level ops (#287)")
     ((stagehand-diff-patch-has "copy from ") "copy hunks: use file-level ops (#287)")
     ((stagehand-diff-patch-has "copy to ") "copy hunks: use file-level ops (#287)")
-    ((and (stagehand-diff-patch-has "old mode ") (stagehand-diff-patch-has "new mode "))
+    ((and (stagehand-diff-patch-has "old mode ")
+          (stagehand-diff-patch-has "new mode ")
+          (not (stagehand-diff-patch-has "@@ ")))
+      ;; MODE-ONLY: no hunks in the block. A mode+CONTENT block
+      ;; stages its content hunks (the reconstructed header omits the
+      ;; mode lines — the patch carries content only; the mode change
+      ;; stays unstaged, hunk-granular like file-level ops own it).
       "mode-only changes not supported")
     (t nil)))
 
 (defun stagehand-diff-block-at-cursor ()
   "The 0-based file BLOCK containing the cursor (the count of
-'diff --git' lines at/above the cursor line in the raw view — the
-same raw-line/cursor-line correspondence stagehand-diff-hunks
-uses). The refusal scope keys on THIS: structural, never path-text
+'diff --git' raw lines up to the cursor's — NOTE the index spaces
+differ from stagehand-diff-hunks: hunk positions live in BUFFER-line
+space (compared to cursor-line directly), this scan walks RAW-index
+space (cursor-line - 1, the title-line offset)). The refusal scope
+keys on THIS: structural, never path-text
 (git's trailing-tab space form and core.quotePath quoted forms made
 every path-parse-based keying miss — the r4 gate's confirmed hole:
 a rename-with-content hunk on a space/non-ASCII path reached git
