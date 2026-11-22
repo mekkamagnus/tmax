@@ -1,0 +1,104 @@
+(defmodule editor/commands/grep-scope
+  (export grep-scope-here grep-scope-project grep-scope-accept
+          grep-scope-table grep-scope-start-path grep-scope-resolve)
+
+;; #310 — the grep subsystem's user-facing scope commands (RFC-031
+;; §2.3). FRESH root detection on EVERY invocation (the *project-root*
+;; cache is BYPASSED — a stale cached root must not redirect the
+;; search; `(project-root)` alone returns its cache, so the detection
+;; primitive is called directly with an explicit start path).
+(require-module editor/commands/grep)
+
+(defvar grep-scope-pending nil
+  "The resolved scope awaiting the minibuffer answer (a string), or
+the symbol 'no-project (SPC p s outside a project — refused).")
+
+(defun grep-scope-start-path ()
+  "The detection start: the current buffer's file dir; no file →
+process.cwd()."
+  (let ((fn (buffer-filename)))
+    (if (and (stringp fn) (> (length fn) 0))
+      (let ((dir (car (reverse (string-split fn "/")))))
+        ;; dirname: strip the last path segment (naive but the
+        ;; primitive takes any start INSIDE the tree).
+        (if (> (length dir) 0)
+          (concat dir "/")
+          "."))
+      ".")))
+
+(defun grep-scope-resolve (binding)
+  "FRESH root detection for BINDING ('here | 'project). Returns the
+scope string, or nil when 'project found no project."
+  (let ((detected (project-detect-root (grep-scope-start-path))))
+    (if (stringp detected)
+      detected
+      (if (string= binding "here")
+        ;; here: no project → the start path itself.
+        (grep-scope-start-path)
+        nil))))
+
+(defun grep-scope-prompt-label (backend scope)
+  "The truthful pre-typed label: backend + resolved scope."
+  (concat "grep (" backend ") " scope ": "))
+
+(defun grep-scope-here ()
+  "SPC s g — search from HERE: the freshly-detected project root
+(cache bypassed); no project → the start path itself."
+  (interactive)
+  (grep-scope-open "here"))
+
+(defun grep-scope-project ()
+  "SPC p s — search the PROJECT: fresh detection; outside a project
+→ the named status, no search, no buffer."
+  (interactive)
+  (let ((scope (grep-scope-resolve "project")))
+    (if (null scope)
+      (editor-set-status "not in a project — SPC s g searches from here")
+      (grep-scope-open-at scope))))
+
+(defun grep-scope-open (binding)
+  (let ((scope (grep-scope-resolve binding)))
+    (if (null scope)
+      (editor-set-status "not in a project — SPC s g searches from here")
+      (grep-scope-open-at scope))))
+
+(defun grep-scope-open-at (scope)
+  ;; Backend detection BEFORE the prompt (the label is truthful).
+  (let ((backend (if (exec-lookup "rg") "rg" "none")))
+    (if (string= backend "none")
+      (editor-set-status "grep: no search backend (rg missing)")
+      (progn
+        (setq grep-scope-pending scope)
+        (completing-read
+          (grep-scope-prompt-label backend scope)
+          "editor/commands/grep-scope/grep-scope-table"
+          nil
+          nil
+          ""
+          "grep-scope-history"
+          "editor/commands/grep-scope/grep-scope-accept")))))
+
+(defun grep-scope-table (input action)
+  ;; A free-text prompt (no candidates) — the SPEC-116 shape.
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list)))
+
+(defun grep-scope-accept (pattern)
+  "The accept handler: empty input cancels (no process, no buffer);
+otherwise the #308 backend searches the RESOLVED scope. A spawn
+failure after accept leaves an open results buffer untouched (the
+#308 rollback owns that)."
+  (let ((scope grep-scope-pending))
+    (setq grep-scope-pending nil)
+    (cond
+      ((null scope)
+        (editor-set-status "grep: no scope pending"))
+      ((and (stringp pattern) (> (length pattern) 0))
+        (grep-search pattern scope))
+      (t
+        ;; Empty input → cancel: status cleared, nothing spawned.
+        (editor-set-status "")))))
+
+(provide "grep-scope")
+)

@@ -60,26 +60,11 @@
           "find-file")))))
 
 (defun project-search-cmd (pattern)
-  "Search project files for PATTERN. Results go to *Search Results* buffer."
-  (if (null *project-root*)
-    (project-root))
-  (if (null *project-root*)
-    (message "No project root — cannot search")
-    (let ((matches (project-search *project-root* pattern *project-ignore-extra*)))
-      (if (null matches)
-        (message (concat "No matches for: " pattern))
-        (progn
-          (buffer-create "*Search Results*")
-          (buffer-switch "*Search Results*")
-          (buffer-set-read-only nil)
-          (let ((i 0))
-            (while (< i (length matches))
-              (let ((m (nth i matches)))
-                (buffer-insert (concat (nth 0 m) ":" (number-to-string (nth 1 m)) ": " (nth 2 m) "\n")))
-              (setq i (+ i 1))))
-          (buffer-set-read-only t)
-          (cursor-move 0 0)
-          (message (concat "Found " (number-to-string (length matches)) " matches")))))))
+  "RETIRED (#310): the synchronous *Search Results* path is gone —
+the grep subsystem (SPC s g / SPC p s) owns search. Kept as a
+named deferral so old callers get the redirection, not silence."
+  (editor-set-status "project-search retired — SPC s g / SPC p s (the grep subsystem)")
+  nil)
 
 (defun project-dired ()
   "Open dired at the project root."
@@ -99,7 +84,7 @@
 
 ;; SPC p prefix for project commands
 (key-bind "SPC p f" "(project-find-file)" "normal")
-(key-bind "SPC p s" "(project-search-cmd (read-string \"Search: \"))" "normal")
+(key-bind "SPC p s" "(editor/commands/grep-scope/grep-scope-project)" "normal")
 (key-bind "SPC p d" "(project-dired)" "normal")
 (key-bind "SPC p r" "(project-root)" "normal")
 

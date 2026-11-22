@@ -123,6 +123,8 @@
   (require-module stagehand/stash)
   ;; #307: the grep hit-buffer subsystem (its own test producer).
   (require-module editor/commands/grep)
+  (require-module editor/commands/grep-scope)
+  (key-bind "SPC s g" "(editor/commands/grep-scope/grep-scope-here)" "normal")
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.
