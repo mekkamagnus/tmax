@@ -9,7 +9,7 @@
           stagehand-diff-table stagehand-diff-accept
           stagehand-diff-apply-filter stagehand-diff-apply-sentinel
           stagehand-diff-apply-exit-get stagehand-diff-side-get
-          stagehand-diff-refresh-view stagehand-diff-hunk-file)
+          stagehand-diff-refresh-view)
 
 ;; #289 — Stagehand T0: the diff GRAMMAR + faces. `git diff
 ;; --no-color` output is PARSED into line classes (never ANSI
@@ -261,11 +261,21 @@ since the last 'diff --git') verbatim + the hunk verbatim (@@ header
               (stagehand-diff-collect (cdr pairs) (list line) count target nil (list))
               (stagehand-diff-collect (cdr pairs) (append header (list line)) count target nil (list)))))
         ((or (string-prefix-p "new file mode" line)
-             (string-prefix-p "deleted file mode" line))
+             (string-prefix-p "deleted file mode" line)
+             (string-prefix-p "similarity index" line)
+             (string-prefix-p "dissimilarity index" line)
+             (string-prefix-p "rename from " line)
+             (string-prefix-p "rename to " line)
+             (string-prefix-p "copy from " line)
+             (string-prefix-p "copy to " line))
           ;; #291 gate r1: mode lines RIDE IN THE HEADER — dropping
           ;; them made the patch module-shaped and `git apply` staged
           ;; a PHANTOM dev/null path into the index (the gate's
-          ;; live-reproduced corruption).
+          ;; live-reproduced corruption). r4: rename/copy/similarity
+          ;; meta rides too — the reconstructed patch is
+          ;; git-apply-semantically complete even for
+          ;; rename-with-content (defense in depth: the refusal
+          ;; still owns renames in the UI).
           (if (and cur (= (- count 1) target))
             (string-join "\n" (append header (reverse cur)))
             (stagehand-diff-collect (cdr pairs) (append header (list line))
@@ -310,16 +320,19 @@ git apply -R - (a worktree mutation, NOT an index op). Confirms via
 the n-first y/n."
   (if (not (string= stagehand-diff-side "worktree"))
     (editor-set-status "Stagehand: D discards worktree hunks")
-    (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
-      (if (null idx)
-        (editor-set-status "Stagehand: no hunk at point")
-        (progn
+    (let ((refusal (stagehand-diff-refusal-reason)))
+      (if refusal
+        (editor-set-status (concat "Stagehand: " refusal))
+        (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
+          (if (null idx)
+            (editor-set-status "Stagehand: no hunk at point")
+            (progn
           (setq stagehand-diff-pending idx)
           (completing-read
             (concat "Discard this hunk in the worktree? (y/n)")
             "stagehand/diff/stagehand-diff-table"
             nil t "" "stagehand-diff-hist"
-            "stagehand/diff/stagehand-diff-accept"))))))
+            "stagehand/diff/stagehand-diff-accept"))))))))
 
 (defvar stagehand-diff-pending nil
   "The hunk idx awaiting the discard y/n.")
@@ -362,6 +375,10 @@ the n-first y/n."
     ((and (string= op "unstage") (not (string= stagehand-diff-side "cached")))
       (editor-set-status "Stagehand: u unstages cached hunks"))
     (t
+      ;; Refusal scoped to the CURSOR'S BLOCK first (r4: structural
+      ;; keying — the refusal classes have no hunks, their cursor
+      ;; sits in the block), then the hunk-at-point check (never a
+      ;; mislabeled 'no hunk at point' for a refusal-class block).
       (let ((refusal (stagehand-diff-refusal-reason)))
         (if refusal
           (editor-set-status (concat "Stagehand: " refusal))
@@ -412,63 +429,29 @@ the n-first y/n."
       "mode-only changes not supported")
     (t nil)))
 
-(defun stagehand-diff-hunk-file (idx)
-  "The FILE the target hunk IDX belongs to (its owning header block's
-b-side path) — the refusal scope keys on THIS, never the view's
-first path (the r3 gate's wrong-keying catch: a first-listed rename
-falsely blocked every later file's hunks in a multi-file view)."
-  (stagehand-diff-hunk-file-scan
-    (stagehand-diff-parse (or stagehand-diff-raw ""))
-    nil 0 idx))
+(defun stagehand-diff-block-at-cursor ()
+  "The 0-based file BLOCK containing the cursor (the count of
+'diff --git' lines at/above the cursor line in the raw view — the
+same raw-line/cursor-line correspondence stagehand-diff-hunks
+uses). The refusal scope keys on THIS: structural, never path-text
+(git's trailing-tab space form and core.quotePath quoted forms made
+every path-parse-based keying miss — the r4 gate's confirmed hole:
+a rename-with-content hunk on a space/non-ASCII path reached git
+apply unrefused), and never hunk-at-point-keyed (the refusal
+classes — binary/rename/mode-only — have NO hunks, so their cursor
+sits in the block, not on a hunk)."
+  (stagehand-diff-block-scan
+    (string-split (or stagehand-diff-raw "") "\n")
+    (cursor-line) 0 0))
 
-(defun stagehand-diff-hunk-file-scan (pairs bpath count target)
-  ;; BPATH: the current file's b-path (the latest +++ or diff --git
-  ;; b-side); COUNT: hunks seen so far.
-  (if (null pairs)
-    bpath
-    (let* ((pair (car pairs))
-           (cls (car pair))
-           (line (car (cdr pair))))
-      (cond
-        ((string= cls "file-header")
-          (stagehand-diff-hunk-file-scan (cdr pairs)
-            (or (stagehand-diff-b-side line) bpath) count target))
-        ((string= cls "hunk-header")
-          (if (= count target)
-            bpath
-            (stagehand-diff-hunk-file-scan (cdr pairs) bpath
-              (+ count 1) target)))
-        (t
-          (stagehand-diff-hunk-file-scan (cdr pairs) bpath count target))))))
-
-(defun stagehand-diff-b-side (header-line)
-  ;; '+++ b/<path>' or 'diff --git a/x b/<path>' → the b-side path
-  ;; (nil otherwise; quoted forms handled).
-  (cond
-    ((string-prefix-p "+++ b/" header-line)
-      (substring header-line 6 (length header-line)))
-    ((string-prefix-p "+++ " header-line)
-      ;; /dev/null (a DELETED file's b-side) must NOT override the
-      ;; real b-path from the diff --git line — nil lets it survive
-      ;; (the gate r4 concern: an empty refusal scope by accident).
-      (if (string= header-line "+++ /dev/null")
-        nil
-        (substring header-line 4 (length header-line))))
-    ((string-prefix-p "diff --git " header-line)
-      (stagehand-diff-b-side-scan header-line))
-    (t nil)))
-
-(defun stagehand-diff-b-side-scan (header-line)
-  ;; The token after ' b/' in the diff --git line.
-  (stagehand-diff-b-token (string-split header-line " ") nil))
-
-(defun stagehand-diff-b-token (tokens found)
-  (if (or (null tokens) found)
-    found
-    (let ((tk (car tokens)))
-      (if (string-prefix-p "b/" tk)
-        (substring tk 2 (length tk))
-        (stagehand-diff-b-token (cdr tokens) found)))))
+(defun stagehand-diff-block-scan (lines i idx seen)
+  ;; IDX: raw line index; SEEN: diff --git lines passed (so far).
+  (if (or (null lines) (> idx i))
+    (- seen 1)
+    (stagehand-diff-block-scan (cdr lines) i (+ idx 1)
+      (if (string-prefix-p "diff --git " (car lines))
+        (+ seen 1)
+        seen))))
 
 (defun stagehand-diff-patch-has (needle)
   ;; Scoped to the TARGET FILE's section (a rename on an unrelated
@@ -478,42 +461,28 @@ falsely blocked every later file's hunks in a multi-file view)."
     (string-split (or (stagehand-diff-file-section) "") "\n") needle))
 
 (defun stagehand-diff-file-section ()
-  "The TARGET file's raw section: from its 'diff --git' line to the
-next one. Keyed on the HUNK AT POINT's owning file (never the view's
-first path — the r3 gate's wrong-keying catch)."
-  (let* ((lines (string-split (or stagehand-diff-raw "") "\n"))
-         (idx (stagehand-diff-hunk-idx-at-cursor))
-         (target (if (null idx)
-                   (car stagehand-diff-paths)
-                   (or (stagehand-diff-hunk-file idx)
-                     (car stagehand-diff-paths)))))
-    (if target
-      (stagehand-diff-section-of lines target nil (list))
-      (or stagehand-diff-raw ""))))
+  "The section under the CURSOR — its 'diff --git' BLOCK, verbatim
+to the next one. Keyed on the cursor's block ordinal (structural —
+the r3 wrong-keying catch AND the r4 quoted/space-path hole both
+die here: no path is ever parsed, no hunk is required at point)."
+  (stagehand-diff-section-block
+    (string-split (or stagehand-diff-raw "") "\n")
+    (stagehand-diff-block-at-cursor) 0 nil (list)))
 
-(defun stagehand-diff-section-of (lines path collecting out)
+(defun stagehand-diff-section-block (lines target block collecting out)
+  ;; The TARGET-th 'diff --git' block, verbatim (to the next one).
   (if (null lines)
     (string-join "\n" (reverse out))
     (let ((line (car lines)))
       (if (string-prefix-p "diff --git " line)
         (if collecting
           (string-join "\n" (reverse out))
-          (if (stagehand-diff-header-names-p line path)
-            (stagehand-diff-section-of (cdr lines) path t (list line))
-            (stagehand-diff-section-of (cdr lines) path nil (list))))
+          (if (= block target)
+            (stagehand-diff-section-block (cdr lines) target block t (list line))
+            (stagehand-diff-section-block (cdr lines) target (+ block 1) nil (list))))
         (if collecting
-          (stagehand-diff-section-of (cdr lines) path t (cons line out))
-          (stagehand-diff-section-of (cdr lines) path nil (list)))))))
-
-(defun stagehand-diff-header-names-p (header-line path)
-  ;; 'diff --git a/<old> b/<new>' names PATH on EITHER side (renames:
-  ;; the path may be the new side) — or the quoted form.
-  (or (string-prefix-p (concat "diff --git a/" path " ") header-line)
-      (string= (concat "diff --git a/" path) header-line)
-      (string-prefix-p (concat "diff --git \"" path "\" ") header-line)
-      (string-prefix-p (concat " b/" path " ") header-line)
-      (string-suffix-p (concat " b/" path) header-line)
-      (string-prefix-p (concat " b/\"" path "\"") header-line)))
+          (stagehand-diff-section-block (cdr lines) target block t (cons line out))
+          (stagehand-diff-section-block (cdr lines) target block nil (list)))))))
 
 (defun stagehand-diff-scan-for (lines needle)
   (if (null lines)

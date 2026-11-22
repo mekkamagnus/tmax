@@ -399,3 +399,83 @@ describe("#291 — key availability + keys", () => {
     expect(git("diff", "--cached")).toContain("+v2");
   });
 });
+
+describe("#291 — gate r4 regressions (quoted/space paths)", () => {
+  /** Rename-WITH-CONTENT staged; the cached view opened via the Staged row. */
+  const stagedRenameWithContent = (oldName: string, newName: string) => {
+    writeFileSync(join(process.cwd(), oldName), "a\nb\n");
+    commit("base");
+    execFileSync("git", ["mv", oldName, newName], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), newName), "a\nB\n");
+    execFileSync("git", ["add", newName], { cwd: process.cwd() });
+    e(editor, "(stagehand/status/stagehand-status)");
+    const ls = strip(bufferText(editor)).split("\n");
+    const hdr = ls.findIndex((l) => l.startsWith("Staged ("));
+    e(editor, `(cursor-move ${hdr} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    e(editor, "(cursor-move 0 0)");
+  };
+
+  // r4: git's trailing-tab space form and core.quotePath quoting made
+  // every path-text keying miss — the refusal scope went EMPTY and
+  // the rename-with-content hunk reached git apply unrefused.
+  test("a SPACE path's rename-with-content hunk still refuses (u)", async () => {
+    stagedRenameWithContent("old r.txt", "new spa.txt");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("rename hunks");
+    expect(git("diff", "--cached")).toContain("+B"); // nothing applied
+  });
+
+  test("a QUOTED (non-ASCII) path's rename-with-content hunk still refuses (u)", async () => {
+    stagedRenameWithContent("plain.txt", "café.txt");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("rename hunks");
+    expect(git("diff", "--cached")).toContain("+B");
+  });
+
+  // r4 gap 2: the reconstructed header now carries the rename/copy
+  // meta (defense in depth — the patch is git-apply-semantically
+  // complete even for rename-with-content).
+  test("the reconstructed patch carries the rename meta (never module-shaped)", () => {
+    stagedRenameWithContent("old r.txt", "new spa.txt");
+    const patch = String(e(editor, "(stagehand/diff/stagehand-diff-hunk-patch 0)").value);
+    expect(patch).toContain("diff --git ");
+    expect(patch).toContain("rename from ");
+    expect(patch).toContain("rename to ");
+    expect(patch).toContain("similarity index");
+    expect(patch).toContain("@@");
+  });
+
+  // r4 gap 3: no hunk at point on a NORMAL file says so — never the
+  // refusal mislabel; and a refusal-class BLOCK says the refusal —
+  // never "no hunk at point".
+  test("message ordering: refusal-class block → the named refusal; normal file → 'no hunk at point'", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    writeFileSync(join(process.cwd(), "ren.txt"), "r\n");
+    commit("base");
+    execFileSync("git", ["mv", "ren.txt", "a-renamed.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    // STAGE both (the rename only appears in the CACHED view — a
+    // staged rename is no worktree change, so the unstaged view
+    // cannot show it) and open via the Staged section row.
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    e(editor, "(stagehand/status/stagehand-status)");
+    const ls0 = strip(bufferText(editor)).split("\n");
+    const hdr = ls0.findIndex((l) => l.startsWith("Staged ("));
+    e(editor, `(cursor-move ${hdr} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    // Line 0: a-renamed.txt's diff --git (alphabetically first) — a
+    // refusal-class BLOCK with no hunk at point in it.
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("rename hunks");
+    // Into f.txt's block, on its diff --git line (no hunk at point).
+    const ls = strip(bufferText(editor)).split("\n");
+    const fhdr = ls.findIndex((l) => l.startsWith("diff --git a/f.txt"));
+    e(editor, `(cursor-move ${fhdr} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("no hunk at point");
+  });
+});
