@@ -190,3 +190,99 @@ describe("#307 — navigation + landing", () => {
     expect(String(e(editor, "(buffer-name)").value)).not.toBe("*grep*");
   });
 });
+
+describe("#307 — gate r1 fixes", () => {
+  test("the DATA-DESTROYER: a completion landing while ANOTHER buffer is current never touches it", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a.txt", 1, 1, "one")})`);
+    // The user switches away mid-search.
+    e(editor, '(buffer-create "*work*")');
+    e(editor, '(buffer-switch "*work*")');
+    e(editor, '(buffer-insert "MY WORK")');
+    e(editor, "(cursor-move 0 4)");
+    // The async completion + a second hit land HERE.
+    e(editor, `(grep-buffer-append-hit 1 ${hit("b.txt", 1, 1, "two")})`);
+    e(editor, '(grep-buffer-complete 1 "done" nil)');
+    // *work* is INTACT and still current: content byte-identical,
+    // read-write, point unchanged.
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*work*");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("MY WORK");
+    const ro = e(editor, "(buffer-read-only-p)");
+    expect(String(ro.value)).toBe("false");
+    // The results rendered into *grep* correctly.
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toContain("a.txt:1:1:one");
+    expect(strip(bufferText(editor))).toContain("b.txt:1:1:two");
+  });
+
+  test("CONSECUTIVE rollbacks restore the right generations (pop, not peek)", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("g1.txt", 1, 1, "gen1")})`);
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 2 ${hit("g2.txt", 1, 1, "gen2")})`);
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 3 ${hit("g3.txt", 1, 1, "gen3")})`);
+    e(editor, "(grep-buffer-rollback 3)");
+    expect(strip(bufferText(editor))).toContain("gen2");
+    expect(strip(bufferText(editor))).not.toContain("gen3");
+    e(editor, "(grep-buffer-rollback 2)");
+    expect(strip(bufferText(editor))).toContain("gen1");
+    expect(strip(bufferText(editor))).not.toContain("gen2");
+  });
+
+  test("FLOAT line/col refuse; a STRING gen errors", () => {
+    expect(() => e(editor, `(grep-buffer-append-hit 1 ${hit("f", 1.5, 1, "t")})`)).toThrow(/line/);
+    expect(() => e(editor, `(grep-buffer-append-hit 1 ${hit("f", 1, 2.5, "t")})`)).toThrow(/col/);
+    expect(() => e(editor, `(grep-buffer-append-hit "x" ${hit("f", 1, 1, "t")})`)).toThrow(/gen/);
+  });
+
+  test("COUNT prefix strides and CONSUMES (2n then bare n moves 1)", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "1")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("b", 1, 1, "2")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("c", 1, 1, "3")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("d", 1, 1, "4")})`);
+    e(editor, '(grep-buffer-complete 1 "done" nil)');
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(count-set 2)");
+    e(editor, "(editor/commands/grep/grep-next)");
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(2); // stride 2
+    e(editor, "(editor/commands/grep/grep-next)");
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(3); // consumed: stride 1
+    expect(st(editor)).toContain("4 of 4");
+  });
+
+  test("STREAMING: the point stays on the first hit while hits append", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "first")})`);
+    e(editor, "(cursor-move 0 0)"); // the user selects hit 1
+    e(editor, `(grep-buffer-append-hit 1 ${hit("b", 1, 1, "second")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("c", 1, 1, "third")})`);
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(0); // STABLE
+    e(editor, '(grep-buffer-complete 1 "done" nil)');
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(0);
+  });
+
+  test("done with a MESSAGE rides as a diagnostic suffix", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, '(grep-buffer-complete 1 "done" "stopped early")');
+    const v = strip(bufferText(editor));
+    expect(v).toContain("no matches for pat");
+    expect(v).toContain("stopped early");
+  });
+
+  test("KEYMAP dispatch: Enter/n/g/q through the real keymap", async () => {
+    writeFileSync(join(process.cwd(), "k.txt"), "needle\n");
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("k.txt", 1, 1, "needle")})`);
+    e(editor, '(grep-buffer-complete 1 "done" nil)');
+    e(editor, "(cursor-move 0 0)");
+    await editor.handleKey("Enter");
+    expect(String(e(editor, "(buffer-name)").value)).toContain("k.txt");
+    e(editor, '(buffer-switch "*grep*")');
+    await editor.handleKey("n");
+    expect(st(editor)).toContain("1 of 1");
+    await editor.handleKey("q");
+    expect(String(e(editor, "(buffer-name)").value)).not.toBe("*grep*");
+  });
+});
