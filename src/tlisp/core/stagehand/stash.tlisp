@@ -1,0 +1,381 @@
+(defmodule stagehand/stash
+  (export stagehand-stash stagehand-stash-buffer-name
+          stagehand-stash-refresh stagehand-stash-quit
+          stagehand-stash-next
+          stagehand-stash-apply stagehand-stash-pop
+          stagehand-stash-drop stagehand-stash-accept
+          stagehand-stash-table
+          stagehand-stash-z stagehand-stash-u stagehand-stash-k
+          stagehand-stash-create
+          stagehand-stash-rows-get stagehand-stash-root
+          stagehand-stash-toggle-u-get stagehand-stash-toggle-k-get)
+
+  (require-module stagehand/status)
+
+;; #292 — Stagehand T1: the STASH POPUP. *Stagehand-Stash* lists
+;; `git stash list --format=%gd<US>%H<US>%gs` (argv, no shell — the
+;; porcelain contract: ref + commit ID + subject, unit-separated);
+;; rows render `stash@{N}  <subject>` with the subject VERBATIM after
+;; the first separator. Selection identity is COMMIT-ID ANCHORED: the
+;; render records (ref id) per row and every action re-resolves — a
+;; gone OR shifted ref refuses (`stash list changed — reselect`).
+;; Creation rides the z prefix (z u / z k toggles shown in the
+;; header, reset on open; z z creates and closes). Every mutation is
+;; argv-based; exit/stderr handling follows the #287/#291 lessons.
+
+;; ── state ───────────────────────────────────────────────────────────
+(defvar stagehand-stash-rows nil
+  "((ref id subject) ...) — the RENDERED rows (identity source).")
+(defvar stagehand-stash-toggle-u nil "z u — include-untracked pending.")
+(defvar stagehand-stash-toggle-k nil "z k — keep-index pending.")
+(defvar stagehand-stash-z-pending nil "the z creation prefix is armed.")
+(defvar stagehand-stash-pending-op nil "(op ref) awaiting the y/n.")
+
+(defun stagehand-stash-buffer-name () "*Stagehand-Stash*")
+
+(defun stagehand-stash-rows-get () stagehand-stash-rows)
+(defun stagehand-stash-root ()
+  (or (stagehand/status/stagehand-status-root) "."))
+(defun stagehand-stash-toggle-u-get () stagehand-stash-toggle-u)
+(defun stagehand-stash-toggle-k-get () stagehand-stash-toggle-k)
+
+;; ── the porcelain parse (FIRST separators; subject verbatim) ───────
+(defun stagehand-stash-sep () (hex-decode "1f"))
+
+(defun stagehand-stash-format ()
+  ;; %gd<US>%H<US>%gs — the separator is hex-built (the T-Lisp
+  ;; reader strips backslash escapes).
+  (concat "--format=%gd" (stagehand-stash-sep)
+    "%H" (stagehand-stash-sep) "%gs"))
+
+(defun stagehand-stash-parse (out)
+  "The list output → ((ref id subject) ...). The subject keeps
+everything after the SECOND separator VERBATIM (embedded
+separators, unicode — structural, never text-parsed)."
+  (stagehand-stash-parse-lines
+    (string-split (or out "") "\n") (list)))
+
+(defun stagehand-stash-parse-lines (lines out)
+  (if (null lines)
+    (reverse out)
+    (let ((line (car lines)))
+      (stagehand-stash-parse-lines (cdr lines)
+        (if (or (string= line "") (< (stagehand-stash-count-sep line) 2))
+          out
+          (cons (stagehand-stash-parse-line line) out))))))
+
+(defun stagehand-stash-parse-line (line)
+  ;; Split on EVERY separator, then re-join parts 2+ with it — the
+  ;; FIRST two separators are the field boundaries; a separator
+  ;; inside the SUBJECT rides verbatim.
+  (let ((parts (string-split line (stagehand-stash-sep))))
+    (list (nth 0 parts) (nth 1 parts)
+      (stagehand-stash-join-from parts 2))))
+
+(defun stagehand-stash-join-from (parts i)
+  ;; Interleave the separator BETWEEN parts only (a trailing glue
+  ;; would corrupt a subject that itself ENDS with a separator).
+  (if (>= i (length parts))
+    ""
+    (concat (nth i parts)
+      (if (< (+ i 1) (length parts))
+        (concat (stagehand-stash-sep)
+          (stagehand-stash-join-from parts (+ i 1)))
+        ""))))
+
+(defun stagehand-stash-count-sep (line)
+  (stagehand-stash-count-scan line 0 0))
+
+(defun stagehand-stash-count-scan (line i n)
+  (if (>= i (length line))
+    n
+    (stagehand-stash-count-scan line (+ i 1)
+      (if (string= (substring line i (+ i 1)) (stagehand-stash-sep))
+        (+ n 1) n))))
+
+;; ── the buffer ──────────────────────────────────────────────────────
+(defun stagehand-stash ()
+  "Z (in the status buffer) — open the stash popup: the list, or the
+`no stashes` line when empty. Toggles reset on open."
+  (setq stagehand-stash-toggle-u nil)
+  (setq stagehand-stash-toggle-k nil)
+  (setq stagehand-stash-z-pending nil)
+  (stagehand-stash-render
+    (stagehand-stash-parse
+      (stagehand-stash-list-out (stagehand-stash-list)))))
+
+(defun stagehand-stash-list ()
+  "git stash list (argv) → (stdout stderr exit)."
+  (shell-exec-argv
+    (list "git" "stash" "list" (stagehand-stash-format))
+    (stagehand-stash-root)))
+
+(defun stagehand-stash-list-out (res)
+  (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+    (car res)
+    ""))
+
+(defun stagehand-stash-render (rows)
+  (setq stagehand-stash-rows rows)
+  (stagehand-stash-ensure-buffer)
+  (major-mode-set "stagehand-stash")
+  (editor-set-mode "normal")
+  (buffer-set-read-only nil)
+  (stagehand-stash-clear)
+  (buffer-append (concat (stagehand-stash-header) "\n"))
+  (if (null rows)
+    (buffer-append "no stashes\n")
+    (stagehand-stash-emit rows))
+  (buffer-set-read-only t)
+  (stagehand-stash-ensure-keymap)
+  (cursor-move 2 0))
+
+(defun stagehand-stash-ensure-buffer ()
+  ;; Create-then-switch (the #286 idiom): buffer-switch errors on a
+  ;; missing buffer.
+  (if (not (string= (buffer-current) (stagehand-stash-buffer-name)))
+    (progn
+      (if (not (member (stagehand-stash-buffer-name) (buffer-list)))
+        (buffer-create (stagehand-stash-buffer-name)))
+      (buffer-switch (stagehand-stash-buffer-name)))))
+
+(defun stagehand-stash-header ()
+  ;; The pending toggle state rides the header (z u / z k).
+  (concat "Stash — [z] create "
+    (if stagehand-stash-toggle-u "[u]ntracked ON " "[u]ntracked off ")
+    (if stagehand-stash-toggle-k "[k]eep-index ON" "[k]eep-index off")
+    "  [a]pply [p]op [D]rop q"))
+
+(defun stagehand-stash-emit (rows)
+  (if (not (null rows))
+    (let ((r (car rows)))
+      (buffer-append (concat (nth 0 r) "  " (nth 2 r) "\n"))
+      (stagehand-stash-emit (cdr rows)))))
+
+(defun stagehand-stash-clear ()
+  ;; The #286 idiom: delete the rendered range, then the remnant.
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+(defun stagehand-stash-refresh ()
+  "g — re-render from git (identity re-recorded)."
+  (stagehand-stash-render
+    (stagehand-stash-parse
+      (stagehand-stash-list-out (stagehand-stash-list))))
+  (editor-set-status "Stagehand: stash list refreshed"))
+
+(defun stagehand-stash-next ()
+  "n — next row."
+  (cursor-move (+ (cursor-line) 1) 0))
+
+(defun stagehand-stash-quit ()
+  "q — close."
+  (buffer-kill (stagehand-stash-buffer-name)))
+
+;; ── selection (commit-ID anchored) ─────────────────────────────────
+(defun stagehand-stash-row-at-cursor ()
+  ;; The rendered row under point (nil on the header/empty/below).
+  (let ((i (- (cursor-line) 2)))
+    (if (and (>= i 0) (< i (length stagehand-stash-rows)))
+      (nth i stagehand-stash-rows)
+      nil)))
+
+(defun stagehand-stash-resolve (ref)
+  "REF → its current commit ID (nil when gone)."
+  (let ((res (shell-exec-argv
+               (list "git" "rev-parse" ref)
+               (stagehand-stash-root))))
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      (string-trim (car res))
+      nil)))
+
+(defun stagehand-stash-valid-row (row)
+  "The row's ref still resolves to its RECORDED id (a shifted ref
+with a different id is the covered refusal)."
+  (let ((now (stagehand-stash-resolve (nth 0 row))))
+    (and now (string= now (nth 1 row)))))
+
+(defun stagehand-stash-stale-recover ()
+  (stagehand-stash-refresh)
+  (editor-set-status "Stagehand: stash list changed — reselect"))
+
+;; ── the actions ─────────────────────────────────────────────────────
+(defun stagehand-stash-apply ()
+  "a — apply the stash at point (y/n; may conflict)."
+  (stagehand-stash-act "apply" "Apply this stash? (may conflict)"))
+
+(defun stagehand-stash-pop ()
+  "p — pop the stash at point (y/n; may conflict)."
+  (stagehand-stash-act "pop" "Pop this stash? (may conflict)"))
+
+(defun stagehand-stash-drop ()
+  "D — drop the stash at point (y/n with the ref echoed)."
+  (stagehand-stash-act "drop" "Drop this stash?"))
+
+(defun stagehand-stash-act (op prompt)
+  (setq stagehand-stash-z-pending nil)
+  (let ((row (stagehand-stash-row-at-cursor)))
+    (cond
+      ((and (null row) (null stagehand-stash-rows))
+        (editor-set-status "Stagehand: no stashes"))
+      ((null row)
+        (editor-set-status "Stagehand: no stash selected"))
+      ((not (stagehand-stash-valid-row row))
+        (stagehand-stash-stale-recover))
+      (t
+        (progn
+          (setq stagehand-stash-pending-op (list op (nth 0 row)))
+          (completing-read
+          (concat "Stagehand: " prompt
+            (if (string= op "drop")
+              (concat " <" (nth 0 row) ">")
+              "")
+            " (y/n)")
+          "stagehand/stash/stagehand-stash-table"
+          nil t "" "stagehand-stash-hist"
+          "stagehand/stash/stagehand-stash-accept"))))))
+
+(defun stagehand-stash-table (input action)
+  ;; n FIRST (the #287 lesson: a bare Enter must CANCEL).
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "n" "display" "n" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "y" "display" "y" "annotation" "" "metadata" (hashmap)))))
+
+(defun stagehand-stash-accept (answer)
+  (let ((pend stagehand-stash-pending-op))
+    (setq stagehand-stash-pending-op nil)
+    (if (and (string= answer "y") pend)
+      (stagehand-stash-run (nth 0 pend) (nth 1 pend))
+      (editor-set-status "Stagehand: cancelled"))))
+
+(defun stagehand-stash-run (op ref)
+  (let ((res (shell-exec-argv
+               (list "git" "stash" op ref)
+               (stagehand-stash-root))))
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      (progn
+        (stagehand-stash-refresh-silent)
+        (stagehand/status/stagehand-status-refresh)
+        (editor-set-status
+          (concat "Stagehand: stash " op " " ref " done")))
+      (editor-set-status
+        (concat "Stagehand: stash " op " failed ("
+          (number-to-string (nth 2 res)) ") "
+          (stagehand-stash-first-line (nth 1 res))
+          (if (or (string= op "apply") (string= op "pop"))
+            " — resolve in the worktree"
+            ""))))))
+
+(defun stagehand-stash-refresh-silent ()
+  (stagehand-stash-render
+    (stagehand-stash-parse
+      (stagehand-stash-list-out (stagehand-stash-list)))))
+
+(defun stagehand-stash-first-line (s)
+  (let ((l (car (string-split (concat (or s "") "\n") "\n"))))
+    (if (and l (> (length l) 0)) l "")))
+
+;; ── creation (the z prefix) ─────────────────────────────────────────
+(defun stagehand-stash-z ()
+  "z — the creation prefix: the FIRST z arms it (u/k toggle, the
+SECOND z creates — the spec's `z z`)."
+  (if stagehand-stash-z-pending
+    (stagehand-stash-create)
+    (progn
+      (setq stagehand-stash-z-pending t)
+      (editor-set-status
+        "Stagehand: z u (untracked) z k (keep-index) z z (create)"))))
+
+(defun stagehand-stash-u ()
+  "z u — toggle include-untracked (header re-renders; the prefix STAYS armed — a following z still creates)."
+  (if stagehand-stash-z-pending
+    (progn
+      (setq stagehand-stash-toggle-u
+        (not stagehand-stash-toggle-u))
+      (stagehand-stash-rerender-preserving))))
+
+(defun stagehand-stash-k ()
+  "z k — toggle keep-index (header re-renders; the prefix stays armed)."
+  (if stagehand-stash-z-pending
+    (progn
+      (setq stagehand-stash-toggle-k
+        (not stagehand-stash-toggle-k))
+      (stagehand-stash-rerender-preserving))))
+
+(defun stagehand-stash-rerender-preserving ()
+  ;; Re-render (the header changed — the rows did not), preserving
+  ;; the cursor line.
+  (buffer-set-read-only nil)
+  (stagehand-stash-clear)
+  (buffer-append (concat (stagehand-stash-header) "\n"))
+  (stagehand-stash-emit stagehand-stash-rows)
+  (buffer-set-read-only t)
+  (editor-set-status "Stagehand: toggle set"))
+
+;; z z — CREATE with the toggled flags, then close the popup.
+;; (Bound on the z key itself: the second z of the prefix.)
+(defun stagehand-stash-create ()
+  "z z — create the stash with the pending flags and close (called
+ARMED by the z dispatch)."
+  (let ((res (shell-exec-argv
+                 (append (list "git" "stash" "push")
+                   (if stagehand-stash-toggle-u (list "-u") (list))
+                   (if stagehand-stash-toggle-k (list "-k") (list)))
+                 (stagehand-stash-root))))
+    (setq stagehand-stash-z-pending nil)
+    (stagehand-stash-quit)
+    (stagehand/status/stagehand-status-refresh)
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      ;; A CLEAN tree exits 0 with 'No local changes' on STDOUT —
+      ;; check both streams before claiming success.
+      (if (or (stagehand-stash-nothing-p (car res))
+              (stagehand-stash-nothing-p (nth 1 res)))
+        (editor-set-status "Stagehand: nothing to stash")
+        ;; Success shows the NEW ref — a successful push always
+        ;; makes stash@{0}.
+        (editor-set-status "Stagehand: stashed stash@{0}"))
+      (editor-set-status
+        (concat "Stagehand: stash create failed ("
+          (number-to-string (nth 2 res)) ") "
+          (stagehand-stash-first-line (nth 1 res)))))))
+
+(defun stagehand-stash-nothing-p (err)
+  (stagehand-stash-has "No local changes" (or err "")))
+
+(defun stagehand-stash-has (needle hay)
+  (stagehand-stash-has-scan needle (string-split hay "\n")))
+
+(defun stagehand-stash-has-scan (needle lines)
+  (if (null lines)
+    nil
+    (if (string-prefix-p needle (car lines))
+      t
+      (stagehand-stash-has-scan needle (cdr lines)))))
+
+;; ── mode + keymap ────────────────────────────────────────────────────
+(major-mode-register "stagehand-stash" '() nil)
+(major-mode-doc "stagehand-stash" "Stagehand stash popup — z u/z k toggle creation flags (z z creates), a apply, p pop, D drop, g refresh, q close")
+(defun stagehand-stash-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-stash-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-stash"))
+        (editor/keymaps/keymap-set-key kmap "n" "(stagehand/stash/stagehand-stash-next)")
+        (editor/keymaps/keymap-set-key kmap "g" "(stagehand/stash/stagehand-stash-refresh)")
+        (editor/keymaps/keymap-set-key kmap "q" "(stagehand/stash/stagehand-stash-quit)")
+        (editor/keymaps/keymap-set-key kmap "a" "(stagehand/stash/stagehand-stash-apply)")
+        (editor/keymaps/keymap-set-key kmap "p" "(stagehand/stash/stagehand-stash-pop)")
+        (editor/keymaps/keymap-set-key kmap "D" "(stagehand/stash/stagehand-stash-drop)")
+        (editor/keymaps/keymap-set-key kmap "z" "(stagehand/stash/stagehand-stash-z)")
+        (editor/keymaps/keymap-set-key kmap "u" "(stagehand/stash/stagehand-stash-u)")
+        (editor/keymaps/keymap-set-key kmap "k" "(stagehand/stash/stagehand-stash-k)")
+        (editor/keymaps/buffer-set-keymap (stagehand-stash-buffer-name) kmap))))
+  t)
+
+(provide "stagehand-stash"))

@@ -116,6 +116,9 @@
   (require-module stagehand/stage)
   ;; #290: log/show/checkout (consumes status + diff).
   (require-module stagehand/log)
+  ;; #292: stash popup (consumes status — one-way; status's keymap
+  ;; binds Z into it lazily).
+  (require-module stagehand/stash)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.
