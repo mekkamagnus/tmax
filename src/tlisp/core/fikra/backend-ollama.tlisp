@@ -979,11 +979,36 @@ with its post-exit capture.")
   (setq fikra-ollama-action-pairs (hashmap))
   (setq fikra-ollama-action-posts (list)))
 
+;; r152: drop other threads' entries (newest-first preserved).
+(defun fikra-ollama-posts-for-thread (posts)
+  (if (or (not posts) (= (length posts) 0))
+    (list)
+    (let ((keep (string= (fikra-ollama-ref-thread (car posts))
+                         (fikra/thread/fikra-thread-current))))
+      (if keep
+        (append (list (car posts)) (fikra-ollama-posts-for-thread (cdr posts)))
+        (fikra-ollama-posts-for-thread (cdr posts))))))
+
+;; r152: the OWNER's actions file (a cross-thread revert must tombstone
+;; in the owner's history, not the focused thread's).
+(defun fikra-ollama-actions-file-for (thread)
+  (concat (fikra/thread/fikra-thread-field-root-of thread)
+          "/.tmax/fikra/threads/" thread "/actions.jsonl"))
+
 (defun fikra-ollama-tombstone-action (post)
-  (condition-case nil
-    (append-file (fikra-ollama-actions-file)
-      (concat post " REVERTED" (hex-decode "0a")))
-    (error () nil)))
+  ;; r152 (codex #3): a failed tombstone write is VISIBLE — a restart
+  ;; could resurrect the reverted action.
+  (let ((out (condition-case nil
+                (progn
+                  (append-file (fikra-ollama-actions-file-for
+                                 (fikra-ollama-ref-thread post))
+                    (concat post " REVERTED" (hex-decode "0a")))
+                  "ok")
+                (error () "failed"))))
+    (if (string= out "failed")
+      (editor-set-status
+        "Fikra: revert bookkeeping FAILED to persist — a restart may re-offer this action")
+      nil)))
 
 ;; Newest-last in the file; reversed = newest-first = the stack order.
 ;; Memory wins per key; the stack rebuilds newest-first.
@@ -1025,11 +1050,18 @@ with its post-exit capture.")
       (progn
         (keymap-mutable-set! fikra-ollama-action-pairs post pre-ref)
         (setq fikra-ollama-action-posts (append (list post) fikra-ollama-action-posts))
-        ;; r150: the durable line (best-effort).
-        (condition-case nil
-          (append-file (fikra-ollama-actions-file)
-            (concat post " " pre-ref (hex-decode "0a")))
-          (error () nil)))
+        ;; r150/r152: the durable line — a failure is VISIBLE (a
+        ;; restart would lose this revertable action).
+        (let ((out (condition-case nil
+                      (progn
+                        (append-file (fikra-ollama-actions-file)
+                          (concat post " " pre-ref (hex-decode "0a")))
+                        "ok")
+                      (error () "failed"))))
+          (if (string= out "failed")
+            (editor-set-status
+              "Fikra: action bookkeeping FAILED to persist — a restart may lose this revert")
+            nil)))
       nil)))
 
 ;; r142: THE ACTION-LEVEL REVERT — restore the LATEST action's touched
@@ -1093,13 +1125,28 @@ with its post-exit capture.")
       ;; r149d: nil-aware — nil (absent/unstaged) equals only nil; strings
       ;; compare byte-exactly. A non-string sentinel cannot collide with
       ;; ANY content (the string markers did — bare and newline forms).
+      ;; r152 (codex #1): a NIL index is only legitimate for a path
+      ;; UNTRACKED in both refs — a tracked path with no index entry is
+      ;; a STAGED DELETION the revert would silently undo.
       (if (not (and (or (fikra-ollama-state-eq cur want-post)
                         (fikra-ollama-state-eq cur want-pre))
-                    (or (null ix)
-                        (fikra-ollama-state-eq ix want-post)
-                        (fikra-ollama-state-eq ix want-pre))))
+                    (if (null ix)
+                      ;; A nil index diverges only for a path TRACKED AT
+                      ;; HEAD (a staged deletion); a never-committed new
+                      ;; file legitimately has no index entry.
+                      (not (fikra-ollama-tracked-at-head-p root p))
+                      (or (fikra-ollama-state-eq ix want-post)
+                          (fikra-ollama-state-eq ix want-pre)))))
         t
         (fikra-ollama-state-diverged-scan root pre post (cdr paths))))))
+
+;; r152: is the path in HEAD's tree? (a nil index for a HEAD-tracked
+;; path = a staged deletion the revert would silently undo.)
+(defun fikra-ollama-tracked-at-head-p (root p)
+  (string= (string-trim (shell-command
+    (concat "git -C " (fikra/thread/fikra-thread-shq root)
+            " cat-file -e HEAD:" (fikra/thread/fikra-thread-shq p)
+            " 2>/dev/null && echo YES || echo NO"))) "YES"))
 
 ;; nil=nil; string=string byte-exact; nil vs string = false.
 (defun fikra-ollama-state-eq (a b)
@@ -1115,8 +1162,13 @@ with its post-exit capture.")
   (if (or (not fikra-ollama-action-posts) (= (length fikra-ollama-action-posts) 0))
     (fikra-ollama-load-action-pairs)
     nil)
+  ;; r152 (codex #2): the revert is SCOPED to the focused thread — the
+  ;; stack is global, so skip other threads' entries (a focused fix-1
+  ;; reverted main's action before).
+  (setq fikra-ollama-action-posts
+    (fikra-ollama-posts-for-thread fikra-ollama-action-posts))
   (if (or (not fikra-ollama-action-posts) (= (length fikra-ollama-action-posts) 0))
-    (editor-set-status "Fikra: no action to revert")
+    (editor-set-status "Fikra: no action to revert in this thread")
     (let* ((post (car fikra-ollama-action-posts))
            (pre (hashmap-get fikra-ollama-action-pairs post))
            (owner (fikra-ollama-ref-thread post))

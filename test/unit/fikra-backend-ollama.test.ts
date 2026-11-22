@@ -1328,6 +1328,40 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       expect(execFileSync("git", ["ls-files", "added151.txt"]).toString()).toBe("");
     });
 
+    // r152 (codex re-grade): a STAGED DELETION of a tracked file refuses
+    // (the revert would silently restore the index entry).
+    tt("a staged deletion refuses (the user's git rm --cached survives)", async () => {
+      const ed = await armed();
+      // A TRACKED file the action edits.
+      writeFileSync(join(process.cwd(), "tracked152.txt"), "ORIGINAL\n");
+      execFileSync("git", ["add", "tracked152.txt"]);
+      execFileSync("git", ["commit", "-q", "-m", "track"]);
+      e(ed, '(fikra/chat/fikra-turn-send "edit tracked")');
+      fire(ed, 610, [edit("tracked152.txt", "EDITED\n")]);
+      expect(readFileSync(join(process.cwd(), "tracked152.txt"), "utf8")).toBe("EDITED\n");
+      // The user stages the deletion.
+      execFileSync("git", ["rm", "--cached", "-q", "tracked152.txt"]);
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
+      // The staged deletion SURVIVES (still no index entry).
+      expect(execFileSync("git", ["ls-files", "tracked152.txt"]).toString()).toBe("");
+    });
+
+    // r152 (codex re-grade): the revert is SCOPED to the focused thread.
+    tt("a focused OTHER thread never reverts main's action", async () => {
+      const ed = await armed();
+      e(ed, "(require-module fikra/threads)");
+      e(ed, '(fikra/chat/fikra-turn-send "main action")');
+      fire(ed, 611, [edit("main152.txt", "MAIN\n")]);
+      expect(existsSync(join(process.cwd(), "main152.txt"))).toBe(true);
+      // Switch to a new thread; its revert finds nothing.
+      e(ed, '(fikra/thread/fikra-thread-focus "fix-1")');
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("no action");
+      // main's file is untouched.
+      expect(existsSync(join(process.cwd(), "main152.txt"))).toBe(true);
+    });
+
     tt("a PARTIAL restore retries to completion (obstruction cleared)", async () => {
       const ed = await armed();
       e(ed, '(fikra/chat/fikra-turn-send "two files then obstruct")');
