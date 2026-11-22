@@ -13,7 +13,10 @@ import { join } from "node:path";
  */
 
 describe("#332 — the binary Info repro (integration)", () => {
-  const socket = join(tmpdir(), "i332-gate.sock");
+  // A UNIQUE per-run socket dir (valve r2: a fixed name can reuse a
+  // stale daemon — a false pass — or stop another concurrent run).
+  const socketDir = mkdtempSync(join(tmpdir(), "i332-gate-"));
+  const socket = join(socketDir, "s.sock");
   let bin: string;
 
   beforeAll(() => {
@@ -38,6 +41,6 @@ describe("#332 — the binary Info repro (integration)", () => {
     try {
       spawnSync(bin, ["--stop"], { env: { ...process.env, TMAX_SOCKET: socket }, timeout: 10_000 });
     } catch { /* the daemon may already be gone */ }
-    try { rmSync(socket, { force: true }); } catch { /* best effort */ }
+    try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 });
