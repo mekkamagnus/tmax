@@ -79,14 +79,25 @@ describe("#296 — span API (SPEC-289, the API half)", () => {
     expect(grid[2]).toEqual([{ start: 0, end: 1 }]); // last: [0,1)
   });
 
-  test("OVERLAP precedence: later-registered spans render after (win per cell)", () => {
-    setText("test", "abcdef\\n");
-    e(editor, '(span-make "test" 0 0 0 6 "region")');
-    e(editor, '(span-make "test" 0 2 0 4 "match")');
+  test("OVERLAP precedence: the LATEST-REGISTERED span wins the overlapped cells (frame-asserted)", async () => {
+    const { captureFrame } = await import("../../src/render/capture-frame.ts");
+    setText("test", "abcdef\n");
+    e(editor, '(span-make "test" 0 0 0 6 "region")'); // registered FIRST
+    e(editor, '(span-make "test" 0 2 0 4 "match")'); // registered LATER → wins [2,4)
+    const frame = captureFrame(editor.getEditorState() as never, 40, 8).join("\n");
+    // The LATER match face is PRESENT and owns the overlapped cells;
+    // region owns [0,2) and [4,6).
+    expect(frame).toContain("48;2;90;58;90"); // #5a3a5a — the match
+    expect(frame).toContain("48;2;38;79;120"); // #264f78 — the region
+    // The grid holds CLIPPED, non-overlapping spans (earlier split
+    // around the later) — the render never sees an intra-layer
+    // overlap (gate r3: the shared renderer's start-sort + pos-clip
+    // would otherwise INVERT precedence).
     const grid = gridOf(editor)!;
-    // Registration order in the grid — the render applies in order,
-    // so the LATER span wins the overlapped cells [2,4).
-    expect(grid[0]).toEqual([{ start: 0, end: 6 }, { start: 2, end: 4 }]);
+    const sorted = [...(grid[0] ?? [])].sort((a, b) => a.start - b.start);
+    for (let i = 1; i < sorted.length; i++) {
+      expect(sorted[i]!.start >= sorted[i - 1]!.end).toBe(true); // no overlap
+    }
   });
 
   test("UNKNOWN face + reversed range refuse with named errors", () => {

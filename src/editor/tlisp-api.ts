@@ -533,10 +533,6 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           if (!buf) return undefined;
           const countR = buf.getLineCount();
           const lineCount = "right" in countR && typeof countR.right === "number" ? countR.right : -1;
-          const lenOf = (r: unknown): number =>
-            r && typeof r === "object" && "right" in (r as Record<string, unknown>) && typeof (r as { right?: unknown }).right === "string"
-              ? ((r as { right: string }).right).length
-              : 0;
           if (lineCount < 0) return undefined;
           // The whole-text CONTENT checksum (gate r2: length-folding
           // was shape-only): ONE getText pass, a rolling char hash —

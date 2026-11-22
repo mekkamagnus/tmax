@@ -212,10 +212,6 @@ function bufferSpanLayer(
   // Either-returning probes (the buffer contract).
   const countR = buf.getLineCount();
   const lineCount = "right" in countR && typeof countR.right === "number" ? countR.right : -1;
-  const lenOf = (r: unknown): number =>
-    r && typeof r === "object" && "right" in (r as Record<string, unknown>) && typeof (r as { right?: unknown }).right === "string"
-      ? ((r as { right: string }).right).length
-      : 0;
   // gate r2: ONE getText pass (the per-line walk was an ~80x
   // per-frame regression on large buffers) folding CHARS (a real
   // content checksum — length-folding was shape-only).

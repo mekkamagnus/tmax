@@ -71,10 +71,14 @@ export function createSpanOps(
   const records = new Map<number, SpanRecord>();
   const api = new Map<string, TLispFunctionImpl>();
 
-  /** Rebuild + publish the merged grid for one buffer (registration
-   * order; later-registered spans render later → win per cell).
-   * Records whose buffer is GONE (or replaced — token mismatch)
-   * drop first (gate r1: the kill-cleanup contract). */
+  /** Rebuild + publish the merged grid for one buffer. Precedence:
+   * the LATEST-REGISTERED span wins per character cell (SPEC-289) —
+   * resolved HERE by clipping earlier spans against later ones, so
+   * the shared renderer never sees an intra-layer overlap (its
+   * start-sort + pos-clip semantics would invert precedence — gate
+   * r3's live-reproduced blocker). Records whose buffer is GONE (or
+   * replaced — token mismatch) drop first (gate r1).
+   */
   const publish = (buffer: string): void => {
     const shapes = new Map<string, ReturnType<typeof probeShape>>();
     for (const r of [...records.values()]) {
@@ -91,9 +95,17 @@ export function createSpanOps(
         const start = line === r.startLine ? r.startCol : 0;
         const end = line === r.endLine ? r.endCol : TO_EOL;
         if (end <= start) continue;
+        // Clip the EARLIER spans against this (later) one — the
+        // latest registration keeps its full range.
         const list = perLine.get(line) ?? [];
-        list.push({ start, end, style: r.style });
-        perLine.set(line, list);
+        const clipped: HighlightSpan[] = [];
+        for (const s of list) {
+          // Pieces of s outside [start, end).
+          if (s.start < start) clipped.push({ ...s, end: Math.min(s.end, start) });
+          if (s.end > end) clipped.push({ ...s, start: Math.max(s.start, end) });
+        }
+        clipped.push({ start, end, style: r.style });
+        perLine.set(line, clipped.filter((s) => s.end > s.start));
         if (line > maxLine) maxLine = line;
       }
     }
