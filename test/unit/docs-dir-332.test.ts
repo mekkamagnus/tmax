@@ -27,7 +27,7 @@ describe("#332 — resolveDocsTmaxDir", () => {
     expect(resolveDocsTmaxDir(from)).toBe(join(root, "docs/tmax"));
   });
 
-  test("the BINARY layout: the assets at the basename level of the root", () => {
+  test("the FALLBACK layout: no corpus anywhere resolves to fromDir", () => {
     const root = mkdtempSync(join(tmpdir(), "d332b-"));
     dirs.push(root);
     // The compiled layout: tmax.texinfo/tmax.info sit BESIDE the virtual

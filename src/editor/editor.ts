@@ -124,12 +124,11 @@ export const TLISP_CORE_DIR = fs.existsSync(`${import.meta.dir}/../tlisp/core`)
 export const DOCS_TMAX_DIR = resolveDocsTmaxDir(import.meta.dir);
 
 /**
- * #332: the docs corpus directory — the dev checkout walks
- * `../../docs/tmax`; the COMPILED binary's `--asset` files embed at
- * the BASENAME level of `/$bunfs/root` (ADR-0271: $bunfs never
- * normalizes `..`), so the binary probes there explicitly instead of
- * relying on the accidental `import.meta.dir` fallback. Exposed as a
- * function for unit tests over both layouts.
+ * #332: the docs corpus directory. The COMPILED binary short-circuits
+ * its /$bunfs virtual root (the --asset files embed at the basename
+ * level — ADR-0271) BEFORE any normalize()d walk, which would
+ * collapse `../../..` to a HOST path; the dev checkout walks
+ * `../../docs/tmax`. Exposed as a function for unit tests.
  */
 export function resolveDocsTmaxDir(fromDir: string): string {
   // The compiled-binary layout FIRST and exclusively: $bunfs never
