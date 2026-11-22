@@ -27,7 +27,6 @@ import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { join } from "path";
 import { realpathSync } from "fs";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
-import { match } from "../src/utils/adt.ts";
 import { type PlanType, type AgentDeps, type ClassifyResult, type DispatchOutcome, classify, dispatch } from "./adws-modules/agent.ts";
 import {
   ADW_ID_RE,
@@ -214,22 +213,21 @@ export function runPlan(
       const liveLabel = process.env.ADW_ORCHESTRATED === "1" ? "plan" : undefined;
       return dispatch(deps, PROJECT_ROOT, SPECS_DIR, plannerLog, ctx.type, ctx.description, liveLabel)
         .map((outcome: DispatchOutcome) => {
-          const dispatchEvent: { event: "dispatch"; skill: string; status: "ok"; kind: string; detail: string } = match(outcome, {
-            created: (v) => ({ event: "dispatch" as const, skill: ctx.type, status: "ok" as const, kind: "created" as const, detail: v.path }),
-            modified: (v) => ({ event: "dispatch" as const, skill: ctx.type, status: "ok" as const, kind: "modified" as const, detail: v.path }),
-            noop: (v) => ({ event: "dispatch" as const, skill: ctx.type, status: "ok" as const, kind: "noop" as const, detail: v.summary.slice(0, 200) }),
-          });
+          // CHORE-61 retired src/utils/adt.ts (its match()); this
+          // switch on `kind` replaces the retired matcher (#337 —
+          // the stale import crashed the plan stage at startup).
+          const dispatchEvent: { event: "dispatch"; skill: string; status: "ok"; kind: string; detail: string } =
+            outcome.kind === "noop"
+              ? { event: "dispatch" as const, skill: ctx.type, status: "ok" as const, kind: "noop" as const, detail: outcome.summary.slice(0, 200) }
+              : { event: "dispatch" as const, skill: ctx.type, status: "ok" as const, kind: outcome.kind, detail: outcome.path };
           appendEvent(ctx.id, "planner", dispatchEvent);
           return { ...ctx, outcome };
         });
     })
     // Step 3: record result + finalize state
     .flatMap((ctx: Classified & { outcome: DispatchOutcome }) => {
-      const specPath: string | null = match(ctx.outcome, {
-        created: (v) => v.path,
-        modified: (v) => v.path,
-        noop: () => null,
-      });
+      const specPath: string | null =
+        ctx.outcome.kind === "noop" ? null : ctx.outcome.path;
       appendEvent(ctx.id, "planner", {
         event: "result",
         kind: ctx.outcome.kind,

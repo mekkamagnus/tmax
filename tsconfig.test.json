@@ -1,5 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["test/**/*.ts"],
-  "exclude": ["test/**/*.disabled"]
+  "include": [
+    "test/**/*.ts",
+    "adws/**/*"
+  ],
+  "exclude": [
+    "test/**/*.disabled"
+  ]
 }
