@@ -2,6 +2,7 @@
   (export markdown-src-block-at-point
           markdown-src-block-content
           markdown-src-mode-for-language
+          markdown-src-lang-ext
           markdown-src-edit-active-p
           markdown-edit-src
           markdown-edit-src-commit
@@ -53,6 +54,40 @@
   "Major mode name for fence language LANG; fundamental when unmapped (RFC-037 §2.3)."
   (let ((mode (hashmap-get markdown-src-mode-map lang)))
     (if mode mode "fundamental")))
+
+;; Extension per language — the edit buffer's synthetic filename uses this
+;; so the syntax highlighter (which keys on filename extension) detects the
+;; language and produces spans. Same hashmap construction as the mode map.
+(defvar markdown-src-ext-map
+  (hashmap
+    "javascript" "ts"
+    "js" "ts"
+    "typescript" "ts"
+    "ts" "ts"
+    "python" "py"
+    "py" "py"
+    "lisp" "lisp"
+    "tlisp" "lisp"
+    "scheme" "lisp"
+    "shell" "sh"
+    "bash" "sh"
+    "sh" "sh"
+    "zsh" "sh"
+    "go" "go"
+    "rust" "rs"
+    "json" "json"
+    "yaml" "yaml"
+    "toml" "toml"
+    "html" "html"
+    "css" "css"
+    "sql" "sql"
+    "c" "c"
+    "cpp" "cpp"))
+
+(defun markdown-src-lang-ext (lang)
+  "File extension for fence language LANG (for the highlighter's filename detection)."
+  (let ((ext (hashmap-get markdown-src-ext-map lang)))
+    (if ext ext "txt")))
 
 ;; ── Piece 1: block detection (RFC §2.1) ───────────────────────────────
 
@@ -184,6 +219,10 @@
           (condition-case err (buffer-kill bufname) (error (e) nil))
           (buffer-create bufname)
           (switch-to-buffer bufname)
+          ;; Set a filename so the syntax highlighter detects the language
+          ;; (highlight-buffer keys on the filename's extension, not the
+          ;; major mode — without this the edit buffer gets no spans).
+          (set-buffer-filename (concat "*src-edit*." (markdown-src-lang-ext lang)))
           (cursor-move 0 0)
           (buffer-insert content)
           (cursor-move 0 0)
@@ -199,13 +238,23 @@
   (interactive)
   (if (not markdown-src-edit-target)
     (editor-set-status "no source edit in progress")
-    (let ((text (buffer-text))
+    (let ((text nil)
           (target markdown-src-edit-target)
           (start markdown-src-edit-start)
           (cstart markdown-src-edit-content-start)
           (cend markdown-src-edit-content-end)
           (bufname markdown-src-edit-buffer)
           (return-mode markdown-src-edit-return-mode))
+      ;; Read the EDIT buffer's text BEFORE switching (the corruption fix):
+      ;; buffer-text reads the CURRENT buffer — if the user already switched
+      ;; back to the markdown buffer, the original buffer-text here would
+      ;; capture the whole document and insert it into the block.
+      (if (string= (buffer-current) bufname)
+        (set! text (buffer-text))
+        (progn
+          (switch-to-buffer bufname)
+          (set! text (buffer-text))
+          (switch-to-buffer target)))
       ;; Neutralize the pending state first: the edit buffer is about to be
       ;; read and killed; a re-entry mid-commit must see no pending edit.
       (set! markdown-src-edit-target nil)
