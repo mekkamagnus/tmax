@@ -335,3 +335,29 @@ describe("#327 — per-segment identity (the events-walk)", () => {
     expect(t).not.toContain("TAB to expand");
   });
 });
+
+describe("#327 — item 3 (the cross-batch thought join)", () => {
+  test("block fragments across SEPARATE emit calls render as ONE run (no line break)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    // The r4-escalation shape: the routed emitter hands each chunk's
+    // events as its own batch — the thought fragments of ONE block
+    // arrive in SEPARATE emit-batch calls.
+    e(editor, emit(delta(0, "first part of ")));
+    e(editor, emit(delta(0, "the thought"))); // same block, new batch
+    const t = strip(bufferText(editor));
+    // ONE ·-run: the fragments JOINED (no break mid-thought).
+    expect(t).toContain("first part of the thought");
+    expect((t.match(/· /g) || []).length).toBe(1);
+  });
+
+  test("a NEW block after a tool call starts a SEPARATE run (the boundary holds)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(delta(0, "run one")));
+    e(editor, toolCall("sep"));
+    e(editor, emit(delta(1, "run two")));
+    const t = strip(bufferText(editor));
+    expect((t.match(/· /g) || []).length).toBe(2); // TWO runs
+    expect(t).toContain("run one");
+    expect(t).toContain("run two");
+  });
+});
