@@ -223,9 +223,20 @@ export function createCursorOps(
       return Either.right(createNumber(col));
     }
 
-    // Recompute the SAME spans the render path uses for this line, so
-    // code-span protection applies identically (a `[[link]]` inside backticks
-    // is visible raw and must not be skipped).
+    // Perf (#333 audit): computeHighlightSpans primes tokenizer state from
+    // the buffer start — O(cursor line) on EVERY horizontal move otherwise.
+    // The spans-free collection is a SUPERSET of the hidden zones (spans
+    // only REMOVE code-protected zones), so a column outside the superset
+    // provably needs no snap and we never tokenize: plain movement on
+    // link-free (or link-outside-the-path) lines is line-local. Only a
+    // landing inside a candidate zone pays the accurate pass.
+    if (snapToVisibleColumn(lineResult.right, undefined, col, dir) === col) {
+      return Either.right(createNumber(col));
+    }
+
+    // The candidate-zone pass: recompute the SAME spans the render path
+    // uses for this line, so code-span protection applies identically (a
+    // `[[link]]` inside backticks is visible raw and must not be skipped).
     const spans = computeHighlightSpans(
       (ln) => {
         const r = currentBuffer!.getLine(ln);

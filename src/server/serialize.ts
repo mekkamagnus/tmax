@@ -1,5 +1,6 @@
 import { TextBufferImpl } from "../core/buffer.ts";
 import { wikiDisplayActive, transformWikiLine } from "../frontend/render/wiki-display.ts";
+import { wordWrapActive } from "../frontend/render/buffer-lines.ts";
 import type { EditorState, Tab, Window } from "../core/contracts/editor.ts";
 import type { TextBuffer } from "../core/contracts/buffer.ts";
 import { Either } from "../utils/task-either.ts";
@@ -182,7 +183,7 @@ export function editorStateToJson(
   // cursor line; the walk continues until the screen is covered AND the
   // cursor is inside.
   let neededRows = rows;
-  if (state.config?.wordWrap && buffer) {
+  if (wordWrapActive(state) && buffer) {
     const cursorLine = state.cursorPosition.line;
     // No width (render-state/no-frame paths) → no wrap estimate; still
     // guarantee the cursor line plus forward screen slack on the wire.
@@ -282,6 +283,9 @@ export function editorStateToJson(
     currentMajorMode: state.currentMajorMode ?? "fundamental",
     activeMinorModes: state.activeMinorModes ?? [],
     activeMinorModeLighters: state.activeMinorModeLighters ?? [],
+    // #334 audit: per-window wrap derivation rides the wire so the client's
+    // multi-window render wraps each pane by ITS buffer.
+    windowWrap: state.windowWrap ?? undefined,
     minibufferState: state.minibufferState,
     minibufferView: state.minibufferView,
     cursorFocus: state.cursorFocus ?? "buffer",
@@ -407,6 +411,7 @@ export function jsonToEditorState(json: SerializedEditorState | Record<string, u
     currentMajorMode: (record.currentMajorMode as string | undefined) ?? "fundamental",
     activeMinorModes: (record.activeMinorModes as string[] | undefined) ?? [],
     activeMinorModeLighters: (record.activeMinorModeLighters as string[] | undefined) ?? [],
+    windowWrap: (record.windowWrap as Record<string, boolean> | undefined) ?? undefined,
     minibufferState: record.minibufferState as EditorState["minibufferState"],
     // #201: shell-mode PTY screen + cursor (absent outside terminal mode).
     terminalLines: (record.terminalLines as string[] | undefined) ?? undefined,

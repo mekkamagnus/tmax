@@ -53,7 +53,9 @@ async function setup(content: string): Promise<Editor> {
 }
 
 function wrapOn(editor: Editor): boolean {
-  return editor.getEditorState().config.wordWrap === true;
+  // #334 audit: wrapping is the per-buffer visual-line mode — the shared
+  // config flag is no longer consulted by the render layer.
+  return executeTlisp(editor, '(minor-mode-active-p "visual-line")').value === true;
 }
 
 function active(editor: Editor, name: string): boolean {
@@ -100,6 +102,149 @@ describe("#334 — visual-line-mode toggle", () => {
     expect(active(editor, "truncate-lines")).toBe(true);
     expect(active(editor, "visual-line")).toBe(false);
     expect(wrapOn(editor)).toBe(false);
+  });
+
+  test("audit: enabling visual-line in ONE buffer does not wrap OTHER buffers", async () => {
+    const editor = await setup("a ".repeat(40) + "\n"); // ~80 chars, wraps at 40
+    editor.createBuffer("other.md", "b ".repeat(40) + "\n");
+    executeTlisp(editor, "(visual-line-mode)");
+    expect(wrapOn(editor)).toBe(true);
+    // The wrapped buffer renders multiple rows for its long line.
+    const wrappedRows = captureFrame(editor.getEditorState(), 40, 8).map(stripAnsi);
+    expect(wrappedRows[1]!.trimEnd()).not.toBe("");
+    // Switch to the OTHER buffer: it must NOT wrap (clip instead).
+    executeTlisp(editor, '(switch-to-buffer "other.md")');
+    expect(wrapOn(editor)).toBe(false);
+    const plainRows = captureFrame(editor.getEditorState(), 40, 8).map(stripAnsi);
+    expect(plainRows[0]!.endsWith("...")).toBe(true);
+    // Row 1 is the (gutter-only) second buffer line — no wrapped content.
+    expect(plainRows[1]!.startsWith("b")).toBe(false);
+    // Switch back: still wrapped.
+    executeTlisp(editor, '(switch-to-buffer "note.md")');
+    expect(wrapOn(editor)).toBe(true);
+  });
+
+  test("audit: a GLOBAL truncate-lines cannot re-merge over a LOCAL visual-line", async () => {
+    const editor = await setup("line\n");
+    executeTlisp(editor, "(global-truncate-lines-mode 1)");
+    expect(executeTlisp(editor, '(global-minor-mode-active-p "truncate-lines")').value).toBe(true);
+    // Local visual-line activation must locally suppress the global truncate
+    // (a "disabled" override — not just a one-time list removal).
+    executeTlisp(editor, "(visual-line-mode 1)");
+    expect(active(editor, "visual-line")).toBe(true);
+    expect(active(editor, "truncate-lines")).toBe(false);
+    // Re-read the merged state (a fresh getCurrentModeState): still off.
+    expect(active(editor, "truncate-lines")).toBe(false);
+  });
+
+  test("audit: global toggles are mutually exclusive in both directions", async () => {
+    const editor = await setup("line\n");
+    executeTlisp(editor, "(global-visual-line-mode 1)");
+    expect(executeTlisp(editor, '(global-minor-mode-active-p "visual-line")').value).toBe(true);
+    expect(executeTlisp(editor, '(global-minor-mode-active-p "truncate-lines")').value).toBe(false);
+    executeTlisp(editor, "(global-truncate-lines-mode 1)");
+    expect(executeTlisp(editor, '(global-minor-mode-active-p "truncate-lines")').value).toBe(true);
+    expect(executeTlisp(editor, '(global-minor-mode-active-p "visual-line")').value).toBe(false);
+  });
+
+  test("audit r2: a SPLIT PANE wraps according to the buffer IT displays", async () => {
+    const long = "word ".repeat(30) + "\n"; // 150 chars
+    const editor = await setup(long);
+    executeTlisp(editor, "(require-module editor/commands/windows)");
+    // note.md wraps; the other buffer does not.
+    executeTlisp(editor, "(visual-line-mode)");
+    // createBuffer switches the current buffer — switch back before splitting
+    // so the TOP pane keeps note.md.
+    editor.createBuffer("other.md", long);
+    executeTlisp(editor, '(switch-to-buffer "note.md")');
+    executeTlisp(editor, "(split-window-below)");
+    executeTlisp(editor, '(window-move-focus "down")');
+    executeTlisp(editor, '(switch-to-buffer "other.md")');
+    // windowWrap: per-window derivation — the note.md pane true, other.md false.
+    const wrap = editor.getEditorState().windowWrap ?? {};
+    const entries = Object.entries(wrap);
+    expect(entries.length).toBe(2);
+    expect(new Set(entries.map(([, v]) => v)).size).toBe(2); // one true, one false
+    // The rendered frame: the wrapping pane has no clip ellipsis; the
+    // clipping pane does.
+    const rowsAll = captureFrame(editor.getEditorState(), 60, 24).map(stripAnsi);
+    const topHalf = rowsAll.slice(0, 11).filter((r) => r.trim().length > 0);
+    const bottomHalf = rowsAll.slice(12).filter((r) => r.trim().length > 0);
+    expect(topHalf.some((r) => r.includes("..."))).toBe(false);
+    expect(bottomHalf.some((r) => r.includes("..."))).toBe(true);
+  });
+
+  test("audit r2: auto-fill buffers keep their wrap (Fikra chat regression)", async () => {
+    const state = makeState("word ".repeat(30), { wrap: false });
+    state.activeMinorModes = ["auto-fill"];
+    const r = rows(state, 40, 8);
+    expect(r[0]!.includes("...")).toBe(false); // wrapped, not clipped
+    expect(r[1]!.trimEnd()).not.toBe(""); // continuation row
+  });
+
+  test("audit r3: two FILENAME-LESS buffers keep independent wrap state in split panes", async () => {
+    const long = "word ".repeat(30) + "\n";
+    const editor = await setup(long);
+    executeTlisp(editor, "(require-module editor/commands/windows)");
+    // Two special buffers with no filename — mode state keys by NAME.
+    editor.createBuffer("*Chat-A*", long);
+    editor.createBuffer("*Chat-B*", long);
+    executeTlisp(editor, '(switch-to-buffer "*Chat-A*")');
+    executeTlisp(editor, "(visual-line-mode)");
+    executeTlisp(editor, "(split-window-below)");
+    executeTlisp(editor, '(window-move-focus "down")');
+    executeTlisp(editor, '(switch-to-buffer "*Chat-B*")');
+    // Per-buffer identity: A wraps, B does not — no shared *scratch* state.
+    const wrap = editor.getEditorState().windowWrap ?? {};
+    const values = Object.values(wrap).sort();
+    expect(values).toEqual([false, true]);
+    // And the mode really is per-buffer, not just per-window.
+    expect(active(editor, "visual-line")).toBe(false); // Chat-B current
+    executeTlisp(editor, '(switch-to-buffer "*Chat-A*")');
+    expect(active(editor, "visual-line")).toBe(true);
+  });
+
+  test("audit r3: killing a FILE buffer clears the stale filename for the filename-less survivor", async () => {
+    const editor = await setup("line\n"); // note.md current, no wrap
+    executeTlisp(editor, "(visual-line-mode)");
+    expect(active(editor, "visual-line")).toBe(true); // note.md's state
+    // Kill note.md — the survivor (*scratch*, filename-less) must NOT keep
+    // reading note.md's mode state through a stale currentFilename.
+    executeTlisp(editor, '(buffer-kill "note.md")');
+    expect(executeTlisp(editor, "(buffer-current)").value).toBe("*scratch*");
+    expect(active(editor, "visual-line")).toBe(false);
+  });
+
+  test("audit r3: renaming a filename-less buffer keeps its mode state", async () => {
+    const editor = await setup("line\n");
+    editor.createBuffer("*Chat-A*", "x\n");
+    executeTlisp(editor, '(switch-to-buffer "*Chat-A*")');
+    executeTlisp(editor, "(visual-line-mode)");
+    executeTlisp(editor, '(buffer-rename "*Chat-B*")');
+    expect(executeTlisp(editor, "(buffer-current)").value).toBe("*Chat-B*");
+    expect(active(editor, "visual-line")).toBe(true);
+  });
+
+  test("audit r3: saving a special buffer under a filename migrates its mode state", async () => {
+    const editor = await setup("line\n");
+    editor.createBuffer("*Chat-A*", "x\n");
+    executeTlisp(editor, '(switch-to-buffer "*Chat-A*")');
+    executeTlisp(editor, "(visual-line-mode)");
+    executeTlisp(editor, '(set-buffer-filename "/tmp/saved-chat.md")');
+    expect(active(editor, "visual-line")).toBe(true);
+    // The key is now the filename: switching away and back keeps the mode.
+    executeTlisp(editor, '(switch-to-buffer "*scratch*")');
+    expect(active(editor, "visual-line")).toBe(false);
+    executeTlisp(editor, '(switch-to-buffer "*Chat-A*")');
+    expect(active(editor, "visual-line")).toBe(true);
+  });
+
+  test("audit r3: a wide char in a one-column pane terminates wrapping", () => {
+    // Would loop forever before the progress guarantee — a timeout here is
+    // the failure signal.
+    const state = makeState("漢字", { wrap: true });
+    const r = rows(state, 1, 6);
+    expect(r.length).toBeGreaterThan(0);
   });
 });
 

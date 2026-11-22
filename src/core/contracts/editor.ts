@@ -240,6 +240,11 @@ export interface EditorState {
   lastCommand?: string;
   currentFilename?: string;  // Filename associated with current buffer
   currentBufferName?: string;  // #253: name of the current buffer (special buffers have no filename)
+  /** #334 audit: per-window wrap derivation (windowId → its buffer's
+   *  visual-line/auto-fill state) — each split pane wraps according to the
+   *  buffer IT displays, never the focused buffer's mode. Populated by
+   *  getEditorState; JSON-safe (plain record) so it rides the daemon wire. */
+  windowWrap?: Record<string, boolean>;
   buffers?: Map<string, TextBuffer>;
   cursorFocus?: 'buffer' | 'command';  // Track where cursor focus should be
   // Which-key popup state (US-1.10.3)

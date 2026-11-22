@@ -60,6 +60,42 @@ function fitToWidthWithScroll(rawLine: string, cw: number, viewportLeft: number)
 export { getVisibleViewportTop };
 
 /**
+ * #334 audit: the mode list that makes a buffer wrap. `visual-line` is the
+ * user-facing toggle; `auto-fill` rides along (its only wrap implementation
+ * is this display path — Fikra chat buffers depend on it), restoring the
+ * pre-#334 behavior of auto-fill consumers as a PER-BUFFER property.
+ */
+export function wrapModesActive(modes: readonly string[]): boolean {
+  return modes.includes("visual-line") || modes.includes("auto-fill");
+}
+
+/**
+ * #334 audit: wrapping is a PER-BUFFER property derived from the displayed
+ * buffer's effective minor modes, never from the shared editor config — the
+ * old config bridge wrapped EVERY buffer when one buffer enabled the mode.
+ * `state.activeMinorModes` is the merged buffer-local + globalized list
+ * (getCurrentModeState → getEditorState, and the daemon wire carries it,
+ * serialize.ts), so every consumer — render, cursor mapping, client, wire
+ * window — derives the same answer for the buffer it is displaying.
+ */
+export function wordWrapActive(state: EditorState): boolean {
+  return wrapModesActive(state.activeMinorModes ?? []);
+}
+
+/**
+ * #334 audit: a SPLIT PANE wraps according to the buffer IT displays. The
+ * focused pane follows {@link wordWrapActive} (its buffers' modes are the
+ * state's list); every other pane follows the per-window derivation
+ * snapshotted onto the state (windowWrap, built by getEditorState from
+ * each window's buffer's mode state — see editor.ts).
+ */
+export function windowWrapActive(state: EditorState, win: { id: string }, isFocused: boolean, fallback: boolean): boolean {
+  if (isFocused) return fallback;
+  const perWindow = state.windowWrap?.[win.id];
+  return perWindow === undefined ? fallback : perWindow;
+}
+
+/**
  * #321: the ONE wrap-aware top-advance (verify-gate: it existed twice and
  * would desync — the exact bug class this fix removes). Advances `top`
  * until the cursor's wrapped rows fit `visibleLines`, counting wrapped
@@ -143,7 +179,7 @@ export function advanceWrappedTop(
  * rendered range. Returns the logical clamp when wrap is off.
  */
 export function getWrappedViewportTop(state: EditorState, visibleLines: number, width: number): number {
-  if (!state.config?.wordWrap) return getVisibleViewportTop(state, visibleLines);
+  if (!wordWrapActive(state)) return getVisibleViewportTop(state, visibleLines);
   const totalLines = getLineCount(state);
   const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
@@ -221,7 +257,7 @@ export function getWrappedCursorRow(
   bufferHeight: number,
   width: number,
 ): number {
-  if (!state.config?.wordWrap) {
+  if (!wordWrapActive(state)) {
     const top = getVisibleViewportTop(state, bufferHeight);
     return Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - top));
   }
@@ -242,7 +278,7 @@ export function getWrappedCursorRow(
 
 /** The wrapped COLUMN within the cursor's wrapped segment. */
 export function getWrappedCursorColumn(state: EditorState, width: number): number {
-  if (!state.config?.wordWrap) return state.cursorPosition.column;
+  if (!wordWrapActive(state)) return state.cursorPosition.column;
   const totalLines = getLineCount(state);
   const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
@@ -562,6 +598,10 @@ function wrapLine(rawLine: string, width: number): string[] {
         chunk = chunk.slice(0, lastSpace + 1);
       }
     }
+    // #334 audit r3: a double-width char (CJK/emoji) in a one-column pane
+    // fits NOTHING — without this the loop never advances. Emit the single
+    // code point (the renderer clips it) so wrapping always makes progress.
+    if (chunk.length === 0) chunk = Array.from(remaining)[0] ?? "";
     rows.push(chunk);
     remaining = sliceFromVisualOffset(remaining, stringWidth(chunk));
   }
@@ -722,7 +762,7 @@ export function renderBufferLines(
 ): string[] {
   const windows = state.windows;
   const currentWindowIndex = state.currentWindowIndex ?? 0;
-  const wordWrap = state.config.wordWrap;
+  const wordWrap = wordWrapActive(state);
   const viewportLeft = wordWrap ? 0 : (state.viewportLeft ?? 0);
 
   // SPEC-119: the [[wiki-link]] display transform applies to the focused
@@ -821,9 +861,11 @@ export function renderBufferLines(
     // Focused pane follows the model viewport (self-healing, same as the
     // single-window path); unfocused panes render from their own record.
     const viewportTop = isFocused ? getVisibleViewportTop(state, cell.height) : win.viewportTop;
-    const winViewportLeft = isFocused ? viewportLeft : (wordWrap ? 0 : (win.viewportLeft ?? 0));
+    // #334 audit: EACH pane derives wrap from the buffer it displays.
+    const winWrap = windowWrapActive(state, win, isFocused, wordWrap);
+    const winViewportLeft = isFocused ? viewportLeft : (winWrap ? 0 : (win.viewportLeft ?? 0));
 
-    const cellLines = wordWrap
+    const cellLines = winWrap
       ? renderSingleWindowWrapped(
           buf, cursorLine, cursorColumn, totalLines, viewportTop,
           cell.width, cell.height, gutterCfg, isFocused, highlightSpans,

@@ -107,4 +107,36 @@ describe("#333 — h/l skip zero-width wiki-link delimiter zones", () => {
     await press(editor, "h");
     expect(cursor(editor)).toEqual([0, 0]);
   });
+
+  test("audit: 3l lands exactly where lll does — count applies to visible steps", async () => {
+    // "a [[xyz]] b": hidden {2,3} {7,8}; visible target x..z at 4-6.
+    const counted = await setup("a [[xyz]] b");
+    executeTlisp(counted, "(cursor-move 0 1)");
+    await press(counted, "3l");
+    expect(cursor(counted)).toEqual([0, 6]);
+    const repeated = await setup("a [[xyz]] b");
+    executeTlisp(repeated, "(cursor-move 0 1)");
+    await press(repeated, "lll");
+    expect(cursor(repeated)).toEqual([0, 6]);
+  });
+
+  test("audit: 3h mirrors hhh through the zone", async () => {
+    const counted = await setup("a [[xyz]] b");
+    executeTlisp(counted, "(cursor-move 0 10)"); // on "b"
+    await press(counted, "3h");
+    expect(cursor(counted)).toEqual([0, 5]);
+    const repeated = await setup("a [[xyz]] b");
+    executeTlisp(repeated, "(cursor-move 0 10)");
+    await press(repeated, "hhh");
+    expect(cursor(repeated)).toEqual([0, 5]);
+  });
+
+  test("audit: Left/Right arrows skip hidden columns too", async () => {
+    const editor = await setup(LINE);
+    executeTlisp(editor, "(cursor-move 0 23)");
+    await editor.handleKey("Left");
+    expect(cursor(editor)).toEqual([0, 20]);
+    await editor.handleKey("Right");
+    expect(cursor(editor)).toEqual([0, 23]);
+  });
 });

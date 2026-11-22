@@ -218,6 +218,10 @@ export interface SerializedEditorState {
   currentMajorMode: string;
   activeMinorModes: string[];
   activeMinorModeLighters: string[];
+  /** #334 audit wire: per-window wrap derivation (windowId → its buffer's
+   *  visual-line/auto-fill state) so the client's split panes each wrap by
+   *  the buffer they display. */
+  windowWrap?: Record<string, boolean> | null;
   minibufferState?: JsonValue;
   minibufferView?: MinibufferRenderView;
   cursorFocus: "buffer" | "command";

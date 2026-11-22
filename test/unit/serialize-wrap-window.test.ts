@@ -21,6 +21,7 @@ describe("wrap-aware serialization", () => {
       mode: "normal",
       statusMessage: "",
       viewportTop: 40,
+      activeMinorModes: ["visual-line"],
       config: { theme: "dark", tabSize: 2, autoSave: false, keyBindings: {}, maxUndoLevels: 100, showLineNumbers: true, relativeLineNumbers: false, wordWrap: true },
       commandLine: "",
       mxCommand: "",

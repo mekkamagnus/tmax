@@ -65,6 +65,9 @@ export function generateFikraChat(n: number): string[] {
 
 function makeState(lines: string[], wordWrap: boolean, cursorLine: number, renderHeight: number): EditorState {
   const buf = TextBufferImpl.create(lines.join("\n"));
+  // #334: wrapping derives from the per-buffer visual-line mode; the
+  // wordWrap boolean here is the test's wrap INTENT.
+  const wrapModes = wordWrap ? ["visual-line"] : [];
   // Realistic scrolled-to-end viewport: the daemon editor's viewportTop
   // after the cursor reached the last line (the clamp formula) — NOT 0,
   // which no real editor state exhibits with a end-of-buffer cursor.
@@ -77,6 +80,7 @@ function makeState(lines: string[], wordWrap: boolean, cursorLine: number, rende
     viewportTop,
     viewportLeft: 0,
     config: CONFIG(wordWrap) as any,
+    activeMinorModes: wrapModes,
     commandLine: "",
     mxCommand: "",
     currentFilename: "matrix.txt",
@@ -299,7 +303,7 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     // The transform activates in markdown mode with the wiki-display
     // minor mode on (a .md filename completes the predicate).
     const cursorOnZ = { ...state, currentMajorMode: "markdown", currentFilename: "note.md",
-      activeMinorModes: ["wiki-link-display"], cursorPosition: { line: 0, column: 15 } };
+      activeMinorModes: ["wiki-link-display", "visual-line"], cursorPosition: { line: 0, column: 15 } };
     const row = getWrappedCursorRow(cursorOnZ as any, 22, 100);
     expect(row).toBe(0); // the DISPLAY line is short — no wrap, row 0
     const col = getWrappedCursorColumn(cursorOnZ as any, 100);
@@ -316,7 +320,7 @@ describe("#321 capture matrix — blank tails on large buffers", () => {
     for (let i = 0; i < 99; i++) lines.push(i === 40 ? "cursor-line-here" : `[[${"p".repeat(190)}/page-${i}|a]] tail`);
     lines.push("L99 TAIL end");
     const state = makeState(lines, true, 40, 22);
-    const md = { ...state, currentMajorMode: "markdown", currentFilename: "note.md", activeMinorModes: ["wiki-link-display"] };
+    const md = { ...state, currentMajorMode: "markdown", currentFilename: "note.md", activeMinorModes: ["wiki-link-display", "visual-line"] };
     // 1) The cursor row EQUALS the rendered row: the frame's row holding
     //    'cursor-line-here' — found through the wire + captureFrame.
     const view = jsonToEditorState(editorStateToJson(md as any, 22, 100));

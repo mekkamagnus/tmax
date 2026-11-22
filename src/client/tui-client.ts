@@ -6,7 +6,7 @@
  */
 
 import { RemoteEditor } from "../editor/remote-editor.ts";
-import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop, getWrappedCursorRow, getWrappedCursorColumn, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
+import { renderBufferLines, getVisibleViewportTop, getWrappedViewportTop, getWrappedCursorRow, getWrappedCursorColumn, getCursorScreenOffset, wordWrapActive } from "../frontend/render/buffer-lines.ts";
 import { mergeFlashSpans } from "../render/flash-merge.ts";
 export { mergeFlashSpans };
 import { renderStatusLine } from "../frontend/render/status-line.ts";
@@ -80,10 +80,10 @@ function render(state: EditorState) {
   const spinnerRow = spinnerRowReserved(state) ? 1 : 0;
   const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight - spinnerRow);
   // #321: wrap-aware top — spans cover the range the wrapped render walks.
-  const vt = state.config?.wordWrap
+  const vt = wordWrapActive(state)
     ? getWrappedViewportTop(state, bufferHeight, width)
     : getVisibleViewportTop(state, bufferHeight);
-  const spanHeight = state.config?.wordWrap ? bufferHeight * 2 : bufferHeight;
+  const spanHeight = wordWrapActive(state) ? bufferHeight * 2 : bufferHeight;
   const getLine = (ln: number) => {
     const r = state.currentBuffer?.getLine(ln);
     return r && Either.isRight(r) ? r.right : "";
@@ -155,9 +155,9 @@ function render(state: EditorState) {
     // wrong screen line). The COLUMN keeps the logical path's gutter-
     // aware math in both modes.
     const cursorRow = Math.max(0, Math.min(bufferHeight - 1,
-      state.config?.wordWrap ? getWrappedCursorRow(state, bufferHeight, width) : getCursorScreenOffset(state, bufferHeight, width).row));
+      wordWrapActive(state) ? getWrappedCursorRow(state, bufferHeight, width) : getCursorScreenOffset(state, bufferHeight, width).row));
     const cursorCol = Math.max(0, Math.min(width - 1,
-      state.config?.wordWrap ? getWrappedCursorColumn(state, width) : getCursorScreenOffset(state, bufferHeight, width).col));
+      wordWrapActive(state) ? getWrappedCursorColumn(state, width) : getCursorScreenOffset(state, bufferHeight, width).col));
     moveTo(cursorRow + tabBarHeight, cursorCol);
   }
 }

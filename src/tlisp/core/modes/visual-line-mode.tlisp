@@ -30,14 +30,20 @@
   "Toggle visual-line mode globally (all buffers). No arg toggle; t/positive on; 0/negative off."
   (interactive)
   (if (not arg-supplied-p)
-    (global-minor-mode-set "visual-line" (not (global-minor-mode-active-p "visual-line")))
-    (if (equal arg t)
-      (global-minor-mode-set "visual-line" t)
-      (if (numberp arg)
-        (if (> arg 0)
-          (global-minor-mode-set "visual-line" t)
-          (global-minor-mode-set "visual-line" nil))
-        (global-minor-mode-set "visual-line" nil)))))
+    (progn
+      (global-minor-mode-set "visual-line" (not (global-minor-mode-active-p "visual-line")))
+      (if (global-minor-mode-active-p "visual-line")
+        (global-minor-mode-set "truncate-lines" nil)))
+    (progn
+      (if (equal arg t)
+        (global-minor-mode-set "visual-line" t)
+        (if (numberp arg)
+          (if (> arg 0)
+            (global-minor-mode-set "visual-line" t)
+            (global-minor-mode-set "visual-line" nil))
+          (global-minor-mode-set "visual-line" nil)))
+      (if (global-minor-mode-active-p "visual-line")
+        (global-minor-mode-set "truncate-lines" nil)))))
 
 (provide "visual-line-mode")
 )

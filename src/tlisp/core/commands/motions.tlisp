@@ -1,5 +1,5 @@
 (defmodule editor/commands/motions
-  (export vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom scroll-column-left scroll-column-right scroll-cursor-start scroll-cursor-end vim-gg vim-G vim-window-top vim-window-middle vim-window-bottom vim-scroll-line-down vim-scroll-line-up vim-sentence-next vim-sentence-previous vim-section-next vim-section-previous vim-section-end-next vim-section-end-previous cursor-skip-hidden)
+  (export vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom scroll-column-left scroll-column-right scroll-cursor-start scroll-cursor-end vim-gg vim-G vim-window-top vim-window-middle vim-window-bottom vim-scroll-line-down vim-scroll-line-up vim-sentence-next vim-sentence-previous vim-section-next vim-section-previous vim-section-end-next vim-section-end-previous cursor-skip-hidden cursor-move-visible)
 
 ;; motions.tlisp -- Vim motions and find-char state owned by T-Lisp
 
@@ -532,6 +532,19 @@ char AFTER the boundary. Returns nil if none."
 (defun cursor-skip-hidden (dir)
   "Move the cursor to the nearest display-visible column in direction DIR (-1 left, 1 right)."
   (cursor-move (cursor-line) (scan-visible-column (cursor-line) (cursor-column) dir)))
+
+;; #333 audit: counted movement must equal repeated movement. Applying the
+;; count to RAW columns and skipping once lands 3l elsewhere than lll (the
+;; hidden zone eats visible steps). Move one column per count step, skipping
+;; zero-width zones after EACH step — 3l === l l l exactly.
+(defun cursor-move-visible (dir)
+  "Move one display-VISIBLE column in direction DIR per vim-count step (#333)."
+  (let ((n (vim-count-consume 1)))
+    (let ((i 0))
+      (while (< i n)
+        (cursor-move (cursor-line) (+ (cursor-column) dir))
+        (cursor-skip-hidden dir)
+        (set! i (+ i 1))))))
 
 ;; C-w window chords live in windows.tlisp (#261 consolidated them there —
 ;; one home for the whole C-w prefix set).

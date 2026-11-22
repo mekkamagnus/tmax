@@ -75,14 +75,13 @@ export function createMinorModeOps(
     (value.type === "boolean" ? value.value === true : true) &&
     (value.type === "number" ? (value.value as number) > 0 : true);
 
-  // #334: modes that drive a config-backed render flag. visual-line turns ON
-  // display-only word wrapping; truncate-lines turns it OFF (clip at the
-  // viewport edge). auto-fill rides the same flag (historical bridge).
-  const CONFIG_BACKED_MODES: Record<string, { key: "showLineNumbers" | "wordWrap"; enable: boolean }> = {
+  // #334 audit: visual-line/truncate-lines/auto-fill NO LONGER write the
+  // shared editor config — the render layer derives wrapping PER BUFFER from
+  // the effective minor-mode list (wordWrapActive), so enabling the mode in
+  // one buffer can never wrap another. The only remaining config-backed mode
+  // is line-numbers (a genuinely global display setting).
+  const CONFIG_BACKED_MODES: Record<string, { key: "showLineNumbers"; enable: boolean }> = {
     "line-numbers": { key: "showLineNumbers", enable: true },
-    "auto-fill": { key: "wordWrap", enable: true },
-    "visual-line": { key: "wordWrap", enable: true },
-    "truncate-lines": { key: "wordWrap", enable: false },
   };
 
   const applyBuiltinModeEffect = (
@@ -121,11 +120,11 @@ export function createMinorModeOps(
     }
   };
 
-  // #334: visual-line and truncate-lines are opposite settings of the one
-  // wordWrap render flag — activating either deactivates the other so the
-  // mode line and the renderer can never both claim to be on. The disabled
-  // mode's config restore runs BEFORE the enabling mode saves its baseline,
-  // so the flag ends at the newly-activated mode's value.
+  // #334: visual-line and truncate-lines are opposite answers to "how are
+  // long lines displayed" — activating either deactivates the other. The
+  // disable is recorded as a LOCAL override (mirroring minor-mode-set), so
+  // a GLOBALIZED opposite mode cannot re-merge over the local decision on
+  // the next getCurrentModeState (applyGlobalMinorModes honors "disabled").
   const EXCLUSIVE_MODE_PAIRS: Record<string, string> = {
     "visual-line": "truncate-lines",
     "truncate-lines": "visual-line",
@@ -137,6 +136,7 @@ export function createMinorModeOps(
     const exclusive = EXCLUSIVE_MODE_PAIRS[name];
     if (exclusive && state.activeMinorModes.includes(exclusive)) {
       deactivate(state, exclusive);
+      state.localMinorModeOverrides[exclusive] = "disabled";
     }
     const newState = activateMinorMode(state, name, source);
     Object.assign(state, newState);

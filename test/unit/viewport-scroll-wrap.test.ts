@@ -16,6 +16,11 @@ import type { EditorState } from "../../src/core/types.ts";
 
 function makeState(content: string, opts?: Partial<EditorState>): EditorState {
   const buf = TextBufferImpl.create(content);
+  // #334: wrapping derives from the per-buffer visual-line mode; these tests
+  // express "this buffer wraps" as config.wordWrap — convert at the seam.
+  if (opts?.config?.wordWrap) {
+    opts.activeMinorModes = [...(opts.activeMinorModes ?? []), "visual-line"];
+  }
   return {
     currentBuffer: buf as any,
     cursorPosition: { line: 0, column: 0 },

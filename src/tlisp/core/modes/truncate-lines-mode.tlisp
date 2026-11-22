@@ -19,14 +19,21 @@
         (minor-mode-set "truncate-lines" nil)))))
 
 (defun global-truncate-lines-mode (&optional (arg nil arg-supplied-p))
-  "Toggle truncate-lines mode globally."
+  "Toggle truncate-lines mode globally. Mutually exclusive with visual-line (#334)."
+  (interactive)
   (if (not arg-supplied-p)
-    (global-minor-mode-set "truncate-lines" (not (global-minor-mode-active-p "truncate-lines")))
-    (if (equal arg t)
-      (global-minor-mode-set "truncate-lines" t)
-      (if (numberp arg)
-        (global-minor-mode-set "truncate-lines" (> arg 0))
-        (global-minor-mode-set "truncate-lines" nil)))))
+    (progn
+      (global-minor-mode-set "truncate-lines" (not (global-minor-mode-active-p "truncate-lines")))
+      (if (global-minor-mode-active-p "truncate-lines")
+        (global-minor-mode-set "visual-line" nil)))
+    (progn
+      (if (equal arg t)
+        (global-minor-mode-set "truncate-lines" t)
+        (if (numberp arg)
+          (global-minor-mode-set "truncate-lines" (> arg 0))
+          (global-minor-mode-set "truncate-lines" nil)))
+      (if (global-minor-mode-active-p "truncate-lines")
+        (global-minor-mode-set "visual-line" nil)))))
 
 (provide "truncate-lines-mode")
 )

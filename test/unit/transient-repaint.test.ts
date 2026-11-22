@@ -252,15 +252,15 @@ describe("#318/#319 — the wire: segment + revision through the REAL helper", (
     // Cursor at the TOP (the #321 cursor-contains walk extends the window
     // to hold the cursor line — with the cursor at the buffer END the
     // window is correctly larger; pin the minimal case).
-    const wrapped = { ...state, viewportTop: 0, cursorPosition: { line: 0, column: 0 }, config: { ...state.config, wordWrap: true }, transientSegment: "| pondering · 3 chunks · 4s" };
+    const wrapped = { ...state, viewportTop: 0, cursorPosition: { line: 0, column: 0 }, config: { ...state.config, wordWrap: true }, activeMinorModes: ["visual-line"], transientSegment: "| pondering · 3 chunks · 4s" };
     const wireWrap = editorStateToJson(wrapped, 22, 100);
     expect(wireWrap.visibleLines!.length).toBe(23);
     // And genuinely-wrapping long lines: the wrapped window + the +1.
     e(editor, `(buffer-insert "${("x".repeat(200) + "\\n").repeat(5)}")`);
     const state2 = editor.getEditorState();
-    const wrappedLong = { ...state2, viewportTop: 0, cursorPosition: { line: 0, column: 0 }, config: { ...state2.config, wordWrap: true }, transientSegment: "| pondering" };
+    const wrappedLong = { ...state2, viewportTop: 0, cursorPosition: { line: 0, column: 0 }, config: { ...state2.config, wordWrap: true }, activeMinorModes: ["visual-line"], transientSegment: "| pondering" };
     const wireLong = editorStateToJson(wrappedLong, 22, 100);
-    const plainLong = editorStateToJson({ ...state2, viewportTop: 0, cursorPosition: { line: 0, column: 0 }, config: { ...state2.config, wordWrap: true } }, 22, 100);
+    const plainLong = editorStateToJson({ ...state2, viewportTop: 0, cursorPosition: { line: 0, column: 0 }, config: { ...state2.config, wordWrap: true }, activeMinorModes: ["visual-line"] }, 22, 100);
     expect(wireLong.visibleLines!.length).toBe(plainLong.visibleLines!.length + 1);
   });
 });

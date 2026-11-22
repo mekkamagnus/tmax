@@ -98,6 +98,7 @@ import {
   applyGlobalMinorModes,
   normalizeExtension,
 } from "./mode-state.ts";
+import { wrapModesActive } from "../frontend/render/buffer-lines.ts";
 import { cloneJsonValue, deserializeTlispValue, serializeTlispValue } from "../tlisp/serialization.ts";
 import { createModuleLoader } from "../tlisp/module-loader.ts";
 import type { ModuleExportRecord } from "../tlisp/module-registry.ts";
@@ -524,9 +525,19 @@ export class Editor {
         }
       },
       setCurrentFilename: (v: string | undefined) => {
-        editor.applyUpdate({ type: "SetCurrentFilename", filename: v });
+        // #334 audit r3: the mode-state key derives from the filename —
+        // when the CURRENT buffer's key changes, its mode entry follows
+        // (save-as from a special buffer keeps its enabled minors). The old
+        // key comes from the buffer's METADATA (filename ?? name), never
+        // the model's currentFilename — that field may still name a
+        // previous buffer and must not donate its state.
         const name = editor.findBufferName(editor.model.currentBuffer);
+        const previousKey = name !== undefined
+          ? (editor.bufferMetadata.get(name)?.filename ?? name)
+          : undefined;
+        editor.applyUpdate({ type: "SetCurrentFilename", filename: v });
         if (name) editor.updateBufferMetadata(name, { filename: v });
+        if (previousKey !== undefined) editor.migrateModeState(previousKey, v ?? name);
       },
       // spacePressed is transient leader-key input state, NOT deterministic
       // EditorModel state. Exposed as a runtime-service accessor pair so it
@@ -3002,7 +3013,29 @@ export class Editor {
    */
   associateBufferFilename(filename: string): void {
     const name = this.findBufferName(this.model.currentBuffer);
-    if (name) this.updateBufferMetadata(name, { filename, modified: false });
+    if (name) {
+      const previousFilename = this.bufferMetadata.get(name)?.filename;
+      this.updateBufferMetadata(name, { filename, modified: false });
+      // #334 audit r3: the mode-state key (filename ?? buffer name) changes
+      // with the filename — the buffer's modes follow it (save-as from a
+      // special buffer keeps its enabled minors).
+      this.migrateModeState(previousFilename ?? name, filename);
+    }
+  }
+
+  /**
+   * #334 audit r3: mode-state lifecycle. The state key (filename ?? buffer
+   * name) changes when a buffer is killed, renamed, or given a filename —
+   * the entry must follow or the buffer silently loses (or shares stale)
+   * mode state. Moves the entry when both keys are known; deletes it when
+   * TO is undefined (kill). Never invents state.
+   */
+  private migrateModeState(fromKey: string, toKey: string | undefined): void {
+    if (fromKey === toKey) return;
+    const state = this.bufferModeStates.get(fromKey);
+    if (!state) return;
+    this.bufferModeStates.delete(fromKey);
+    if (toKey !== undefined) this.bufferModeStates.set(toKey, state);
   }
 
   /**
@@ -3160,7 +3193,14 @@ export class Editor {
    * Get the current buffer key for mode state lookup
    */
   getCurrentBufferKey(): string {
-    return this.model.currentFilename ?? "*scratch*";
+    // #334 audit r2: filename-less buffers key mode state by their NAME.
+    // The old `?? "*scratch*"` fallback made every special buffer (*Fikra*,
+    // *Help*, …) SHARE one mode state — a minor mode enabled in one
+    // filename-less buffer activated in all of them. Named buffers keep
+    // filename keying (aliases of the same file share mode state); *scratch*
+    // itself is unaffected (its name IS "*scratch*").
+    if (this.model.currentFilename) return this.model.currentFilename;
+    return this.findBufferName(this.model.currentBuffer) ?? "*scratch*";
   }
 
   /**
@@ -3434,9 +3474,32 @@ export class Editor {
       activeMinorModeLighters: modeState.activeMinorModes
         .map((m) => this.minorModeRegistry.get(m)?.lighter ?? "")
         .filter((l) => l !== ""),
+      // #334 audit: each split pane wraps according to the buffer IT
+      // displays — snapshot the per-window derivation (mode state of the
+      // window's buffer, globalized modes merged) so the render layer never
+      // applies the focused buffer's wrap to other panes.
+      windowWrap: this.computeWindowWrap(),
       minibufferState: cloneJsonValue(this.model.minibufferState),
       minibufferView: this.model.minibufferView ? structuredClone(this.model.minibufferView) : undefined,
     };
+  }
+
+  /** #334 audit: windowId → wrap derivation for THAT window's buffer. */
+  private computeWindowWrap(): Record<string, boolean> | undefined {
+    const windows = this.model.windows;
+    if (!windows || windows.length <= 1) return undefined;
+    const out: Record<string, boolean> = {};
+    for (const win of windows) {
+      const name = win.bufferName ?? this.findBufferName(win.buffer);
+      const filename = name !== undefined ? this.bufferMetadata.get(name)?.filename : undefined;
+      // #334 audit r2: filename, else the buffer's NAME (identity) — never
+      // a shared *scratch* bucket for filename-less buffers.
+      const key = filename ?? name ?? "*scratch*";
+      const state = getOrCreateModeState(this.bufferModeStates, key);
+      const merged = applyGlobalMinorModes(state, this.globalizedMinorModes);
+      out[win.id] = wrapModesActive(merged.activeMinorModes);
+    }
+    return out;
   }
 
   /**
@@ -3444,7 +3507,11 @@ export class Editor {
    */
   setEditorState(newState: EditorState): void {
     const previousBufferKey = this.getCurrentBufferKey();
-    const nextBufferKey = newState.currentFilename ?? "*scratch*";
+    // #334 audit r2: same identity rule as getCurrentBufferKey — filename,
+    // else the buffer's name (never a shared *scratch* bucket).
+    const nextBufferKey = newState.currentFilename
+      ?? this.findBufferName(newState.currentBuffer)
+      ?? "*scratch*";
     const hasExistingModeState = this.bufferModeStates.has(nextBufferKey);
 
     // Bulk ingress of caller-owned EditorState. Routed as one
@@ -3737,6 +3804,10 @@ export class Editor {
    */
   killBuffer(name: string): string | null {
     if (!this.buffers.has(name)) return null;
+    // #334 audit r3: the killed buffer's mode state dies with it (keyed by
+    // its filename, else its name) — no stale state for a future buffer
+    // that reuses the key.
+    this.migrateModeState(this.bufferMetadata.get(name)?.filename ?? name, undefined);
     this.buffers.delete(name);
     this.bufferMetadata.delete(name);
 
@@ -3753,6 +3824,11 @@ export class Editor {
         const meta = this.bufferMetadata.get(survivor);
         if (meta?.filename) {
           this.applyUpdate({ type: "SetCurrentFilename", filename: meta.filename });
+        } else {
+          // #334 audit r3: a filename-less survivor must CLEAR the stale
+          // filename — the mode-state key (getCurrentBufferKey) would
+          // otherwise keep reading the KILLED file's state.
+          this.applyUpdate({ type: "SetCurrentFilename", filename: undefined });
         }
         // #265: rebind the focused window record to the survivor — a focus
         // round-trip would otherwise resurrect the killed buffer (the
@@ -3827,6 +3903,9 @@ export class Editor {
     const meta = this.bufferMetadata.get(oldName);
     this.bufferMetadata.delete(oldName);
     this.bufferMetadata.set(newName, meta ?? { modified: false, recency: this.bufferRecency++ });
+    // #334 audit r3: the mode-state key follows the rename (filename, else
+    // the buffer name) — a renamed special buffer keeps its modes.
+    this.migrateModeState(meta?.filename ?? oldName, meta?.filename ?? newName);
     return newName;
   }
 

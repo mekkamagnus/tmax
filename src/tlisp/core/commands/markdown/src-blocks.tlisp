@@ -98,15 +98,27 @@
       (string= (substring trimmed 0 3) "```")
       nil)))
 
+(defun markdown-src-fence-len (line)
+  "Length of LINE's backtick run (0 when LINE is not a fence). #335 audit: a ```` outer fence containing ``` inner lines must pair with its OWN length — shorter inner fences are content."
+  (let ((trimmed (string-trim line)))
+    (if (markdown-src-fence-p trimmed)
+      (let ((i 0) (n (length trimmed)))
+        (while (if (< i n) (string= (substring trimmed i (+ i 1)) "`") nil)
+          (set! i (+ i 1)))
+        i)
+      0)))
+
 (defun markdown-src-fence-language (line)
   "The language token of fence LINE (first word of the info string; \"\" when bare)."
-  (let ((info (string-trim (substring (string-trim line) 3))))
+  (let* ((trimmed (string-trim line))
+         (len (markdown-src-fence-len trimmed))
+         (info (if (> len 0) (string-trim (substring trimmed len)) "")))
     (if (= (length info) 0)
       ""
       (nth 0 (string-split info " ")))))
 
 (defun markdown-src-block-at-point ()
-  "The fenced block at point as a hashmap (start end language content-start content-end), or nil (RFC-037 §2.1)."
+  "The fenced block at point as a hashmap (start end fence-len language content-start content-end), or nil (RFC-037 §2.1)."
   (interactive)
   (let ((total (buffer-line-count))
         (cur (cursor-line))
@@ -114,24 +126,37 @@
         (i 0))
     (while (< i total)
       (if (markdown-src-fence-p (buffer-get-line i))
-        (set! fences (cons i fences)))
+        (set! fences (cons (list i (markdown-src-fence-len (buffer-get-line i))) fences)))
       (set! i (+ i 1)))
     (set! fences (reverse fences))
-    ;; Fence lines pair by strict top-down alternation (CommonMark's simple
-    ;; case). The cursor is inside a block when a pair encloses it
-    ;; inclusively — boundary fence lines count.
-    (let ((result nil) (j 0))
-      (while (and (< (+ j 1) (length fences)) (not result))
-        (let ((open (nth j fences))
-              (close (nth (+ j 1) fences)))
-          (if (if (>= cur open) (<= cur close) nil)
-            (set! result (hashmap
-                           "start" open
-                           "end" close
-                           "language" (markdown-src-fence-language (buffer-get-line open))
-                           "content-start" (+ open 1)
-                           "content-end" (- close 1)))
-            (set! j (+ j 2)))))
+    ;; Pair each opener with the NEXT fence of the SAME backtick length that
+    ;; has NO info string (#335 audit: a ``` line inside a ```` block is
+    ;; content; CommonMark: a fence carrying an info string can only OPEN).
+    ;; An opener with no same-length bare closer is unclosed: everything
+    ;; below it belongs to that unclosed block, so pairing stops (nil).
+    (let ((result nil) (j 0) (n (length fences)))
+      (while (and (< j n) (not result))
+        (let ((open-line (nth 0 (nth j fences)))
+              (open-len (nth 1 (nth j fences)))
+              (close nil)
+              (k (+ j 1)))
+          (while (if (< k n) (not close) nil)
+            (if (= (nth 1 (nth k fences)) open-len)
+              (if (= (length (markdown-src-fence-language (buffer-get-line (nth 0 (nth k fences))))) 0)
+                (set! close (nth 0 (nth k fences)))
+                (set! k (+ k 1)))
+              (set! k (+ k 1))))
+          (if close
+            (if (if (>= cur open-line) (<= cur close) nil)
+              (set! result (hashmap
+                             "start" open-line
+                             "end" close
+                             "fence-len" open-len
+                             "language" (markdown-src-fence-language (buffer-get-line open-line))
+                             "content-start" (+ open-line 1)
+                             "content-end" (- close 1)))
+              (set! j (+ k 1)))
+            (set! j n))))
       result)))
 
 (defun markdown-src-block-content (block)
@@ -152,6 +177,24 @@
   "Name of the live *Src-Edit:* buffer.")
 (defvar markdown-src-edit-start 0
   "Opening fence line of the block under edit.")
+(defvar markdown-src-edit-fence-text ""
+  "The opening fence line's exact text at OPEN (#335 audit): commits validate/relocate the block by this identity when the buffer changed.")
+(defvar markdown-src-edit-buffer-lines 0
+  "The target buffer's line count at OPEN (#335 audit r5): ANY insertion or deletion changes it, so for ambiguous twins a preserved count is the precondition for claiming continuity — a shifted twin always arrives with a changed count.")
+(defvar markdown-src-edit-pre-line ""
+  "The line immediately ABOVE the opening fence at OPEN (#335 audit r4): with ambiguous twins, positional continuity alone is spoofable by a deletion that shifts the twin onto the recorded line — the neighborhood must match too.")
+(defvar markdown-src-edit-pre-exists nil
+  "t when the block had a line above it at open (start > 0).")
+(defvar markdown-src-edit-post-line ""
+  "The line immediately BELOW the closing fence at OPEN (#335 audit r4).")
+(defvar markdown-src-edit-post-exists nil
+  "t when the block had a line below it at open (end < line count - 1).")
+(defvar markdown-src-edit-ambiguous-at-open nil
+  "t when OTHER byte-identical blocks existed at OPEN (#335 audit r3): identity was never unique, so once positional continuity is lost the commit must ABORT rather than guess among twins.")
+(defvar markdown-src-edit-abort-reason ""
+  "Why the last locate returned nil: "gone" (no candidate) or "ambiguous" (identity not establishable).")
+(defvar markdown-src-edit-content-full ""
+  "The ORIGINAL block content at OPEN (#335 audit r2): a relocation candidate's content must EQUAL it — first-line/line-count anchors are spoofable by twin blocks and coincidental edits; full equality is the strongest position-free identity available (fully-identical twins remain indistinguishable in principle and resolve to the nearest candidate).")
 (defvar markdown-src-edit-content-start 0)
 (defvar markdown-src-edit-content-end 0)
 (defvar markdown-src-edit-return-mode "normal"
@@ -212,6 +255,25 @@
                (content (markdown-src-block-content block)))
           (set! markdown-src-edit-target (buffer-current))
           (set! markdown-src-edit-start (hashmap-get block "start"))
+          (set! markdown-src-edit-fence-text (buffer-get-line (hashmap-get block "start")))
+          (set! markdown-src-edit-content-full content)
+          (set! markdown-src-edit-buffer-lines (buffer-line-count))
+          ;; #335 audit r4: neighborhood anchors (only consulted for
+          ;; ambiguous twins — see locate).
+          (set! markdown-src-edit-pre-exists (> (hashmap-get block "start") 0))
+          (set! markdown-src-edit-pre-line
+                (if markdown-src-edit-pre-exists
+                  (buffer-get-line (- (hashmap-get block "start") 1)) ""))
+          (set! markdown-src-edit-post-exists
+                (< (hashmap-get block "end") (- (buffer-line-count) 1)))
+          (set! markdown-src-edit-post-line
+                (if markdown-src-edit-post-exists
+                  (buffer-get-line (+ (hashmap-get block "end") 1)) ""))
+          ;; #335 audit r3: identity uniqueness is a property of the buffer
+          ;; AT OPEN — twins recorded now make a later lost-continuity
+          ;; resolution an abort, never a guess.
+          (set! markdown-src-edit-ambiguous-at-open
+                (> (length (markdown-edit-src-candidates)) 1))
           (set! markdown-src-edit-content-start (hashmap-get block "content-start"))
           (set! markdown-src-edit-content-end (hashmap-get block "content-end"))
           (set! markdown-src-edit-return-mode (editor-mode))
@@ -233,16 +295,106 @@
 
 ;; ── Piece 4: write-back and abort (RFC §2.4) ──────────────────────────
 
+(defun markdown-edit-src-candidates ()
+  "All blocks in the current buffer matching the recorded identity — fence text, bare same-length closer, FULL content equality — as (start end) pairs."
+  (let ((total (buffer-line-count)) (out (list)) (i 0))
+    (while (< i total)
+      (if (string= (buffer-get-line i) markdown-src-edit-fence-text)
+        (let ((flen (markdown-src-fence-len markdown-src-edit-fence-text))
+              (k (+ i 1))
+              (close nil))
+          (while (if (< k total) (not close) nil)
+            (if (= (markdown-src-fence-len (buffer-get-line k)) flen)
+              (if (= (length (markdown-src-fence-language (buffer-get-line k))) 0)
+                (set! close k)
+                (set! k (+ k 1)))
+              (set! k (+ k 1))))
+          (if close
+            (if (markdown-edit-src-content-matches-p (+ i 1) (- close 1))
+              (set! out (cons (list i close) out))))))
+      (set! i (+ i 1)))
+    (reverse out)))
+
+(defun markdown-edit-src-anchors-match-p (cand-start cand-end)
+  "t when continuity is established for an AMBIGUOUS block (#335 audit r4/r5): the buffer's TOTAL line count is unchanged since open (any insertion or deletion — including every shift that could move a twin onto the recorded line — changes it) AND the neighborhood lines above/below the block are unchanged."
+  (let ((count-ok (= (buffer-line-count) markdown-src-edit-buffer-lines))
+        (pre-ok (if markdown-src-edit-pre-exists
+                  (if (> cand-start 0)
+                    (string= (buffer-get-line (- cand-start 1)) markdown-src-edit-pre-line)
+                    nil)
+                  (= cand-start 0)))
+        (post-ok (if markdown-src-edit-post-exists
+                   (if (< cand-end (- (buffer-line-count) 1))
+                     (string= (buffer-get-line (+ cand-end 1)) markdown-src-edit-post-line)
+                     nil)
+                   (= cand-end (- (buffer-line-count) 1)))))
+    (if count-ok (if pre-ok post-ok nil) nil)))
+
+(defun markdown-edit-src-locate ()
+  "Resolve the pending block's identity (#335 audit r3) — NEVER a proximity guess: (1) the candidate AT the recorded start line wins (positional continuity); (2) otherwise the unique candidate, and ONLY when identity was unique at open (no byte-identical twins existed); (3) otherwise nil with the reason in markdown-src-edit-abort-reason (gone | ambiguous) — the commit aborts with recovery."
+  (let ((cands (markdown-edit-src-candidates))
+        (start markdown-src-edit-start))
+    (set! markdown-src-edit-abort-reason "")
+    (let ((exact nil) (others (list)) (j 0) (chosen nil))
+      (while (< j (length cands))
+        (if (= (nth 0 (nth j cands)) start)
+          (set! exact (nth j cands))
+          (set! others (cons (nth j cands) others)))
+        (set! j (+ j 1)))
+      ;; #335 audit r6 — THE CONSERVATIVE RULE the audit prescribed: for
+      ;; ambiguous-at-open blocks (byte-identical twins existed), identity
+      ;; can NEVER be established without buffer-edit markers — position,
+      ;; neighborhood, and line-count evidence are all constructible by
+      ;; compensating edits. Such edits therefore NEVER commit: the edit
+      ;; aborts with recovery. Unique-at-open blocks are safe: full-content
+      ;; equality identifies the block buffer-wide (exact position or the
+      ;; unique candidate).
+      (set! markdown-src-edit-abort-reason
+            (if markdown-src-edit-ambiguous-at-open "ambiguous" ""))
+      (set! chosen
+            (if markdown-src-edit-ambiguous-at-open
+              nil
+              (if exact
+                exact
+                (if (= (length others) 1) (nth 0 others) nil))))
+      (if chosen
+        (set! markdown-src-edit-abort-reason ""))
+      (if chosen
+        (hashmap
+          "start" (nth 0 chosen)
+          "end" (nth 1 chosen)
+          "fence-len" (markdown-src-fence-len markdown-src-edit-fence-text)
+          "language" (markdown-src-fence-language markdown-src-edit-fence-text)
+          "content-start" (+ (nth 0 chosen) 1)
+          "content-end" (- (nth 1 chosen) 1))
+        (progn
+          ;; Keep an already-established reason (the conservative
+          ;; ambiguous-at-open abort) — only fall back when unset.
+          (if (= (length markdown-src-edit-abort-reason) 0)
+            (set! markdown-src-edit-abort-reason
+                  (if (> (length cands) 0) "ambiguous" "gone")))
+          nil)))))
+
+(defun markdown-edit-src-content-matches-p (cstart cend)
+  "t when the block content at [CSTART..CEND] EQUALS the recorded open-time content (#335 audit r2/r3). Full equality: a twin block with any differing line is rejected; a pairing that ran past a removed closing fence swallows intervening prose and is rejected; a directly-edited target block is rejected (the edit recovers via *Messages*)."
+  (string= (markdown-edit-src-join-lines cstart cend) markdown-src-edit-content-full))
+
+(defun markdown-edit-src-join-lines (cstart cend)
+  "Lines [CSTART..CEND] joined by newlines, no trailing newline ("" for an empty range)."
+  (let ((lines (list)) (i cstart))
+    (while (<= i cend)
+      (set! lines (cons (buffer-get-line i) lines))
+      (set! i (+ i 1)))
+    (string-join "\n" (reverse lines))))
+
 (defun markdown-edit-src-commit ()
-  "Write the edit buffer's text back between the block's fences, kill the edit buffer, and return to the fence line (RFC-037 §2.4)."
+  "Write the edit buffer's text back between the block's fences, kill the edit buffer, and return to the fence line (RFC-037 §2.4). The block is re-located by its recorded fence text first (#335 audit): edits that shifted or removed the block can never write to stale line numbers."
   (interactive)
   (if (not markdown-src-edit-target)
     (editor-set-status "no source edit in progress")
     (let ((text nil)
           (target markdown-src-edit-target)
           (start markdown-src-edit-start)
-          (cstart markdown-src-edit-content-start)
-          (cend markdown-src-edit-content-end)
           (bufname markdown-src-edit-buffer)
           (return-mode markdown-src-edit-return-mode))
       ;; Read the EDIT buffer's text BEFORE switching (the corruption fix):
@@ -260,19 +412,35 @@
       (set! markdown-src-edit-target nil)
       (set! markdown-src-edit-buffer nil)
       (switch-to-buffer target)
-      ;; Replace [cstart..cend] with the edit text. Deleting up to
-      ;; (cend+1, 0) removes the content lines AND their newlines, leaving
-      ;; the closing fence as the new line cstart; the insert re-adds the
-      ;; text plus its trailing newline. Empty text inserts just "\n" —
-      ;; one blank line between the fences, valid markdown (RFC §2.4).
-      (if (>= cend cstart)
-        (buffer-delete-range cstart 0 (+ cend 1) 0))
-      (cursor-move cstart 0)
-      (buffer-insert (concat text "\n"))
-      (cursor-move start 0)
-      (condition-case err (buffer-kill bufname) (error (e) nil))
-      (editor-set-mode return-mode)
-      (message "src block updated"))))
+      ;; Stale-line guard (#335 audit): re-locate the block by fence text.
+      (let ((block (markdown-edit-src-locate)))
+        (if (not block)
+          (progn
+            ;; Block gone: no write, no corruption — recover via *Messages*.
+            (condition-case err (buffer-kill bufname) (error (e) nil))
+            (editor-set-mode return-mode)
+            (cursor-move (min start (- (buffer-line-count) 1)) 0)
+            (message "src block %s — edit aborted, content for recovery: %s"
+                     (if (> (length markdown-src-edit-abort-reason) 0) markdown-src-edit-abort-reason "gone") text)
+            (editor-set-status (concat "src block "
+                                       (if (> (length markdown-src-edit-abort-reason) 0) markdown-src-edit-abort-reason "gone")
+                                       " — edit aborted (content echoed to *Messages*)")))
+          (let ((cstart (hashmap-get block "content-start"))
+                (cend (hashmap-get block "content-end"))
+                (new-start (hashmap-get block "start")))
+            ;; Replace [cstart..cend] with the edit text. Deleting up to
+            ;; (cend+1, 0) removes the content lines AND their newlines,
+            ;; leaving the closing fence as the new line cstart; the insert
+            ;; re-adds the text plus its trailing newline. Empty text inserts
+            ;; just "\n" — one blank line between the fences (RFC §2.4).
+            (if (>= cend cstart)
+              (buffer-delete-range cstart 0 (+ cend 1) 0))
+            (cursor-move cstart 0)
+            (buffer-insert (concat text "\n"))
+            (cursor-move new-start 0)
+            (condition-case err (buffer-kill bufname) (error (e) nil))
+            (editor-set-mode return-mode)
+            (message "src block updated")))))))
 
 (defun markdown-edit-src-abort ()
   "Discard the source edit; the markdown buffer is untouched (RFC-037 §2.4)."
