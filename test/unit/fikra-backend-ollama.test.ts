@@ -1446,7 +1446,7 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
       const status = String(e(ed, "(editor-status)").value);
       expect(status).toContain("action reverted");
-      expect(status).toContain("1 path(s) you had staged are still staged");
+      expect(status).toContain("1 path(s) left staged (unstage to drop them for good)");
       expect(existsSync(join(process.cwd(), "added151.txt"))).toBe(false);
       // …and the staged entry is exactly what the user staged.
       expect(execFileSync("git", ["show", ":added151.txt"]).toString()).toBe("ADDED\n");
@@ -3051,10 +3051,11 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
-  // r155c (codex gate round 2): a staged addition is the USER's work.
-  // The pair now records whether the action's OWN command moved the
-  // index (a fingerprint before and after); only then does a revert
-  // unstage what it finds.
+  // r155c/r155d (codex gate rounds 2–3): a staged entry is the USER's
+  // work. A revert NEVER writes the index — who staged what cannot be
+  // told apart after the fact (a whole-index fingerprint granted an
+  // action that ran its own `git add` for ONE path ownership of every
+  // other added path, and cost the user an entry they staged).
   // The WORKTREE mode as git records it (100644 / 100755).
   const fileMode = (f: string) => ((statSync(join(process.cwd(), f)).mode & 0o111) ? "100755" : "100644");
   const worktreeIsLink = (f: string) => lstatSync(join(process.cwd(), f), { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
@@ -3068,12 +3069,15 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
     const status = String(e(ed, "(editor-status)").value);
     expect(status).toContain("action reverted");
-    expect(status).toContain("still staged");
+    expect(status).toContain("left staged");
     expect(existsSync(join(process.cwd(), "user-staged.txt"))).toBe(false);
     expect(execFileSync("git", ["ls-files", "user-staged.txt"], { encoding: "utf8" }).trim()).toBe("user-staged.txt");
   });
 
-  tt("the action's OWN `git add` is undone with the action", async () => {
+  // The price of never writing the index: an action's OWN `git add`
+  // stays staged too — said in the status AND in the transcript (the
+  // entry would bring the file back at commit).
+  tt("the action's OWN `git add` is LEFT STAGED — a revert never writes the index — and it is said twice", async () => {
     const ed = await armed();
     e(ed, '(fikra/chat/fikra-turn-send "stage your own file")');
     call(ed, 511, "touch self-staged.txt && git add self-staged.txt");
@@ -3082,9 +3086,31 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
     const status = String(e(ed, "(editor-status)").value);
     expect(status).toContain("action reverted");
-    expect(status).not.toContain("still staged");
+    expect(status).toContain("1 path(s) left staged (unstage to drop them for good)");
     expect(existsSync(join(process.cwd(), "self-staged.txt"))).toBe(false);
-    expect(execFileSync("git", ["ls-files", "self-staged.txt"], { encoding: "utf8" }).trim()).toBe("");
+    expect(execFileSync("git", ["ls-files", "self-staged.txt"], { encoding: "utf8" }).trim()).toBe("self-staged.txt");
+    // …and durably in the transcript.
+    expect(strip(String(e(ed, "(buffer-text)").value))).toContain("1 staged path(s) left staged by the revert");
+  });
+
+  // Codex gate round 3 (P0): the action ran its own `git add` for an
+  // UNRELATED path, then the user staged the file it created. The
+  // user's entry must survive the revert of that action.
+  tt("a MIXED action: the user's staging of another added path survives", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "mixed staging")');
+    call(ed, 517, "printf 'x\\n' >> base.txt && git add base.txt && touch victim.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    execFileSync("git", ["add", "victim.txt"]);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    const status = String(e(ed, "(editor-status)").value);
+    expect(status).toContain("action reverted");
+    expect(status).toContain("left staged");
+    expect(existsSync(join(process.cwd(), "victim.txt"))).toBe(false);
+    expect(execFileSync("git", ["show", ":victim.txt"], { encoding: "utf8" })).toBe("");
+    expect(execFileSync("git", ["ls-files", "victim.txt"], { encoding: "utf8" }).trim()).toBe("victim.txt");
+    // The worktree is back to the pre-action content.
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
   });
 
   // Kind and mode are part of a path's state: a symlink the user
@@ -3157,6 +3183,76 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(actionRefs()).toEqual([]);
     await settleRefireFrom(ed, before, "written");
     expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // Codex gate round 3: the NUL stream was joined back onto newlines —
+  // a name that CONTAINS a newline could not revert.
+  tt("a path containing a NEWLINE reverts", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "odd newline")');
+    // (A `$( )` in the command parks at the L2 gate — a literal newline
+    // inside single quotes does not.)
+    call(ed, 518, "touch 'line\nbreak'");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(existsSync(join(process.cwd(), "line\nbreak"))).toBe(true);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(existsSync(join(process.cwd(), "line\nbreak"))).toBe(false);
+  });
+
+  // Codex gate round 3: `cp -p` keeps the old timestamp — invisible to
+  // the modification-time scan. Ignored entries that APPEAR are caught
+  // by a listing taken before and after the command.
+  tt("an ignored write that KEEPS its old timestamp is still reported", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), ".gitignore"), ".tmax/\n.env\n");
+    execFileSync("git", ["add", ".gitignore"]);
+    execFileSync("git", ["commit", "-qm", "ignore env"]);
+    execFileSync("touch", ["-t", "202001010000", "old-source.txt"]);
+    e(ed, '(fikra/chat/fikra-turn-send "copy preserving time")');
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    call(ed, 519, "cp -p old-source.txt .env");
+    const mid = strip(await until(ed, "(buffer-text)", "cannot hold", 120));
+    expect(mid.split("\n").filter((l) => l.includes("not revertable: .env")).length).toBe(1);
+    expect(String(e(ed, "(editor-status)").value)).toContain("outside the checkpoint");
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, before, "copied");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // Codex gate round 3: with `.tmax` NOT ignored, the glob exclude
+  // matched the directory entry but not its contents — the thread's own
+  // indexes, locks and logs entered the snapshots.
+  tt("an UNIGNORED .tmax never enters a snapshot — but a user's file named .tmax does", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), ".gitignore"), "node_modules/\n");
+    execFileSync("git", ["add", ".gitignore"]);
+    execFileSync("git", ["commit", "-qm", "tmax not ignored"]);
+    e(ed, '(fikra/chat/fikra-turn-send "two files")');
+    call(ed, 520, "touch plain.txt user-tmax-file.tmp && mkdir -p tools && mv user-tmax-file.tmp tools/.tmax");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    const post = actionRefs()[1]!;
+    const tree = execFileSync("git", ["ls-tree", "-r", "--name-only", post], { encoding: "utf8" }).trim().split("\n");
+    expect(tree.filter((p) => p.startsWith(".tmax/"))).toEqual([]);
+    expect(tree).toContain("plain.txt");
+    // A regular file NAMED .tmax below the root is the user's — kept.
+    expect(tree).toContain("tools/.tmax");
+    expect(existsSync(join(process.cwd(), ".tmax", "fikra", "ckpt-index-main"))).toBe(true);
+  });
+
+  // Codex gate round 3: with core.fileMode=false git records every file
+  // as non-executable; a pre-existing executable bit read as divergence.
+  tt("with core.fileMode=false an executable file's content action still reverts", async () => {
+    const ed = await armed();
+    execFileSync("git", ["config", "core.fileMode", "false"]);
+    execFileSync("chmod", ["+x", "base.txt"]);
+    e(ed, '(fikra/chat/fikra-turn-send "append to it")');
+    call(ed, 521, "printf 'more\\n' >> base.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
+    expect(fileMode("base.txt")).toBe("100755");
   });
 
   // Codex gate r154 round 5 (P2): the counters ran BEFORE the append — a
