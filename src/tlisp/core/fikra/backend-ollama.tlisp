@@ -1265,6 +1265,21 @@ availability gate must be synchronous; the turn itself is async)."
               ;; result joins the SAVED acc (its position in the reply),
               ;; then the remainder appends; the decision never appends
               ;; out of order again.
+              ;; r141 (codex 9-item): the PRE-state ref captures BEFORE
+              ;; the command runs — an earlier action in the turn may
+              ;; have changed the tree since the baseline; the ref a
+              ;; revert restores to is the state immediately before THIS
+              ;; mutation. The post-exit capture (evidence) remains.
+              (condition-case nil
+                (progn (require-module fikra/checkpoint)
+                       (fikra/checkpoint/fikra-checkpoint-set-emit-owner
+                         (if home-thread home-thread (fikra/thread/fikra-thread-current)))
+                       (fikra/checkpoint/fikra-checkpoint-capture "action")
+                       (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil))
+                (error (m)
+                  (editor-set-status
+                    (concat "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref ("
+                            (if (stringp m) m "capture error") ")"))))
               (setq fikra-ollama-next-mediated t)
               (let ((approved (fikra-ollama-run-bash-now cmd dir)))
                 ;; r131: an async spawn returns the PID — the result

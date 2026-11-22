@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -1001,6 +1001,36 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(msgs).toContain("user rejected this command");
     // The refusal appears exactly once.
     expect(msgs.split("user rejected this command").length - 1).toBe(1);
+  });
+
+  // r141 (codex 9-item): the MEDIATED bash's PRE ref captures the
+  // state IMMEDIATELY BEFORE the command (an earlier edit may have
+  // changed the tree since the baseline); the POST ref (evidence)
+  // follows at exit. Verify by TREE CONTENT, not existence.
+  tt("a mediated bash's pre-ref tree predates the command; the post-ref carries it", async () => {
+    const ed = await armed();
+    mkdirSync(join(process.cwd(), "med141dir"));
+    writeFileSync(join(process.cwd(), "med141dir/pre141.txt"), "BEFORE-MUTATION");
+    e(ed, '(fikra/chat/fikra-turn-send "remove it")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "rm -rf med141dir/" } } }] } }));
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 250 "live")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 250 "${r}")`);
+    e(ed, `(fikra-http-complete 250 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    await settleRefireFrom(ed, "250", "MED141-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // Two action refs exist: -a1 (PRE, captured before the spawn) and
+    // -a2 (POST, at exit). The PRE tree still HAS the file; the POST
+    // tree does not.
+    const refs = String(e(ed, '(shell-command "git for-each-ref refs/fikra")').value);
+    expect(refs).toContain("1-a1");
+    expect(refs).toContain("1-a2");
+    const preTree = String(e(ed, '(shell-command "git ls-tree -r refs/fikra/main/1-a1 --name-only")').value);
+    const postTree = String(e(ed, '(shell-command "git ls-tree -r refs/fikra/main/1-a2 --name-only")').value);
+    expect(preTree).toContain("med141dir/pre141.txt");
+    expect(postTree).not.toContain("pre141.txt");
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
