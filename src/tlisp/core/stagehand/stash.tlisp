@@ -29,7 +29,7 @@
 (defvar stagehand-stash-toggle-u nil "z u — include-untracked pending.")
 (defvar stagehand-stash-toggle-k nil "z k — keep-index pending.")
 (defvar stagehand-stash-z-pending nil "the z creation prefix is armed.")
-(defvar stagehand-stash-pending-op nil "(op ref) awaiting the y/n.")
+(defvar stagehand-stash-pending-op nil "(op ref id) awaiting the y/n — the recorded commit ID re-validates at the mutation point.")
 
 (defun stagehand-stash-buffer-name () "*Stagehand-Stash*")
 
@@ -340,7 +340,11 @@ SECOND z creates — the spec's `z z`)."
     (buffer-set-read-only nil)
     (stagehand-stash-clear)
     (buffer-append (concat (stagehand-stash-header) "\n"))
-    (stagehand-stash-emit stagehand-stash-rows)
+    ;; An EMPTY list keeps its placeholder (gate r2: the rerender
+    ;; emitted header+rows only — the 'no stashes' line dropped).
+    (if (null stagehand-stash-rows)
+      (buffer-append "no stashes\n")
+      (stagehand-stash-emit stagehand-stash-rows))
     (buffer-set-read-only t)
     (cursor-move line 0))
   (editor-set-status "Stagehand: toggle set"))

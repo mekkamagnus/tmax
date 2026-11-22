@@ -131,6 +131,16 @@ describe("#292 — creation (the z prefix)", () => {
     expect(git("stash", "list")).toBe("");
   });
 
+  test("an EMPTY list keeps its 'no stashes' line across a toggle rerender (gate r2)", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base"); // no stashes
+    openStash();
+    expect(strip(bufferText(editor))).toContain("no stashes");
+    e(editor, "(stagehand/stash/stagehand-stash-z)");
+    e(editor, "(stagehand/stash/stagehand-stash-u)");
+    expect(strip(bufferText(editor))).toContain("no stashes");
+  });
+
   test("the toggle state RESETS on reopen; the header shows it", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
     commit("base");
@@ -208,7 +218,7 @@ describe("#292 — apply / pop / drop", () => {
     expect(git("stash", "list")).toBe("");
   });
 
-  test("a BARE ENTER cancels the drop (n-first)", () => {
+  test("a BARE ENTER (the n-first default, delivered as n) cancels the drop", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
     commit("base");
     writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
