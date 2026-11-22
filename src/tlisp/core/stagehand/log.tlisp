@@ -4,6 +4,8 @@
           stagehand-log-quit stagehand-log-show
           stagehand-log-checkout stagehand-log-checkout-accept
           stagehand-log-checkout-table stagehand-show-next
+          stagehand-log-cherry-pick stagehand-log-revert
+          stagehand-log-pick-table stagehand-log-pick-accept
           stagehand-show-prev stagehand-show-quit
           stagehand-log-buffer-name stagehand-show-buffer-name
           stagehand-log-shas stagehand-log-commit-count
@@ -27,7 +29,7 @@
 ;; is GIT's call — no preflight, no force. q closes (recency).
 
 (major-mode-register "stagehand-log" '() nil)
-(major-mode-doc "stagehand-log" "Stagehand log — n/p commits, RET show, b checkout, g re-run, q close")
+(major-mode-doc "stagehand-log" "Stagehand log — n/p commits, RET show, b checkout, c cherry-pick, r revert, g re-run, q close")
 (major-mode-register "stagehand-show" '() nil)
 (major-mode-doc "stagehand-show" "Stagehand show — n/p walk commits, q back to the log")
 
@@ -425,6 +427,79 @@ candidate — a bare Enter must CANCEL, never confirm a mutation)."
         (concat "Stagehand: checkout failed (" (number-to-string (nth 2 res)) ") "
           (car (string-split (concat (nth 1 res) "\n") "\n")))))))
 
+;; ── cherry-pick + revert (#330) ─────────────────────────────────────
+(defvar stagehand-pick-pending nil
+  "The (op sha) list awaiting the y/n answer (op: cherry-pick|revert).")
+
+(defun stagehand-log-pick-op (op)
+  "c/r — cherry-pick or revert the commit at point behind an n-first
+y/n confirm (#287's lesson: a bare Enter cancels)."
+  (let ((sha (stagehand-log-line-is-commit (cursor-line))))
+    (if sha
+      (progn
+        (setq stagehand-pick-pending (list op sha))
+        (completing-read
+          (concat (if (string= op "cherry-pick") "Cherry-pick " "Revert ")
+            sha "? (y/n)")
+          "stagehand/log/stagehand-log-pick-table"
+          nil t "" "stagehand-checkout-history"
+          "stagehand/log/stagehand-log-pick-accept"))
+      (editor-set-status "Stagehand: no commit on this row"))))
+
+(defun stagehand-log-cherry-pick () (stagehand-log-pick-op "cherry-pick"))
+(defun stagehand-log-revert () (stagehand-log-pick-op "revert"))
+
+(defun stagehand-log-pick-table (input action)
+  "n FIRST (a bare Enter must CANCEL a mutation)."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "n" "display" "n" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "y" "display" "y" "annotation" "" "metadata" (hashmap)))))
+
+(defun stagehand-log-pick-accept (answer)
+  (if (string= answer "y")
+    (let ((pending stagehand-pick-pending))
+      (setq stagehand-pick-pending nil)
+      (if pending
+        (stagehand-do-pick (nth 0 pending) (nth 1 pending))
+        (editor-set-status "Stagehand: no pick pending")))
+    (progn
+      (setq stagehand-pick-pending nil)
+      (editor-set-status "Stagehand: pick cancelled"))))
+
+(defun stagehand-do-pick (op sha)
+  (let* ((res (shell-exec-argv
+                (list "git"
+                      (if (string= op "cherry-pick") "cherry-pick" "revert")
+                      sha)
+                stagehand-log-root))
+         (code (nth 2 res)))
+    (if (and (numberp code) (= code 0))
+      (progn
+        ;; Success: the STATUS view refreshes (the Conflicted section
+        ;; would appear on conflicts); the log stays (the issue).
+        (stagehand/status/stagehand-status)
+        (editor-set-status
+          (concat (if (string= op "cherry-pick") "cherry-picked " "reverted ") sha)))
+      (stagehand-pick-conflict-route op sha res))))
+
+(defun stagehand-pick-conflict-route (op sha res)
+  ;; Route conflicts to the Conflicted section (#286's buffer) with
+  ;; the manual resolution advice. The key-driven continuation/abort
+  ;; flow rides #295's framework (blocked) — the documented v1
+  ;; ceiling; `git <op> --abort` is the named escape hatch.
+  (let ((out (concat (nth 1 res) "")))
+    (if (or (string-contains-p "CONFLICT" out)
+            (string-contains-p "conflict" out))
+      (progn
+        (stagehand/status/stagehand-status)
+        (editor-set-status
+          (concat "Stagehand: " op " conflict — resolve in the Conflicted section, then continue; abort: git " op " --abort")))
+      (editor-set-status
+        (concat "Stagehand: " op " failed (" (number-to-string (nth 2 res)) ") "
+          (car (string-split (concat (nth 1 res) "\n") "\n")))))))
+
 (defun stagehand-refs-at (sha)
   (let ((out (car (shell-exec-argv
                     (list "git" "for-each-ref" (concat "--points-at=" sha)
@@ -510,6 +585,8 @@ streaming contexts; switch-append-restore is verified end-to-end)."
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/log/stagehand-log-quit)")
         (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/log/stagehand-log-show)")
         (editor/keymaps/keymap-set-key kmap "b" "(stagehand/log/stagehand-log-checkout)")
+        (editor/keymaps/keymap-set-key kmap "c" "(stagehand/log/stagehand-log-cherry-pick)")
+        (editor/keymaps/keymap-set-key kmap "r" "(stagehand/log/stagehand-log-revert)")
         (editor/keymaps/buffer-set-keymap (stagehand-log-buffer-name) kmap))))
   t)
 
