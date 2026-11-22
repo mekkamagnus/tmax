@@ -168,3 +168,5 @@
 {"ts":"2026-11-23T09:05:00Z","event":"gate-round","issue":292,"round":3,"workflow":"wf_400b5cb2-c19","verdict":"PASS","note":"r1+r2 fixes confirmed genuine; the gate independently re-ran the suite (18/18); non-blocking notes only"}
 {"ts":"2026-11-23T09:10:00Z","event":"adr","issue":292,"adr":"docs/adrs/ADR-0314-stagehand-stash.md","commit":"189b269"}
 {"ts":"2026-11-23T09:12:00Z","event":"valve-launch","issue":292,"round":1,"head":"189b269","task":"bf3w5t8yl"}
+{"ts":"2026-11-23T10:20:00Z","event":"valve-round","issue":292,"round":1,"grade":"7/10","top_fixes":["staying-armed z prefix created mid-interleave (z u z k created with -u only)","success path switched away from the stash list","tests called handlers directly, no keymap dispatch"],"disposition":"all fixed: u/k consume the prefix; the run restores the current buffer; key-driven tests added; 20/20 x3"}
+{"ts":"2026-11-23T10:25:00Z","event":"valve-launch","issue":292,"round":2,"task":"b2ocosg22"}
