@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
+import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
 
 /**
  * @file grep-rg.test.ts
@@ -42,6 +42,7 @@ const rgMatches = (pattern: string, scope: string): string[] =>
 
 /** Evaluate through the interpreter (the primitives are global ops). */
 const q = (expr: string) => e(editor, expr);
+const strip = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "");
 /** Hex-encode a payload for a T-Lisp string literal (the reader
  *  strips backslash escapes — raw JSON quotes break). */
 const hx = (s: string) => Buffer.from(s, "utf8").toString("hex");
@@ -162,6 +163,56 @@ describe("#308 — rg-event->hit (the output protocol)", () => {
     expect(String(field(ev, "col").value)).toBe("1"); // the fallback
     const f = flagOf(ev);
     expect(["nil", "null", "false"]).toContain(String(f.value)); // NOT degraded
+  });
+
+  test("INVALID OFFSET (start beyond the text) → col 1 + degraded-text, hit STILL appended", () => {
+    // "hi\n" is 3 bytes; start 99 is out of range → the columnOf
+    // valid:false path.
+    const ev = JSON.stringify({
+      type: "match",
+      data: {
+        path: { text: "o.txt" },
+        lines: { text: "hi\n" },
+        line_number: 1,
+        submatches: [{ start: 99, end: 99, match: { text: "" } }],
+      },
+    });
+    expect(String(field(ev, "col").value)).toBe("1");
+    const f = flagOf(ev);
+    expect(String(f.value)).toContain("degraded-text");
+    expect(String(field(ev, "file").value)).toContain("o.txt"); // appended
+  });
+});
+
+describe("#308 — the stash/replay protocol (pid-attributed)", () => {
+  const REG = '(grep-test-producer (list (list "register" (hashmap "backend" "rg" "pattern" "x" "scope" "." "rerun" (lambda () nil)))))';
+
+  test("OUR pid replays in order; a STRANGER pid's chunk DROPS", () => {
+    writeFileSync(join(process.cwd(), "ours.txt"), "stash-ours needle\n");
+    writeFileSync(join(process.cwd(), "stranger.txt"), "stash-stranger needle\n");
+    const oursEv = rgMatches("stash-ours", ".")[0]!;
+    const strangerEv = rgMatches("stash-stranger", ".")[0]!;
+    // No live run: gen/pid nil → both chunks stash (pid-attributed).
+    e(editor, '(editor/commands/grep/grep-rg-test-state! nil nil "" 0 0)');
+    e(editor, `(editor/commands/grep/grep-rg-filter 999 (hex-decode "${hx(strangerEv + "\n")}"))`);
+    e(editor, `(editor/commands/grep/grep-rg-filter 424242 (hex-decode "${hx(oursEv + "\n")}"))`);
+    // Register a live generation, adopt pid 424242, replay.
+    const gen = Number(e(editor, REG).value);
+    e(editor, `(editor/commands/grep/grep-rg-test-state! ${gen} 424242 "" 0 0)`);
+    e(editor, '(editor/commands/grep/grep-rg-replay-pending)');
+    e(editor, '(buffer-switch "*grep*")');
+    const v = strip(String(bufferText(editor)));
+    expect(v).toContain("stash-ours"); // ours landed
+    expect(v).not.toContain("stash-stranger"); // stranger dropped
+    // The stash is drained.
+    const dump = String(e(editor, "(editor/commands/grep/grep-rg-dump)").value);
+    expect(dump).toContain("pendlen=0");
+  });
+
+  test("CONDITION-CASE catches the evaluator-thrown spawn failure (the rollback's enabling fix)", () => {
+    const r = q('(condition-case nil (make-process :command (list "/nonexistent/rg-xyz-308")) (error (m) (concat "caught:" m)))');
+    expect(String(r.value)).toContain("caught:");
+    expect(String(r.value)).toContain("make-process failed");
   });
 });
 

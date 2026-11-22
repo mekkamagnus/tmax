@@ -3,6 +3,8 @@
           grep-buffer-complete grep-buffer-rollback
           grep-test-producer grep-hits-get grep-generation-get
           grep-current-gen-get grep-status-get
+          grep-rg-replay-pending grep-rg-kill-prior grep-rg-stderr-filter
+          grep-rg-executable-set! grep-rg-test-state!
           grep-ret grep-next grep-prev grep-rerun grep-quit)
 
 ;; #307 — the *grep* HIT-BUFFER subsystem (RFC-031 §2.1; SPEC-291).
@@ -507,11 +509,13 @@ and flipped it read-only).")
       (editor-set-status "grep: no rerun registered"))))
 
 (defun grep-quit ()
-  "q — kill the results buffer. The Editor's buffer-kill already
-picks the recency-correct survivor (gate r1: an explicit switch
-OVERRIDES it, and buffer-list is INSERTION order, not recency);
-*scratch* only if the survivor is somehow still *grep*. No windows
-are ever deleted."
+  "q — kill the process AND the results buffer (the normative
+kill-on-quit; gate r1: q used to leave rg running). The Editor's
+buffer-kill already picks the recency-correct survivor (gate r1: an
+explicit switch OVERRIDES it, and buffer-list is INSERTION order,
+not recency); *scratch* only if the survivor is somehow still
+*grep*. No windows are ever deleted."
+  (grep-rg-kill-prior)
   (buffer-kill (grep-buffer-name))
   (if (string= (buffer-current) (grep-buffer-name))
     (buffer-switch "*scratch*"))
@@ -562,7 +566,7 @@ form returns nil; callers poll the ids they need)."
     " malformed=" (number-to-string grep-rg-malformed)
     " exit=" (number-to-string grep-rg-last-exit)
     " fcalls=" (number-to-string grep-rg-filter-calls)
-    " pendlen=" (number-to-string (length grep-rg-pending))
+    " pendlen=" (number-to-string (length (grep-rg-pending-as-list)))
     " lastflag=" grep-rg-last-flag
     " lastline=" (substring grep-rg-last-line 0 40)
     " appends=" (number-to-string grep-rg-append-calls)))
@@ -576,11 +580,23 @@ shape without a real spawn)."
         "rerun" (lambda () nil))))
   (grep-buffer-rollback grep-rg-gen))
 (defun grep-rg-detected-set! (v) (setq grep-rg-detected v) v)
+(defun grep-rg-executable-set! (v) (setq grep-rg-executable v) v)
+(defun grep-rg-test-state! (gen pid stderr und malformed)
+  "A test hook: set the sentinel/stash input state directly (module
+defvars are not setq-able from outside — the module boundary)."
+  (setq grep-rg-gen gen)
+  (setq grep-rg-pid pid)
+  (setq grep-rg-stderr stderr)
+  (setq grep-rg-undecodable und)
+  (setq grep-rg-malformed malformed)
+  t)
 
 (defvar grep-backend "auto"
   "The search backend: auto | rg | grep (#309).")
 (defvar grep-rg-detected nil
   "The cached auto-detection result (t/nil; per session).")
+(defvar grep-rg-executable "rg"
+  "The rg binary (test seam: a vanished-executable spawn failure).")
 (defvar grep-rg-gen nil "The RUNNING rg search's generation.")
 (defvar grep-rg-pid nil "The running rg process id.")
 (defvar grep-rg-partial "" "The trailing incomplete JSON line.")
@@ -589,80 +605,141 @@ shape without a real spawn)."
 (defvar grep-rg-malformed 0 "The run's malformed-line count.")
 (defvar grep-rg-last-exit -99 "The last sentinel exit (diagnostics).")
 (defvar grep-rg-filter-calls 0 "Filter invocation count (diagnostics).")
-(defvar grep-rg-pending "" "Chunks from a not-yet-registered pid (the
-spawn→setq race; replayed on registration).")
+(defvar grep-rg-pending nil "PID-ATTRIBUTED chunks from a not-yet-registered
+pid — ((pid chunk) ...) in arrival order (the spawn→setq race; the
+kill→register window). Replayed on registration; strangers drop.")
 (defvar grep-rg-append-calls 0 "append-hit invocation count (diagnostics).")
 (defvar grep-rg-last-flag "??" "The last handled flag (diagnostics).")
 (defvar grep-rg-last-line "??" "The last handled line (diagnostics).")
 
 (defun grep-backend-available-p ()
-  ;; The matrix: auto → rg (cached); rg → explicit; grep → #309.
-  (cond
-    ((string= grep-backend "rg")
-      (if (exec-lookup "rg") t
-        (progn (editor-set-status
-                 "grep: grep-backend is rg but rg is not on PATH") nil)))
-    ((string= grep-backend "grep")
-      (progn
-        (editor-set-status "grep: grep backend pending (#309)") nil))
-    (t
-      ;; auto: detect (cached per session) then dispatch.
-      (progn
-        (if (null grep-rg-detected)
-          (setq grep-rg-detected (exec-lookup "rg")))
-        (if grep-rg-detected t
-          (progn
-            (editor-set-status
-              "grep: no search backend: rg missing (grep fallback pending #309)")
-            nil))))))
+  ;; The matrix: auto → rg (cached); rg → explicit; grep → #309. A
+  ;; non-string backend (nil) coalesces to auto — string= on nil
+  ;; THROWS (the same hazard class grep-rg-handle hit; gate r1).
+  (let ((b (if (stringp grep-backend) grep-backend "auto")))
+    (cond
+      ((string= b "rg")
+        (if (exec-lookup grep-rg-executable) t
+          (progn (editor-set-status
+                   "grep: grep-backend is rg but rg is not on PATH") nil)))
+      ((string= b "grep")
+        (progn
+          (editor-set-status "grep: grep backend pending (#309)") nil))
+      (t
+        ;; auto: detect (cached per session) then dispatch.
+        (progn
+          (if (null grep-rg-detected)
+            (setq grep-rg-detected (exec-lookup grep-rg-executable)))
+          (if grep-rg-detected t
+            (progn
+              (editor-set-status
+                "grep: no search backend: rg missing (grep fallback pending #309)")
+              nil)))))))
+
+(defun grep-rg-kill-prior ()
+  "Kill the prior rg process (re-runs, quits and new searches all
+call this BEFORE the next spawn — the normative kill-first rule).
+SIGTERM; the full name is required by the signal op."
+  (if (numberp grep-rg-pid)
+    (progn (signal grep-rg-pid "SIGTERM") (setq grep-rg-pid nil)))
+  nil)
+
+(defun grep-rg-pending-as-list ()
+  "nil and the empty list are DISTINCT in T-Lisp — reverse/cons
+throw on nil. Coalesce."
+  (if (null grep-rg-pending) (list) grep-rg-pending))
+
+(defun grep-rg-replay-pending ()
+  "Replay the stash: OUR pid's chunks (in arrival order) re-enter
+the filter. STRANGER pids' chunks DROP — every spawn has a fresh
+pid, so a killed predecessor's straggler can never belong to this
+run (gate r1: the old un-attributed concat stash replayed strangers
+as ours)."
+  (if (numberp grep-rg-pid)
+    (let ((ours "")
+          (pairs (reverse (grep-rg-pending-as-list))))
+      (dolist (pair pairs)
+        (if (and (listp pair) (= (length pair) 2) (= (nth 0 pair) grep-rg-pid))
+          (setq ours (concat ours (nth 1 pair)))))
+      (setq grep-rg-pending nil)
+      (if (> (length ours) 0)
+        (grep-rg-filter grep-rg-pid ours))))
+  nil)
 
 (defun grep-rg-run (pattern scope)
   "The rg search: provisional registration, spawn, streaming."
   (if (not (grep-backend-available-p))
     nil
     (progn
+      ;; 0. Kill the prior process FIRST (re-runs and new searches
+      ;;    alike), and close the pid guard BEFORE the new register:
+      ;;    an old chunk arriving in the register→spawn window now
+      ;;    STASHES (pid-attributed) instead of landing in the new
+      ;;    generation.
+      (grep-rg-kill-prior)
       ;; 1. PROVISIONAL registration (callbacks guarded from here).
-      (setq grep-rg-gen
-        (grep-buffer-register
-          (hashmap "backend" "rg" "pattern" pattern "scope" scope
-            "rerun" (lambda () (grep-rg-run pattern scope)))))
-      (setq grep-rg-partial "")
-      (setq grep-rg-pending "")
-      (setq grep-rg-stderr "")
-      (setq grep-rg-undecodable 0)
-      (setq grep-rg-malformed 0)
-      ;; 2. The spawn (argv; -- terminates options — dash-prefixed
-      ;;    patterns/dirs are structural).
-      (let ((pid (make-process
-                   :command (list "rg" "--json" "--smart-case" "--"
-                                  pattern scope)
-                   :cwd "."
-                   :filter "editor/commands/grep/grep-rg-filter"
-                   :sentinel "editor/commands/grep/grep-rg-sentinel")))
-        (cond
-          ((numberp pid)
-            (progn
-              (setq grep-rg-pid pid)
-              (if (> (length grep-rg-pending) 0)
-                (let ((replay grep-rg-pending))
-                  (setq grep-rg-pending "")
-                  (grep-rg-filter pid replay)))))
-          (t
-            ;; 3. Spawn failure → ROLLBACK (the prior generation's
-            ;; content restored; nothing half-registered).
-            (progn
-              (grep-buffer-rollback grep-rg-gen)
-              (editor-set-status
-                (concat "grep: rg spawn failed "
-                  (if (stringp pid) pid ""))))))))))
+      (let ((gen (grep-buffer-register
+                   (hashmap "backend" "rg" "pattern" pattern "scope" scope
+                     "rerun" (lambda () (grep-rg-run pattern scope))))))
+        (setq grep-rg-gen gen)
+        ;; 2. FULL per-run state reset (the dump reflects the current
+        ;;    run only — gate r1: the diagnostics counters used to
+        ;;    accumulate across runs).
+        (setq grep-rg-partial "")
+        (setq grep-rg-pending nil)
+        (setq grep-rg-stderr "")
+        (setq grep-rg-undecodable 0)
+        (setq grep-rg-malformed 0)
+        (setq grep-rg-filter-calls 0)
+        (setq grep-rg-append-calls 0)
+        (setq grep-rg-last-exit -99)
+        (setq grep-rg-last-flag "??")
+        (setq grep-rg-last-line "??")
+        ;; 3. The spawn (argv; -- terminates options — dash-prefixed
+        ;;    patterns/dirs are structural). CONDITION-CASE: a
+        ;;    vanished executable THROWS from the evaluator (a
+        ;;    builtin's Either.left propagates as an error, never as
+        ;;    a value) — without the catch the rollback below was
+        ;;    dead code and the search stayed half-registered on
+        ;;    'searching…' (gate r1's critical finding).
+        (let ((pid (condition-case nil
+                      (make-process
+                        :command (list grep-rg-executable "--json" "--smart-case" "--"
+                                       pattern scope)
+                        :cwd "."
+                        :filter "editor/commands/grep/grep-rg-filter"
+                        :stderr-filter "editor/commands/grep/grep-rg-stderr-filter"
+                        :sentinel "editor/commands/grep/grep-rg-sentinel")
+                    (error (m) (concat "spawn error: " m)))))
+          (cond
+            ((numberp pid)
+              (progn
+                (setq grep-rg-pid pid)
+                (grep-rg-replay-pending)))
+            (t
+              ;; 4. Spawn failure → ROLLBACK (the prior generation's
+              ;;    content restored; nothing half-registered).
+              (progn
+                (setq grep-rg-gen nil)
+                (grep-buffer-rollback gen)
+                (editor-set-status
+                  (concat "grep: rg spawn failed — "
+                    (if (stringp pid) pid "unknown error")))))))))))
+
+(defun grep-rg-stderr-filter (pid output)
+  "Buffer the run's stderr (routed via make-process :stderr-filter —
+exit ≥2 errors carry rg's actual message, not '(no stderr)')."
+  (if (and (numberp grep-rg-pid) (= pid grep-rg-pid))
+    (setq grep-rg-stderr (concat grep-rg-stderr output)))
+  nil)
 
 (defun grep-rg-filter (pid output)
   (setq grep-rg-filter-calls (+ grep-rg-filter-calls 1))
   "Streaming: chunk→line buffering; complete lines through
 rg-event->hit; flagged non-hits COUNTED (not appended). Chunks from
-a not-yet-registered pid are STASHED (the spawn→setq race: rg's
-first chunk can beat the setq of grep-rg-pid; replayed on
-registration)."
+a not-yet-registered pid are STASHED PID-ATTRIBUTED (the spawn→setq
+race: rg's first chunk can beat the setq of grep-rg-pid; replayed on
+registration; strangers drop at replay)."
   (if (and (numberp grep-rg-gen)
            (numberp grep-rg-pid)
            (= pid grep-rg-pid))
@@ -674,8 +751,10 @@ registration)."
         (setq grep-rg-partial rest)
         (dolist (ln complete)
           (grep-rg-handle ln))))
-    ;; An unregistered pid (the race) — stash for replay.
-    (setq grep-rg-pending (concat grep-rg-pending output)))
+    ;; An unregistered pid (the race) — stash PID-ATTRIBUTED for
+    ;; replay (strangers drop at replay).
+    (setq grep-rg-pending
+      (cons (list pid output) (grep-rg-pending-as-list))))
   nil)
 
 (defun grep-rg-handle (ln)
@@ -701,9 +780,16 @@ registration)."
             (grep-buffer-append-hit grep-rg-gen hit)))
         (t nil))))))
 
+(defun grep-first-line (s)
+  "The first line of S (rg's stderr is the message line; anything
+after is noise)."
+  (let ((ls (string-split s "\n")))
+    (if (null ls) "" (car ls))))
+
 (defun grep-rg-sentinel (pid exit-code)
-  "The exit mapping (0 done / 1 no-matches / ≥2 error) + the
-diagnostics aggregation."
+  "The exit mapping (0 done / 1 no-matches / ≥2 error — 128+N means
+signal-killed) + the diagnostics aggregation (on EVERY completion
+status, gate r1: done/no-matches used to drop it)."
   (setq grep-rg-last-exit exit-code)
   (if (and (numberp grep-rg-gen)
            (= pid (or grep-rg-pid -1)))
@@ -724,20 +810,19 @@ diagnostics aggregation."
                     (number-to-string grep-rg-malformed)
                     " unparseable lines") "")
                 (if (or (> grep-rg-undecodable 0) (> grep-rg-malformed 0))
-                  ")" ""))))
+                  ")" "")))
+            (errline (grep-first-line grep-rg-stderr)))
         (cond
           ((and (numberp exit-code) (= exit-code 0))
-            (grep-buffer-complete grep-rg-gen "done" nil))
+            (grep-buffer-complete grep-rg-gen "done"
+              (if (> (length diag) 0) diag nil)))
           ((and (numberp exit-code) (= exit-code 1))
-            (grep-buffer-complete grep-rg-gen "no-matches" nil))
-          ((stringp grep-rg-stderr)
-            (if (> (length grep-rg-stderr) 0)
-              ;; Diagnostics FOLLOW the stderr message on error.
-              (grep-buffer-complete grep-rg-gen "error"
-                (concat grep-rg-stderr diag))
-              (grep-buffer-complete grep-rg-gen "error"
-                (concat "rg exited " (number-to-string exit-code)
-                  " (no stderr)" diag))))
+            (grep-buffer-complete grep-rg-gen "no-matches"
+              (if (> (length diag) 0) diag nil)))
+          ((> (length errline) 0)
+            ;; Diagnostics FOLLOW the stderr message on error.
+            (grep-buffer-complete grep-rg-gen "error"
+              (concat errline diag)))
           (t
             (grep-buffer-complete grep-rg-gen "error"
               (concat "rg exited "
@@ -748,11 +833,10 @@ diagnostics aggregation."
   (reverse (cdr (reverse lines))))
 
 (defun grep-search (pattern &optional (scope "."))
-  "The search entry (SPC s s / M-x): run the backend."
+  "The search entry (SPC s s / M-x): run the backend. grep-rg-run
+itself kills the prior process BEFORE spawning (the kill-first rule
+covers new searches AND g-reruns through one choke point)."
   (interactive)
-  ;; Re-run kills the prior process BEFORE spawning.
-  (if (numberp grep-rg-pid)
-    (progn (signal grep-rg-pid "SIGTERM") (setq grep-rg-pid nil)))
   (grep-rg-run pattern scope))
 
 (provide "editor/commands/grep")

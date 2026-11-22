@@ -82,6 +82,13 @@ import { TerminalManager } from "../core/terminal-manager.ts";
 import { createComintOps, ComintManager } from "./api/comint-ops.ts";
 import { createSnippetOps, SnippetManager } from "./api/snippet-ops.ts";
 
+/** #308 (gate r1): signal name → number for the 128+N exit-code
+ *  synthesis (make-process sentinels; shell convention). */
+const SIGNAL_NUM: Record<string, number> = {
+  SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGABRT: 6, SIGKILL: 9,
+  SIGSEGV: 11, SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15,
+};
+
 /**
  * T-Lisp function implementation that returns Either for error handling
  */
@@ -1684,6 +1691,11 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const commandArg = kwargs['command'];
           const filterFn = kwargs['filter'];
           const sentinelFn = kwargs['sentinel'];
+          // #308: :stderr-filter routes stderr chunks to T-Lisp
+          // (without it stderr is TS-side-only — the rg backend's
+          // "exit ≥2 with stderr" reporting was architecturally
+          // impossible; gate r1 finding).
+          const stderrFn = kwargs['stderr-filter'];
           const cwdArg = kwargs['cwd'];
           const envArg = kwargs['env'];
 
@@ -1741,6 +1753,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
 
             const filterName = filterFn ? String(filterFn.value) : null;
             const sentinelName = sentinelFn ? String(sentinelFn.value) : null;
+            const errFilterName = stderrFn ? String(stderrFn.value) : null;
             const spawnTime = Date.now();
             const cmdSummary = command.join(' ');
             let tailBuf = '';
@@ -1753,18 +1766,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               const decoder = new TextDecoder();
               const reader = readable.getReader();
               const errReader = proc.stderr?.getReader();
-              const errLoop = (async () => {
-                if (!errReader) return;
-                try {
-                  while (true) {
-                    const { done, value } = await errReader.read();
-                    if (done) break;
-                    tailBuf += decoder.decode(value, { stream: true });
-                  }
-                } catch { /* stderr closed */ }
-              })();
-              // #208 (RFC-027 §D3): filter evals are SERIALIZED per process —
-              // every chunk's eval runs to completion before the next begins.
+              // #208 (RFC-027 §D3): filter evals are SERIALIZED per
+              // process — every chunk's eval (stdout AND the #308
+              // stderr route) runs to completion before the next begins.
               // The old fire-and-forget call let two chunks' evals overlap
               // when evalTlisp is async, so a streaming consumer could read
               // state set by an earlier chunk before that chunk's eval had
@@ -1772,6 +1776,34 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // runs last, by construction). A rejected filter eval is logged
               // and does not kill the stream.
               let filterChain: Promise<unknown> = Promise.resolve();
+              const errLoop = (async () => {
+                if (!errReader) return;
+                try {
+                  while (true) {
+                    const { done, value } = await errReader.read();
+                    if (done) break;
+                    const text = decoder.decode(value, { stream: true });
+                    tailBuf += text;
+                    // #308: stderr chunks join the SAME serialized chain
+                    // (hex-encoded — the reader-safe boundary) so they
+                    // interleave deterministically with stdout filters.
+                    if (errFilterName && ctx.evalTlisp) {
+                      const hex = Buffer.from(text, "utf8").toString("hex");
+                      const expr = `(${errFilterName} ${pid} (hex-decode "${hex}"))`;
+                      filterChain = filterChain
+                        .then(() => ctx.evalTlisp!(expr))
+                        .catch((e: unknown) => {
+                          ctx.logProgram?.('process', {
+                            level: 'error',
+                            text: `stderr filter eval failed: ${e instanceof Error ? e.message : String(e)}`,
+                            pid,
+                          });
+                        });
+                      await filterChain;
+                    }
+                  }
+                } catch { /* stderr closed */ }
+              })();
               // SENTINEL-PIPE-HOLD (fikra live catch): the stdout/stderr
               // drains run DETACHED. A child that inherits the pipes (hooks,
               // daemons, backgrounded subprocesses) keeps them open long
@@ -1816,7 +1848,13 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
 
               await proc.exited;
               await filterChain;
-              const exitCode = proc.exitCode ?? 0;
+              // #308 (gate r1): a signal-killed child is NOT exit 0 —
+              // shell convention 128+N (SIGTERM→143, SIGKILL→137) so
+              // sentinels report an error instead of "done" for
+              // external kills (OOM, pkill). An exited child reports
+              // its own code; only the signal case synthesizes.
+              const exitCode = proc.exitCode ??
+                (proc.signalCode ? 128 + (SIGNAL_NUM[proc.signalCode] ?? 9) : 0);
               ctx.logProgram?.('process', {
                 level: exitCode === 0 ? 'info' : 'error',
                 text: `◀ pid ${pid} exited: ${exitCode}`,
