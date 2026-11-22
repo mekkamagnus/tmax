@@ -951,6 +951,7 @@ does not)."
           (progn
             (setq stagehand-diff-hunks (list))
             (setq stagehand-diff-raw nil)
+            (setq stagehand-diff-mark nil) ;; the refresh-safe invariant
             (stagehand-diff-ensure-buffer)
             (buffer-set-read-only nil)
             (stagehand-diff-clear)

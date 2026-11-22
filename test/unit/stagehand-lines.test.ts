@@ -304,6 +304,21 @@ describe("#331 — the mark-based selection UI (end-to-end)", () => {
     expect(git("diff", "--cached")).toBe("");
   });
 
+  test("REGRESSION (r2): the mark RESETS on the EMPTY refresh too", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nB\nc\n");
+    openDiff("f.txt");
+    const hdr = Number(e(editor, "(nth 0 (stagehand/diff/stagehand-diff-hunk-lines))").value);
+    e(editor, `(cursor-move ${hdr + 1} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-toggle-mark)");
+    // Stage the whole file change, then refresh → the side empties.
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    e(editor, "(stagehand/diff/stagehand-diff-refresh-view)");
+    expect(String(e(editor, "(stagehand/diff/stagehand-diff-mark-get)").value)).toContain("null");
+    expect(strip(bufferText(editor))).toContain("no changes on this side");
+  });
+
   test("REGRESSION (gate probe): the mark RESETS on refresh (stale-mark misselection)", async () => {
     writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
     commit("base");
