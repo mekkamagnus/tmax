@@ -176,6 +176,7 @@ editor-time-now
 editor-transient-timer-start
 editor-transient-timer-stop
 enable-local-variables-p
+exec-lookup
 file-copy
 file-exists-p
 file-glob
@@ -325,6 +326,7 @@ replace-regexp-in-string
 replace-show-current
 replace-skip
 replace-state-init
+rg-event->hit
 run-hooks
 scan-number-on-line
 scope-at-cursor
