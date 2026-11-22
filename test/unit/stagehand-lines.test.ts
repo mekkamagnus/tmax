@@ -136,6 +136,34 @@ describe("#331 — partial-patch construction (round-trips vs REAL git)", () => 
     expect(git("show", ":f.txt")).toBe("a\nB\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm"); // only b→B
   });
 
+  test("COALESCED replacement matrix (valve r1): EACH slot unstages to the correct order (byte-exact)", () => {
+    // The block '-b -c +B +C' = two replacement slots. Unstaging
+    // c→C must leave B BEFORE c (the raw stream order yields c,B —
+    // the valve's reproduced misordering).
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nB\nC\nd\ne\nf\ng\n");
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    openDiff("f.txt");
+    // Swapped+slot-paired body: " a","-B","+b","-C","+c"," d"...
+    // Select c→C = keep body k=3,4 ("-C","+c").
+    let patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil nil nil t t nil nil nil nil nil))").value);
+    expect(patch).toBeTruthy();
+    execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
+    expect(new TextDecoder().decode(execFileSync("git", ["show", ":f.txt"], { cwd: process.cwd() })))
+      .toBe("a\nB\nc\nd\ne\nf\ng\n"); // B before c
+    // The OTHER slot: reset the index to all-staged, unstage b→B.
+    execFileSync("git", ["restore", "--staged", "f.txt"], { cwd: process.cwd() });
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    // Select b→B = keep body k=1,2 ("-B","+b").
+    patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil t t nil nil nil nil nil nil nil))").value);
+    expect(patch).toBeTruthy();
+    execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
+    expect(new TextDecoder().decode(execFileSync("git", ["show", ":f.txt"], { cwd: process.cwd() })))
+      .toBe("a\nb\nC\nd\ne\nf\ng\n"); // b before C
+  });
+
+
   test("WHOLE-HUNK equivalence: all-flags output applies the identical index", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
     commit("base");

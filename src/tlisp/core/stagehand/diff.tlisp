@@ -521,6 +521,60 @@ CACHED-side partial construction's sign mirror."
               (t l))
         (stagehand-diff-swap-body (cdr lines))))))
 
+(defun stagehand-diff-slot-pair (body)
+  "Reorder each BALANCED replacement run (a maximal run of change
+lines with EQUAL '-' and '+' counts) into per-slot pairs: the i-th
+'-' with the i-th '+'. '-b -c +B +C' → '-B +b -C +c' — selecting
+c→C on the cached side then emits ' B' ctx, '-C', '+c' (the correct
+B,c result order; the raw stream yields c,B — valve r1's reproduced
+misordering). UNBALANCED runs (merges/splits) keep stream order —
+pairing is ambiguous there and the stream construction is the
+conservative reading."
+  (if (null body)
+    (list)
+    (if (stagehand-diff-change-line-p (car body))
+      (let ((run (stagehand-diff-take-run body (list))))
+        (append (stagehand-diff-pair-run run)
+          (stagehand-diff-slot-pair (stagehand-diff-drop-n (length run) body))))
+      (cons (car body) (stagehand-diff-slot-pair (cdr body))))))
+
+(defun stagehand-diff-drop-n (n lst)
+  (if (or (= n 0) (null lst))
+    lst
+    (stagehand-diff-drop-n (- n 1) (cdr lst))))
+
+(defun stagehand-diff-change-line-p (line)
+  (or (string-prefix-p "-" line) (string-prefix-p "+" line)))
+
+(defun stagehand-diff-take-run (body acc)
+  (if (null body)
+    (reverse acc)
+    (if (stagehand-diff-change-line-p (car body))
+      (stagehand-diff-take-run (cdr body) (cons (car body) acc))
+      (reverse acc))))
+
+(defun stagehand-diff-pair-run (run)
+  ;; Split the run into its '-' lines and '+' lines; balanced →
+  ;; interleave (-1 +1 -2 +2 ...); unbalanced → run unchanged.
+  (let ((dels (stagehand-diff-filter-sign run "-"))
+        (adds (stagehand-diff-filter-sign run "+")))
+    (if (= (length dels) (length adds))
+      (stagehand-diff-interleave dels adds)
+      run)))
+
+(defun stagehand-diff-filter-sign (lines sign)
+  (if (null lines)
+    (list)
+    (if (string-prefix-p sign (car lines))
+      (cons (car lines) (stagehand-diff-filter-sign (cdr lines) sign))
+      (stagehand-diff-filter-sign (cdr lines) sign))))
+
+(defun stagehand-diff-interleave (dels adds)
+  (if (null dels)
+    (list)
+    (append (list (car dels) (car adds))
+      (stagehand-diff-interleave (cdr dels) (cdr adds)))))
+
 (defun stagehand-diff-partial-patch-cached (idx flags)
   "The CACHED-side (unstage) partial patch: the roles INVERT — the
 patch's old side is the INDEX content, so the body's signs swap
@@ -539,7 +593,8 @@ the patch string, or nil with the refusal named."
              (hunk (nth 1 split))
              (spec (stagehand-diff-hunk-spec (car hunk))))
         (stagehand-diff-partial-scan
-          (stagehand-diff-swap-body (cdr hunk)) flags (list) (list)
+          (stagehand-diff-slot-pair (stagehand-diff-swap-body (cdr hunk)))
+          flags (list) (list)
           0 0
           0
           nil nil 0
