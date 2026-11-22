@@ -361,3 +361,50 @@ describe("#327 — item 3 (the cross-batch thought join)", () => {
     expect(t).toContain("run two");
   });
 });
+
+describe("#327 — gate r1 fixes", () => {
+  test("POST-TOOL-ROUND collision: block indices RESTART but runs key uniquely", () => {
+    // The realistic shape the gate probe-verified: raw blocks restart
+    // per assistant message — TWO segments both carrying block "0".
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(delta(0, "same first\n" + "a".repeat(180) + "\nx\ny")));
+    // A MESSAGE-FINAL separator (the feed resets the context on the
+    // batch boundary — tool rounds end an assistant message).
+    e(editor, `(fikra/event/fikra-event-emit-batch (fikra/thought/fikra-thought-feed "main" (list (list (list "kind" "turn-end") (list "result" "ok")))))`);
+    e(editor, emit(delta(0, "same first\n" + "b".repeat(180) + "\nz\nw")));
+    let t = strip(bufferText(editor));
+    expect((t.match(/same first …/g) || []).length).toBe(2);
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/event/fikra-thought-tab)");
+    t = strip(bufferText(editor));
+    expect(t).toContain("a".repeat(180)); // segment 1 expanded
+    expect(t).not.toContain("b".repeat(180)); // segment 2 untouched
+  });
+
+  test("THREAD-SCOPED: a focus switch clears toggles", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(delta(0, "thread one\n" + "a".repeat(180) + "\nline3\nline4")));
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/event/fikra-thought-tab)"); // expand in thread A
+    expect(strip(bufferText(editor))).toContain("a".repeat(180));
+    // Switch the log (what a thread focus does).
+    e(editor, '(fikra/event/fikra-event-log-set (fikra/event/fikra-event-log-path))');
+    e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    // The toggle is GONE: default collapse again.
+    expect(strip(bufferText(editor))).toContain("thread one …");
+    expect(strip(bufferText(editor))).not.toContain("a".repeat(180));
+  });
+
+  test("TAB works after STREAMED TEXT (the walk joins adjacent deltas)", () => {
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    e(editor, emit(textEv("part one")));
+    e(editor, emit(textEv("part two"))); // adjacent text-deltas: one line
+    e(editor, emit(delta(0, "after text\n" + "a".repeat(180) + "\nz\nw")));
+    const ls = strip(bufferText(editor)).split("\n");
+    const thoughtLine = ls.findIndex((l) => l.startsWith("· after text"));
+    expect(thoughtLine).toBeGreaterThan(0);
+    e(editor, `(cursor-move ${thoughtLine} 0)`);
+    e(editor, "(fikra/event/fikra-thought-tab)");
+    expect(strip(bufferText(editor))).toContain("a".repeat(180)); // NOT a silent no-op
+  });
+});
