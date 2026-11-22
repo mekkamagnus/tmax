@@ -1328,6 +1328,24 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       expect(execFileSync("git", ["ls-files", "added151.txt"]).toString()).toBe("");
     });
 
+    // r152b (codex r152 catch): a bookkeeping write failure is DURABLY
+    // visible — a transcript row survives the operation's own success
+    // status (the ephemeral status line was overwritten).
+    tt("a bookkeeping write failure leaves a durable transcript warning", async () => {
+      const ed = await armed();
+      // Obstruct the actions file with a DIRECTORY at its path.
+      e(ed, '(shell-command "mkdir -p .tmax/fikra/threads/main/actions.jsonl")');
+      e(ed, '(fikra/chat/fikra-turn-send "failing bookkeeping")');
+      fire(ed, 620, [edit("bk152.txt", "BK\n")]);
+      const text = strip(await until(ed, "(buffer-text)", "bookkeeping failed", 60));
+      expect(text).toContain("bookkeeping failed to persist");
+      // The warning row SURVIVES the turn's completion status.
+      await settleRefireFrom(ed, "620", "BK-DONE");
+      expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+      const after = strip(String(e(ed, "(buffer-text)").value));
+      expect(after).toContain("bookkeeping failed to persist");
+    });
+
     // r152 (codex re-grade): a STAGED DELETION of a tracked file refuses
     // (the revert would silently restore the index entry).
     tt("a staged deletion refuses (the user's git rm --cached survives)", async () => {

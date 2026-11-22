@@ -1006,8 +1006,15 @@ with its post-exit capture.")
                   "ok")
                 (error () "failed"))))
     (if (string= out "failed")
-      (editor-set-status
-        "Fikra: revert bookkeeping FAILED to persist — a restart may re-offer this action")
+      (progn
+        ;; r152b (codex): DURABLE — the status line is ephemeral (the
+        ;; revert's own success status overwrote the warning); the
+        ;; transcript row survives.
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "checkpoint-error")
+                (list "reason" "revert bookkeeping failed to persist — a restart may re-offer this action")))
+        (editor-set-status
+          "Fikra: revert bookkeeping FAILED to persist — a restart may re-offer this action"))
       nil)))
 
 ;; Newest-last in the file; reversed = newest-first = the stack order.
@@ -1059,8 +1066,12 @@ with its post-exit capture.")
                         "ok")
                       (error () "failed"))))
           (if (string= out "failed")
-            (editor-set-status
-              "Fikra: action bookkeeping FAILED to persist — a restart may lose this revert")
+            (progn
+              (fikra/event/fikra-event-emit
+                (list (list "kind" "checkpoint-error")
+                      (list "reason" "action bookkeeping failed to persist — a restart may lose this revert")))
+              (editor-set-status
+                "Fikra: action bookkeeping FAILED to persist — a restart may lose this revert"))
             nil)))
       nil)))
 
