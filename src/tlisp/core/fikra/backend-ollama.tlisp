@@ -980,30 +980,29 @@ with its post-exit capture.")
       (substring rest 0 slash)
       (fikra/thread/fikra-thread-current))))
 
-;; r144 (#1): does the WORKTREE or the INDEX diverge from the post-ref
-;; on the paths? (git diff <ref> compares the ref to the INDEX+worktree
-;; combination; a STAGED change with a matching worktree file still
-;; diverges — the revert would silently replace the staged content.)
-(defun fikra-ollama-worktree-diverged-p (root post paths)
-  ;; BOTH the worktree (diff) and the INDEX (--cached) must match the
-  ;; post-ref — staged-only content otherwise silently replaced.
-  (let ((wt (string-trim (shell-command
-           (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                   " diff --quiet " post " -- "
-                   (fikra-ollama-paths-args paths)
-                   " 2>/dev/null && echo CLEAN || echo DIRTY"))))
-        (ix (string-trim (shell-command
-           (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                   " diff --cached --quiet " post " -- "
-                   (fikra-ollama-paths-args paths)
-                   " 2>/dev/null && echo CLEAN || echo DIRTY")))))
-    (not (and (string= wt "CLEAN") (string= ix "CLEAN")))))
+;; r146: does the CURRENT state match the PRE-ref (the revert's end
+;; state) on the paths? EXACT per-path check — git diff <ref> is blind
+;; to UNTRACKED files (an added-but-never-staged path looked CLEAN).
+(defun fikra-ollama-state-diverged-p (root pre paths)
+  (fikra-ollama-state-diverged-scan root pre paths))
 
-;; r142: THE ACTION-LEVEL REVERT — restore the LATEST action's touched
-;; paths from ITS pre-ref. r144 hardening: the thread/root come FROM
-;; THE REF (the focused thread never selects another thread's action);
-;; a DIVERGENT worktree refuses (later user edits survive); a failed
-;; path leaves the action revertable (the stack pops only on success).
+(defun fikra-ollama-state-diverged-scan (root pre paths)
+  (if (or (not paths) (= (length paths) 0))
+    nil
+    (let* ((p (car paths))
+           (expect (string-trim (shell-command
+                  (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                          " show " pre ":" (fikra/thread/fikra-thread-shq p)
+                          " 2>/dev/null || echo __ABSENT__"))))
+           (absent (string= expect "__ABSENT__"))
+           (actual (if absent "" (string-trim (shell-command
+                         (concat "cat " (fikra/thread/fikra-thread-shq (concat root "/" p))
+                                 " 2>/dev/null || echo __ABSENT__")))))
+           (exists (not (string= actual "__ABSENT__"))))
+      (if (if absent exists (not (and exists (string= actual expect))))
+        t
+        (fikra-ollama-state-diverged-scan root pre (cdr paths))))))
+
 (defun fikra-ollama-revert-latest-action ()
   (require-module fikra/checkpoint)
   (if (or (not fikra-ollama-action-posts) (= (length fikra-ollama-action-posts) 0))
@@ -1025,8 +1024,18 @@ with its post-exit capture.")
                         (string-split paths-text (hex-decode "0a")))))
           (cond
             ((= (length paths) 0)
-              (editor-set-status "Fikra: the action changed nothing"))
-            ((fikra-ollama-worktree-diverged-p root post paths)
+              ;; r146 (codex): a no-change action SKIPS (pops) — it
+              ;; blocked every older action's revert forever.
+              (progn
+                (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
+                (keymap-mutable-set! fikra-ollama-action-pairs post nil)
+                (editor-set-status "Fikra: the action changed nothing — skipped")
+                'skipped))
+            ;; r146 (codex): the divergence compares the CURRENT state
+            ;; against the EXPECTED END state (the pre-ref) — user
+            ;; changes still refuse, but paths already restored by a
+            ;; partial retry PASS.
+            ((fikra-ollama-state-diverged-p root pre paths)
               (editor-set-status
                 (concat "Fikra: action revert REFUSED — the working tree "
                         "changed since the action (commit or stash first)")))
@@ -1072,6 +1081,14 @@ with its post-exit capture.")
 
 ;; Restore each PATH from REF (checkout when REF has it; remove when
 ;; REF lacks it — the action ADDED it). Returns the failure list.
+;; r146 (codex re-grade): the restore is RETRY-SAFE and index-clean —
+;; a removed path also leaves the INDEX (a staged addition outlived the
+;; worktree rm); removal is VERIFIED (rm -f ...; true reported success
+;; on failure); a failed checkout records the path. A partial restore
+;; leaves the action on the stack, and the retry's divergence check
+;; passes because restored paths now match the PRE-ref... which the
+;; post-ref check would flag — so the retry compares against the
+;; EXPECTED end-state (pre-ref content) per path, not the post-ref.
 (defun fikra-ollama-restore-paths (root ref paths fails)
   (if (or (not paths) (= (length paths) 0))
     fails
@@ -1080,16 +1097,22 @@ with its post-exit capture.")
                           (concat "git -C " (fikra/thread/fikra-thread-shq root)
                                   " cat-file -e " ref ":" (fikra/thread/fikra-thread-shq p)
                                   " 2>/dev/null && echo YES || echo NO"))) "YES"))
-           (out (if has
-                  (shell-command
-                    (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                            " checkout " ref " -- " (fikra/thread/fikra-thread-shq p) " 2>&1"))
-                  (shell-command
-                    (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p)) " 2>/dev/null; true")))))
+           (ok (if has
+                 (string= (string-trim (shell-command
+                   (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                           " checkout " ref " -- " (fikra/thread/fikra-thread-shq p)
+                           " 2>/dev/null && echo RESTORED || echo FAILED"))) "RESTORED")
+                 ;; Removal: the file AND its staged addition go; the
+                 ;; removal is verified (the path must be gone).
+                 (string= (string-trim (shell-command
+                   (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p)) " 2>/dev/null; "
+                           "git -C " (fikra/thread/fikra-thread-shq root)
+                           " rm -f --cached --ignore-unmatch -- " (fikra/thread/fikra-thread-shq p)
+                           " 2>/dev/null; "
+                           "test ! -e " (fikra/thread/fikra-thread-shq (concat root "/" p))
+                           " && echo RESTORED || echo FAILED"))) "RESTORED"))))
       (fikra-ollama-restore-paths root ref (cdr paths)
-        (if (and has (not (string= (string-trim out) "")))
-          (append fails (list p))
-          fails)))))
+        (if ok fails (append fails (list p)))))))
 
 ;; r138: append FRAGMENT into the CURRENT turn's exchange slot.
 ;; r139: the slot key is THREAD/TURN/ROUND — every round flushes in

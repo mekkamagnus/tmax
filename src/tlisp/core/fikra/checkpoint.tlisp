@@ -179,7 +179,12 @@ after it (+4 skips the marker)."
 commit sha on success; emits checkpoint-ready/checkpoint-error FAEP
 events; nil when disabled or failed. Never touches turn state."
   (if (fikra-checkpoint-disable-p)
-    nil
+    (progn
+      ;; r146 (codex): a disabled/failed capture CLEARS the name — a
+      ;; stale last-ref-name paired into a revert target that never
+      ;; existed.
+      (setq fikra-checkpoint-last-ref-name nil)
+      nil)
     ;; r134b: the ref derives ONCE (the old shape called
     ;; fikra-checkpoint-ref in BOTH the command and the event — each
     ;; allocating a fresh action seq; the event named a ref that never
@@ -198,8 +203,10 @@ events; nil when disabled or failed. Never touches turn state."
            (out (shell-command (fikra-checkpoint-command-for tmp ref kind))))
       (let ((sha (fikra-checkpoint-tail out)))
         (setq fikra-checkpoint-last-ref sha)
-        ;; r142: the ref NAME for pre/post pairing callers.
+        ;; r142+r146: the ref NAME for pre/post pairing callers — nil
+        ;; on failure (a stale name paired a nonexistent revert target).
         (setq fikra-checkpoint-last-ref-name (if sha ref nil))
+
         ;; r134e (codex P2): the emit is CONTEXT-aware — the pointer
         ;; emit in normal evals (it renders); the EXPLICIT-PATH owner
         ;; emit when a CALLBACK context set fikra-checkpoint-emit-owner
