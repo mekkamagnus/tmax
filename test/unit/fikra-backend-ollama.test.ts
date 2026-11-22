@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -2834,6 +2834,154 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(actionRefs()).toEqual([]);
     expect(ckptEvents(ed).filter((l) => /-a\d+"/.test(l))).toEqual([]);
     expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-action-posts-get)").value)).not.toContain("-a");
+  });
+
+  // Each mutating call is its own pair: a deletion and a modification
+  // in one turn revert one at a time, newest first.
+  tt("a deleted file comes back and a modified one is restored — one action per pair", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "delete and append")');
+    call(ed, 502, "rm base.txt");
+    expect(strip(await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120))).toContain("[ckpt main/1-a2");
+    call(ed, 503, "printf 'appended\\n' >> notes.txt");
+    expect(strip(await until(ed, "(buffer-text)", "[ckpt main/1-a4", 120))).toContain("[ckpt main/1-a4");
+    expect(actionRefs()).toEqual(["refs/fikra/main/1-a1", "refs/fikra/main/1-a2", "refs/fikra/main/1-a3", "refs/fikra/main/1-a4"]);
+    expect(existsSync(join(process.cwd(), "base.txt"))).toBe(false);
+    // Newest first: the append goes…
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted to refs/fikra/main/1-a3");
+    expect(existsSync(join(process.cwd(), "notes.txt"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "base.txt"))).toBe(false);
+    // …then the deletion.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted to refs/fikra/main/1-a1");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
+  });
+
+  // The snapshots read the WORKTREE through their own index: whatever
+  // the user has staged or left uncommitted stays exactly as it was.
+  tt("the user's staged and unstaged work is untouched (and still reverts safely)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "base.txt"), "user edit\n");
+    execFileSync("git", ["add", "base.txt"]);
+    writeFileSync(join(process.cwd(), "staged-then-edited.txt"), "v1\n");
+    execFileSync("git", ["add", "staged-then-edited.txt"]);
+    writeFileSync(join(process.cwd(), "staged-then-edited.txt"), "v2\n");
+    e(ed, '(fikra/chat/fikra-turn-send "copy it")');
+    call(ed, 504, "cp base.txt made-by-bash.txt");
+    expect(strip(await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120))).toContain("[ckpt main/1-a2");
+    expect(execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim().split("\n").sort()).toEqual(["base.txt", "staged-then-edited.txt"]);
+    expect(execFileSync("git", ["show", ":base.txt"], { encoding: "utf8" })).toBe("user edit\n");
+    expect(readFileSync(join(process.cwd(), "staged-then-edited.txt"), "utf8")).toBe("v2\n");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(existsSync(join(process.cwd(), "made-by-bash.txt"))).toBe(false);
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("user edit\n");
+    expect(execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim().split("\n").sort()).toEqual(["base.txt", "staged-then-edited.txt"]);
+  });
+
+  // The marker file sits inside the working dir — the very command it
+  // describes can write it. Nothing but two 40-hex object names may
+  // reach a shell command — and with checkpointing enabled, a marker
+  // that yields no pair is a VISIBLE failure, never a quiet pass.
+  tt("a tampered or bogus marker seals nothing, reaches no shell, and is REPORTED", async () => {
+    const ed = await armed();
+    const marker = join(process.cwd(), ".tmax", "fikra", "ckpt-trees-main");
+    mkdirSync(dirname(marker), { recursive: true });
+    writeFileSync(marker, "0; touch PWNED deadbeef");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-checkpoint)");
+    expect(existsSync(join(process.cwd(), "PWNED"))).toBe(false);
+    expect(actionRefs()).toEqual([]);
+    expect(String(e(ed, "(editor-status)").value)).toContain("action checkpoint FAILED");
+    expect(logText(ed)).toContain('"kind":"checkpoint-error"');
+    expect(existsSync(marker)).toBe(false);
+    // Right shape, no such objects: commit-tree fails — nothing is
+    // sealed, and that is reported too.
+    writeFileSync(marker, `${"a".repeat(40)} ${"b".repeat(40)}`);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-checkpoint)");
+    expect(actionRefs()).toEqual([]);
+    expect(String(e(ed, "(editor-status)").value)).toContain("action checkpoint FAILED");
+    expect(existsSync(marker)).toBe(false);
+    // The marker of a READ-ONLY call (identical trees) is not a failure:
+    // nothing is reported (the status and the log stay as they were).
+    const errorsBefore = logText(ed).split("\n").filter((l) => l.includes('"kind":"checkpoint-error"')).length;
+    const statusBefore = String(e(ed, "(editor-status)").value);
+    writeFileSync(marker, `${"a".repeat(40)} ${"a".repeat(40)}`);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-checkpoint)");
+    expect(String(e(ed, "(editor-status)").value)).toBe(statusBefore);
+    expect(logText(ed).split("\n").filter((l) => l.includes('"kind":"checkpoint-error"')).length).toBe(errorsBefore);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  // r155b (codex gate round 1, P1): a locked snapshot index made both
+  // `git add`s fail — the command ran, the mutation had NO checkpoint,
+  // and nothing said so.
+  tt("a snapshot that cannot run is a VISIBLE failure (never a silent mutation)", async () => {
+    const ed = await armed();
+    mkdirSync(join(process.cwd(), ".tmax", "fikra"), { recursive: true });
+    writeFileSync(join(process.cwd(), ".tmax", "fikra", "ckpt-index-main.lock"), "");
+    e(ed, '(fikra/chat/fikra-turn-send "copy it")');
+    const before = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    call(ed, 508, "cp base.txt copied.txt");
+    const mid = strip(await until(ed, "(buffer-text)", "checkpoint-error", 120));
+    expect(mid.split("\n").filter((l) => l.includes("checkpoint-error: action checkpoint failed (snapshot)")).length).toBe(1);
+    expect(String(e(ed, "(editor-status)").value)).toContain("action checkpoint FAILED");
+    expect(existsSync(join(process.cwd(), "copied.txt"))).toBe(true);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, before, "copied");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // r155b (codex gate round 1, P1): the worktree state of a SYMLINK is
+  // its target text (what the tree stores) — `cat` followed the link,
+  // so a link-creating action could never be reverted.
+  tt("a symlink action reverts — a live link and a dangling one", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "link it")');
+    call(ed, 506, "ln -s base.txt link.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(existsSync(join(process.cwd(), "link.txt"))).toBe(true);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(lstatSync(join(process.cwd(), "link.txt"), { throwIfNoEntry: false })).toBeUndefined();
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
+    call(ed, 507, "ln -s nowhere.txt dangling.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a4", 120);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(lstatSync(join(process.cwd(), "dangling.txt"), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  // r155b (codex gate round 1, P0): the revert restored with
+  // `git checkout <pre> -- <path>`, which writes the INDEX too — a
+  // version the user had STAGED was overwritten, and unstaged work the
+  // user had left alone became staged. A revert restores the WORKTREE.
+  tt("a revert restores the WORKTREE and never touches the user's staged content", async () => {
+    const ed = await armed();
+    // Staged one version, then returned the working file to another.
+    writeFileSync(join(process.cwd(), "base.txt"), "staged content\n");
+    execFileSync("git", ["add", "base.txt"]);
+    writeFileSync(join(process.cwd(), "base.txt"), "base\n");
+    writeFileSync(join(process.cwd(), "source.txt"), "staged content\n");
+    e(ed, '(fikra/chat/fikra-turn-send "copy it")');
+    call(ed, 505, "cp source.txt base.txt");
+    // (The action made the working file identical to the staged one.)
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("base\n");
+    expect(execFileSync("git", ["show", ":base.txt"], { encoding: "utf8" })).toBe("staged content\n");
+  });
+
+  tt("a revert never STAGES the user's unstaged work", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "base.txt"), "user edit\n");
+    e(ed, '(fikra/chat/fikra-turn-send "append to it")');
+    call(ed, 509, "printf 'more\\n' >> base.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(readFileSync(join(process.cwd(), "base.txt"), "utf8")).toBe("user edit\n");
+    expect(execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim()).toBe("");
   });
 
   // Each mutating call is its own pair: a deletion and a modification
