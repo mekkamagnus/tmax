@@ -164,6 +164,61 @@ describe("#331 — partial-patch construction (round-trips vs REAL git)", () => 
   });
 
 
+  test("DELETED FILE: partial STAGE keeps the remaining lines in the index (valve r4)", () => {
+    writeFileSync(join(process.cwd(), "df.txt"), "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n");
+    commit("base");
+    // Delete the file in the WORKTREE; stage only HALF the deletion.
+    require("node:fs").unlinkSync(join(process.cwd(), "df.txt"));
+    openDiff("df.txt");
+    // Body: 8 '-' lines; stage the deletion of l1..l4 only (k=0..3).
+    const patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch 0 (list t t t t nil nil nil nil))").value);
+    expect(patch).toBeTruthy();
+    expect(patch).not.toContain("deleted file mode");
+    expect(patch).toContain("+++ b/df.txt");
+    execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
+    expect(new TextDecoder().decode(execFileSync("git", ["show", ":df.txt"], { cwd: process.cwd() })))
+      .toBe("l5\nl6\nl7\nl8\n");
+  });
+
+  test("DELETED FILE (cached): partial UNSTAGE restores the unselected lines (valve r4)", () => {
+    writeFileSync(join(process.cwd(), "df.txt"), "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n");
+    commit("base");
+    require("node:fs").unlinkSync(join(process.cwd(), "df.txt"));
+    execFileSync("git", ["add", "df.txt"], { cwd: process.cwd() });
+    // Cached view; unstage the deletion of l1..l4 (restore them).
+    e(editor, "(stagehand/status/stagehand-status)");
+    const strip3 = (t: string) => t.replace(/\u001b\[[0-9;]*m/g, "");
+    const ls3 = strip3(bufferText(editor)).split("\n");
+    const row3 = ls3.findIndex((l) => l.includes("df.txt"));
+    e(editor, `(cursor-move ${row3} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    const patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list t t t t nil nil nil nil))").value);
+    expect(patch).toBeTruthy();
+    expect(patch).not.toContain("deleted file mode");
+    execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
+    expect(new TextDecoder().decode(execFileSync("git", ["show", ":df.txt"], { cwd: process.cwd() })))
+      .toBe("l1\nl2\nl3\nl4\n");
+  });
+
+  test("QUOTED PATH: staged-new-file partial unstage rides prefix surgery (valve r4)", () => {
+    // A path git QUOTES ('café.txt' — non-ASCII): the header lines
+    // carry quoted forms; the rewrite must not unescape them.
+    writeFileSync(join(process.cwd(), "café.txt"), "q1\nq2\nq3\nq4\nq5\nq6\nq7\nq8\n");
+    execFileSync("git", ["add", "café.txt"], { cwd: process.cwd() });
+    e(editor, "(stagehand/status/stagehand-status)");
+    const strip4 = (t: string) => t.replace(/\u001b\[[0-9;]*m/g, "");
+    const ls4 = strip4(bufferText(editor)).split("\n");
+    const row4 = ls4.findIndex((l) => l.includes("café.txt"));
+    e(editor, `(cursor-move ${row4} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    const patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil nil nil t nil nil nil nil))").value);
+    expect(patch).toBeTruthy();
+    expect(patch).not.toContain("new file mode");
+    execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
+    expect(new TextDecoder().decode(execFileSync("git", ["show", ":café.txt"], { cwd: process.cwd() })))
+      .toBe("q1\nq2\nq3\nq5\nq6\nq7\nq8\n");
+  });
+
   test("STAGED NEW FILE: partial unstage rewrites the creation header (valve r3)", () => {
     // A staged new file's cached diff is a creation patch. Partial
     // unstaging must apply as a MODIFICATION against the index copy

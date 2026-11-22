@@ -404,9 +404,10 @@ nil with `stagehand-diff-partial-refusal' naming why."
       (progn
         (setq stagehand-diff-partial-refusal "no hunk at that index")
         nil)
-      (let* ((header (nth 0 split))
+      (let* ((header0 (nth 0 split))
              (hunk (nth 1 split))
-             (spec (stagehand-diff-hunk-spec (car hunk))))
+             (spec (stagehand-diff-hunk-spec (car hunk)))
+             (header (stagehand-diff-partial-header header0 "worktree")))
         (stagehand-diff-partial-scan
           (cdr hunk) flags (list) (list)
           0 0                     ;; kept old/new counts
@@ -595,18 +596,21 @@ Returns (lines flags)."
       (list (append (list (car dl) (car al)) (nth 0 rest))
             (append (list (car df) (car af)) (nth 1 rest))))))
 
-(defun stagehand-diff-cached-header (header)
-  "The cached-side header REWRITE for staged NEW FILES (valve r3):
-the swapped patch's old side is the INDEX CONTENT, but 'new file
-mode' + '--- /dev/null' would make git treat it as CREATING a file
-that already exists. Drop the mode line and point the old side at
-a/<path> (a modification header against the index copy)."
-  (let ((has-new (stagehand-diff-header-has header "new file mode"))
-        (devnull (stagehand-diff-header-has header "--- /dev/null"))
-        (bpath (stagehand-diff-header-path header)))
-    (if (and has-new devnull (not (null bpath)))
-      (stagehand-diff-cached-header-scan header bpath)
-      header)))
+(defun stagehand-diff-rewrite-a-side (line)
+  "Rewrite an +++ b/ line to its --- a/ counterpart. Git-QUOTED
+paths stay quoted: PREFIX SURGERY (hex-decoded prefixes), no
+unescaping."
+  (cond
+    ((string-prefix-p "+++ b/" line) (concat "--- a/" (substring line 6 (length line))))
+    ((string-prefix-p (hex-decode "2b2b2b2022622f") line) (concat (hex-decode "2d2d2d2022612f") (substring line 7 (length line))))
+    (t line)))
+
+(defun stagehand-diff-rewrite-b-side (line)
+  "An --- a/x line (optionally git-QUOTED: --- then a quoted a/ path)"
+  (cond
+    ((string-prefix-p "--- a/" line) (concat "+++ b/" (substring line 6 (length line))))
+    ((string-prefix-p (hex-decode "2d2d2d2022612f") line) (concat (hex-decode "2b2b2b2022622f") (substring line 7 (length line))))
+    (t line)))
 
 (defun stagehand-diff-header-has (header prefix)
   (if (null header)
@@ -615,25 +619,88 @@ a/<path> (a modification header against the index copy)."
       t
       (stagehand-diff-header-has (cdr header) prefix))))
 
-(defun stagehand-diff-header-path (header)
+(defun stagehand-diff-header-scan-a (header)
+  "The header's '--- a/...' line (nil when none)."
   (if (null header)
     nil
-    (if (string-prefix-p "+++ b/" (car header))
-      (substring (car header) 6 (length (car header)))
-      (stagehand-diff-header-path (cdr header)))))
+    (if (or (string-prefix-p "--- a/" (car header))
+            (string-prefix-p (hex-decode "2d2d2d2022612f") (car header)))
+      (car header)
+      (stagehand-diff-header-scan-a (cdr header)))))
 
-(defun stagehand-diff-cached-header-scan (header bpath)
+(defun stagehand-diff-header-scan-b (header)
+  "The header's '+++ b/...' line (nil when none)."
+  (if (null header)
+    nil
+    (if (or (string-prefix-p "+++ b/" (car header))
+            (string-prefix-p (hex-decode "2b2b2b2022622f") (car header)))
+      (car header)
+      (stagehand-diff-header-scan-b (cdr header)))))
+
+(defun stagehand-diff-drop-mode (header mode)
+  "Drop the mode line AND the stale 'index ...' line (its blob hashes
+  describe the ORIGINAL direction — the rewritten patch's sides no
+  longer match them; git apply recomputes)."
   (if (null header)
     (list)
-    (let ((l (car header)))
-      (cond
-        ((string-prefix-p "new file mode" l)
-          (stagehand-diff-cached-header-scan (cdr header) bpath))
-        ((string-prefix-p "--- /dev/null" l)
-          (cons (concat "--- a/" bpath)
-            (stagehand-diff-cached-header-scan (cdr header) bpath)))
-        (t
-          (cons l (stagehand-diff-cached-header-scan (cdr header) bpath)))))))
+    (if (or (string-prefix-p mode (car header))
+            (string-prefix-p "index " (car header)))
+      (stagehand-diff-drop-mode (cdr header) mode)
+      (cons (car header) (stagehand-diff-drop-mode (cdr header) mode)))))
+
+(defun stagehand-diff-partial-header (header side)
+  "The PARTIAL patch's header for SIDE ('worktree'|'cached') —
+valve r3+r4. Worktree+deleted-file → a MODIFICATION (drop mode;
+'+++ /dev/null' → '+++ b/<path>'). Cached+new-file → a modification
+(drop mode; '--- /dev/null' → '--- a/<path>'). Cached+deleted-file
+→ a partial CREATION (drop mode; '--- a/x' → '--- /dev/null' AND
+'+++ /dev/null' → '+++ b/x'). Quoted paths ride prefix surgery."
+  (cond
+    ((and (string= side "worktree")
+          (stagehand-diff-header-has header "deleted file mode")
+          (stagehand-diff-header-has header "+++ /dev/null"))
+      (stagehand-diff-replace-line
+        (stagehand-diff-drop-mode header "deleted file mode")
+        "+++ /dev/null"
+        (stagehand-diff-rewrite-b-side (or (stagehand-diff-header-scan-a header) "--- a/x"))))
+    ((and (string= side "cached")
+          (stagehand-diff-header-has header "new file mode")
+          (stagehand-diff-header-has header "--- /dev/null"))
+      (stagehand-diff-replace-line
+        (stagehand-diff-drop-mode header "new file mode")
+        "--- /dev/null"
+        (stagehand-diff-rewrite-a-side (or (stagehand-diff-header-scan-b header) "+++ b/x"))))
+    ((and (string= side "cached")
+          (stagehand-diff-header-has header "deleted file mode")
+          (stagehand-diff-header-has header "+++ /dev/null"))
+      ;; A partial CREATION: git requires 'new file mode' for a
+      ;; /dev/null patch (bare creation: 'dev/null does not exist in
+      ;; index') — REPLACE the deleted-mode line, keep the diff--git.
+      (stagehand-diff-replace-line
+        (stagehand-diff-replace-line
+          (stagehand-diff-replace-line
+            (stagehand-diff-drop-index header) "deleted file mode" "new file mode 100644")
+          "--- a/" "--- /dev/null")
+        "+++ /dev/null"
+        (stagehand-diff-rewrite-b-side (or (stagehand-diff-header-scan-a header) "--- a/x"))))
+    (t header)))
+
+(defun stagehand-diff-drop-index (header)
+  (if (null header)
+    (list)
+    (if (string-prefix-p "index " (car header))
+      (stagehand-diff-drop-index (cdr header))
+      (cons (car header) (stagehand-diff-drop-index (cdr header))))))
+
+(defun stagehand-diff-replace-line (header prefix replacement)
+  "Replace the FIRST line with PREFIX by REPLACEMENT (prefix-length
+surgery for git-QUOTED paths: any line STARTING with
+the prefix)."
+  (if (null header)
+    (list)
+    (if (string-prefix-p prefix (car header))
+      (cons replacement (cdr header))
+      (cons (car header) (stagehand-diff-replace-line (cdr header) prefix replacement)))))
 
 (defun stagehand-diff-partial-patch-cached (idx flags)
   "The CACHED-side (unstage) partial patch: the roles INVERT — the
@@ -661,7 +728,7 @@ the patch string, or nil with the refusal named."
              ;; side at a/<path> — the swapped patch is a MODIFICATION
              ;; against the index copy (valve r3: the retained creation
              ;; header made git treat it as creating an existing file).
-             (cheader (stagehand-diff-cached-header header)))
+             (cheader (stagehand-diff-partial-header header "cached")))
         (stagehand-diff-partial-scan
           (nth 0 paired) (nth 1 paired) (list) (list)
           0 0
