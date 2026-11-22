@@ -182,6 +182,39 @@ describe("#308 — rg-event->hit (the output protocol)", () => {
     expect(String(f.value)).toContain("degraded-text");
     expect(String(field(ev, "file").value)).toContain("o.txt"); // appended
   });
+
+  test("MID-SEQUENCE offset (inside a multi-byte char) → col 1 + degraded-text", () => {
+    // "ü" is 2 bytes (0xC3 0xBC); offset 1 lands INSIDE it — a
+    // continuation byte at the boundary (valve r1: the subarray cut
+    // used to decode the partial char as one column).
+    const ev = JSON.stringify({
+      type: "match",
+      data: {
+        path: { text: "m.txt" },
+        lines: { text: "ünïcødé needle\n" },
+        line_number: 1,
+        submatches: [{ start: 1, end: 9, match: { text: "n" } }],
+      },
+    });
+    expect(String(field(ev, "col").value)).toBe("1");
+    const f = flagOf(ev);
+    expect(String(f.value)).toContain("degraded-text");
+    expect(String(field(ev, "file").value)).toContain("m.txt"); // appended
+  });
+
+  test("NON-INTEGER offset → col 1 + degraded-text", () => {
+    const ev = JSON.stringify({
+      type: "match",
+      data: {
+        path: { text: "f.txt" },
+        lines: { text: "plain text\n" },
+        line_number: 1,
+        submatches: [{ start: 3.5, end: 7, match: { text: "in" } }],
+      },
+    });
+    expect(String(field(ev, "col").value)).toBe("1");
+    expect(String(flagOf(ev).value)).toContain("degraded-text");
+  });
 });
 
 describe("#308 — the stash/replay protocol (pid-attributed)", () => {

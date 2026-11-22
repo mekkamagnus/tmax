@@ -47,10 +47,17 @@ function replacementCharDecode(b64: string): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(buf);
 }
 
-/** UTF-8 code-point column +1 (editor columns are 1-based). */
+/** UTF-8 code-point column +1 (editor columns are 1-based). An
+ *  offset is INVALID (col 1 + degraded) when non-integer, out of
+ *  range, or landing INSIDE a multi-byte sequence (a continuation
+ *  byte at the boundary — the subarray cut would decode a partial
+ *  char as one column). */
 function columnOf(lineText: string, byteOffset: number): { col: number; valid: boolean } {
   const bytes = Buffer.from(lineText, "utf-8");
-  if (byteOffset < 0 || byteOffset > bytes.length) {
+  if (!Number.isInteger(byteOffset) || byteOffset < 0 || byteOffset > bytes.length) {
+    return { col: 1, valid: false };
+  }
+  if (byteOffset < bytes.length && (bytes[byteOffset]! & 0xc0) === 0x80) {
     return { col: 1, valid: false };
   }
   const slice = bytes.subarray(0, byteOffset).toString("utf-8");

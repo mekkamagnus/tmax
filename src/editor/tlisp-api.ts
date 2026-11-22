@@ -82,11 +82,18 @@ import { TerminalManager } from "../core/terminal-manager.ts";
 import { createComintOps, ComintManager } from "./api/comint-ops.ts";
 import { createSnippetOps, SnippetManager } from "./api/snippet-ops.ts";
 
-/** #308 (gate r1): signal name → number for the 128+N exit-code
- *  synthesis (make-process sentinels; shell convention). */
+/** #308 (valve r1): signal name → number for the 128+N exit-code
+ *  synthesis (make-process sentinels; shell convention). The full
+ *  Node/Bun table — an unknown name synthesizes 128 (no invented
+ *  signal number). */
 const SIGNAL_NUM: Record<string, number> = {
-  SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGABRT: 6, SIGKILL: 9,
-  SIGSEGV: 11, SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15,
+  SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGILL: 4, SIGTRAP: 5,
+  SIGABRT: 6, SIGBUS: 7, SIGFPE: 8, SIGKILL: 9, SIGUSR1: 10,
+  SIGSEGV: 11, SIGUSR2: 12, SIGPIPE: 13, SIGALRM: 14, SIGTERM: 15,
+  SIGCHLD: 17, SIGCONT: 18, SIGSTOP: 19, SIGTSTP: 20, SIGTTIN: 21,
+  SIGTTOU: 22, SIGURG: 23, SIGXCPU: 24, SIGXFSZ: 25, SIGVTALRM: 26,
+  SIGPROF: 27, SIGWINCH: 28, SIGIO: 29, SIGPOLL: 29, SIGPWR: 30,
+  SIGSYS: 31, SIGUNUSED: 31,
 };
 
 /**
@@ -1764,6 +1771,11 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             const readable = proc.stdout;
             (async () => {
               const decoder = new TextDecoder();
+              // #308 valve r1: stderr gets its OWN streaming decoder —
+              // one shared {stream:true} decoder across two pipes lets
+              // an interleaved multi-byte sequence split across the
+              // streams corrupt both sides.
+              const errDecoder = new TextDecoder();
               const reader = readable.getReader();
               const errReader = proc.stderr?.getReader();
               // #208 (RFC-027 §D3): filter evals are SERIALIZED per
@@ -1782,7 +1794,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                   while (true) {
                     const { done, value } = await errReader.read();
                     if (done) break;
-                    const text = decoder.decode(value, { stream: true });
+                    const text = errDecoder.decode(value, { stream: true });
                     tailBuf += text;
                     // #308: stderr chunks join the SAME serialized chain
                     // (hex-encoded — the reader-safe boundary) so they
@@ -1847,6 +1859,20 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               })();
 
               await proc.exited;
+              // #308 valve r1: settle the reads already buffered at
+              // exit BEFORE the sentinel — valid hits and stderr that
+              // arrived with the exit used to race the sentinel (lost).
+              // BOUNDED (the SENTINEL-PIPE-HOLD constraint stands:
+              // children inheriting the pipes hold them open forever;
+              // a full drain await hung turn-end sentinels). 150ms
+              // grace: exit-buffered chunks enqueue into the chain;
+              // inherited-pipe holders stop the wait and stragglers
+              // keep flowing through the chain after the sentinel,
+              // exactly as before.
+              await Promise.race([
+                Promise.allSettled([drainPromise, errLoop]),
+                new Promise<void>((resolve) => setTimeout(resolve, 150)),
+              ]);
               await filterChain;
               // #308 (gate r1): a signal-killed child is NOT exit 0 —
               // shell convention 128+N (SIGTERM→143, SIGKILL→137) so
@@ -1854,7 +1880,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // external kills (OOM, pkill). An exited child reports
               // its own code; only the signal case synthesizes.
               const exitCode = proc.exitCode ??
-                (proc.signalCode ? 128 + (SIGNAL_NUM[proc.signalCode] ?? 9) : 0);
+                (proc.signalCode ? 128 + (SIGNAL_NUM[proc.signalCode] ?? 0) : 0);
               ctx.logProgram?.('process', {
                 level: exitCode === 0 ? 'info' : 'error',
                 text: `◀ pid ${pid} exited: ${exitCode}`,

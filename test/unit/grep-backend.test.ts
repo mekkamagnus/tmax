@@ -246,4 +246,32 @@ describe("#308 — the backend", () => {
     expect(i).toBeGreaterThanOrEqual(0); // stderr text present
     expect(j).toBeGreaterThan(i); // diagnostics FOLLOW it
   });
+
+  // ── valve r1 fixes ──────────────────────────────────────────────────
+
+  test("EARLY STDERR (the spawn→setq race) stashes and replays with the pid", async () => {
+    e(editor, '(editor/commands/grep/grep-rg-test-state! nil nil "" 0 0)');
+    e(editor, '(editor/commands/grep/grep-rg-stderr-filter 424245 (hex-decode "' +
+      Buffer.from("early stderr line\n", "utf8").toString("hex") + '"))');
+    const gen = Number(e(editor,
+      '(grep-test-producer (list (list "register" (hashmap "backend" "rg" "pattern" "x" "scope" "." "rerun" (lambda () nil)))))').value);
+    e(editor, `(editor/commands/grep/grep-rg-test-state! ${gen} 424245 "" 0 0)`);
+    e(editor, '(editor/commands/grep/grep-rg-replay-pending)');
+    e(editor, '(editor/commands/grep/grep-rg-sentinel 424245 2)');
+    e(editor, '(buffer-switch "*grep*")');
+    // The stashed early stderr reached the completion message (valve
+    // r1: it used to be DROPPED — '(no stderr)').
+    expect(strip(bufferText(editor))).toContain("early stderr line");
+  });
+
+  test("MULTI-LINE stderr is preserved COMPLETE (one trailing newline chomped)", () => {
+    const gen = Number(e(editor,
+      '(grep-test-producer (list (list "register" (hashmap "backend" "rg" "pattern" "x" "scope" "." "rerun" (lambda () nil)))))').value);
+    e(editor, `(editor/commands/grep/grep-rg-test-state! ${gen} 424246 "line one\nline two\n" 0 0)`);
+    e(editor, '(editor/commands/grep/grep-rg-sentinel 424246 2)');
+    e(editor, '(buffer-switch "*grep*")');
+    const v = strip(bufferText(editor));
+    expect(v).toContain("line one");
+    expect(v).toContain("line two"); // not first-line-truncated
+  });
 });
