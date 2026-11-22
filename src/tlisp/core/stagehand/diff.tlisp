@@ -1,6 +1,9 @@
 (defmodule stagehand/diff
   (export stagehand-diff-parse stagehand-diff-classify
           stagehand-diff-face stagehand-diff-face-line
+          stagehand-diff-partial-patch stagehand-diff-partial-patch-cached
+          stagehand-diff-partial-refusal-get
+          stagehand-diff-flags-for-lines
           stagehand-diff-buffer-name stagehand-diff-open
           stagehand-diff-next stagehand-diff-prev
           stagehand-diff-quit stagehand-diff-hunk-lines
@@ -316,7 +319,233 @@ since the last 'diff --git') verbatim + the hunk verbatim (@@ header
             (stagehand-diff-collect (cdr pairs) header count target (cons line cur))
             (stagehand-diff-collect (cdr pairs) header count target cur)))))))
 
-;; ── the hunk ops ────────────────────────────────────────────────────
+;; ── partial-patch construction (#331) ───────────────────────────────
+(defun stagehand-diff-split-patch (text)
+  "The collected patch TEXT → (header-lines hunk-lines): everything
+before the first '@@ ' line vs the '@@ ' line onward. NIL when no
+hunk line exists. Trailing EMPTY lines chomp — the raw diff's
+trailing newline rides through collect as a phantom '' body line
+(kept by the exhausted-flags default, +1 to newC, and its blank
+line corrupts `git apply')."
+  (stagehand-diff-split-scan
+    (stagehand-diff-chomp-empty (string-split text "\n")) (list)))
+
+(defun stagehand-diff-chomp-empty (lines)
+  (if (null lines)
+    lines
+    (if (string= "" (car (reverse lines)))
+      (stagehand-diff-chomp-empty (reverse (cdr (reverse lines))))
+      lines)))
+
+(defun stagehand-diff-split-scan (lines acc)
+  (if (null lines)
+    nil
+    (if (string-prefix-p "@@ " (car lines))
+      (list (reverse acc) lines)
+      (stagehand-diff-split-scan (cdr lines) (cons (car lines) acc)))))
+
+(defun stagehand-diff-num-spec (spec)
+  "'-12,5' / '+13' → (start count); a missing count is 1 (git's
+single-line abbreviation)."
+  (let* ((bare (if (or (string-prefix-p "-" spec) (string-prefix-p "+" spec))
+                 (substring spec 1 (length spec))
+                 spec))
+         (halves (string-split bare ",")))
+    (list (string-to-number (car halves))
+      (if (null (cdr halves)) 1 (string-to-number (car (cdr halves)))))))
+
+(defun stagehand-diff-hunk-spec (line)
+  "'@@ -oS[,oC] +nS[,nC] @@[ tail]' → (oS oC nS nC tail). Splits on
+single spaces (git's emission format); the tail is everything after
+the closing @@, joined back with spaces."
+  (let* ((parts (string-split line " "))
+         (old (stagehand-diff-num-spec (nth 1 parts)))
+         (new (stagehand-diff-num-spec (nth 2 parts))))
+    (list (nth 0 old) (nth 1 old) (nth 0 new) (nth 1 new)
+      (stagehand-diff-tail-join parts 4))))
+
+(defun stagehand-diff-tail-join (parts i)
+  ;; The joined tail CARRIES its leading space (string-split ate it;
+  ;; the rebuild concats " @@" directly against this value).
+  (if (>= i (length parts))
+    ""
+    (if (string= (stagehand-diff-tail-join parts (+ i 1)) "")
+      (concat " " (nth i parts))
+      (concat " " (nth i parts) (stagehand-diff-tail-join parts (+ i 1))))))
+
+(defun stagehand-diff-partial-refusal-get ()
+  "The last partial build's refusal reason (a test/inspection seam)."
+  stagehand-diff-partial-refusal)
+
+(defvar stagehand-diff-partial-refusal nil
+  "Why the last partial-patch build refused (nil when it built).")
+
+(defun stagehand-diff-partial-patch (idx flags)
+  "The applyable patch for the SUBSET of hunk IDX's change lines —
+#331's core. FLAGS: one boolean per BODY line (the @@ header
+excluded), in stream order; context lines ignore their flag (always
+kept); '+'/'-' lines are kept iff flagged; the no-newline marker
+must follow a line KEPT AS-IS (anything else refuses). Arithmetic
+(the conversion rule): a dropped '-' becomes CONTEXT (both side
+counts advance; the old start NEVER moves — every old-side line
+stays represented); a dropped '+' omits (a LEADING dropped
+insertion shifts the new start, the only start movement); trailing
+drops never move starts. A missing flag defaults to KEEP; zero kept
+changes refuses ('nothing selected'). Returns the patch string, or
+nil with `stagehand-diff-partial-refusal' naming why."
+  (setq stagehand-diff-partial-refusal nil)
+  (let* ((split (stagehand-diff-split-patch (stagehand-diff-hunk-patch idx))))
+    (if (null split)
+      (progn
+        (setq stagehand-diff-partial-refusal "no hunk at that index")
+        nil)
+      (let* ((header (nth 0 split))
+             (hunk (nth 1 split))
+             (spec (stagehand-diff-hunk-spec (car hunk))))
+        (stagehand-diff-partial-scan
+          (cdr hunk) flags (list) (list)
+          0 0                     ;; kept old/new counts
+          0                       ;; leading dropped '+'
+          nil nil 0               ;; kept-any, prev-kept, changes
+          (nth 0 spec) (nth 2 spec) (nth 4 spec) header)))))
+
+(defun stagehand-diff-partial-scan (body flags out held oldC newC leadN keptAny prevKept changes oStart nStart tail header)
+  "The walk. OUT accumulates reversed output lines; OLDC/NEWC count
+old/new-side lines; HELD buffers converted context (a kept '+' jumps over it — git coalesces adjacent change blocks); LEADN counts dropped '+' lines before the first
+kept line (a leading dropped insertion shifts the NEW start — the
+old start NEVER moves: every old-side line stays represented);
+KEPTANY freezes LEADN; PREVKEPT = the previous line was KEPT AS-IS
+(the only state a no-newline marker may follow); CHANGES counts
+kept change lines (zero → the nothing-selected refusal).
+
+The CONVERSION rule (the classic partial-patch pitfall): a DROPPED
+'-' line becomes a CONTEXT line (' ' + content — it occupies its
+old position on BOTH sides; interior drops cannot simply vanish or
+the surrounding context mismatches the file); a dropped '+' line
+omits entirely."
+  (if (null body)
+    (if (= changes 0)
+      (progn
+        (setq stagehand-diff-partial-refusal "nothing selected")
+        nil)
+      (let* ((at (concat "@@ -" (number-to-string oStart)
+                         "," (number-to-string oldC)
+                         " +" (number-to-string (+ nStart leadN))
+                         "," (number-to-string newC)
+                         " @@" tail))
+             (lines (append header (list at)
+                            (reverse out)
+                            (reverse held))))
+        (string-join "\n" lines)))
+    (let* ((line (car body))
+           (flag (if (null flags) t (car flags)))
+           (marker (string-prefix-p (hex-decode "5c204e6f") line))
+           (ctx (string-prefix-p " " line))
+           (rem (string-prefix-p "-" line))
+           (keep (if marker prevKept (if ctx t flag))))
+      (cond
+        ((and marker (not prevKept))
+          ;; The marker's line was dropped or converted — the new
+          ;; final line's newline state is uncomputable from the
+          ;; diff. (Markers are always hunk-final.)
+          (progn
+            (setq stagehand-diff-partial-refusal
+              "the no-newline line must stay selected")
+            nil))
+        (marker
+          ;; Rides its kept line (after flushing held context);
+          ;; counts toward NEITHER side.
+          (stagehand-diff-partial-scan (cdr body) (cdr flags)
+            (cons line (append held out))
+            (list) oldC newC leadN keptAny prevKept changes
+            oStart nStart tail header))
+        (keep
+          ;; A kept CONTEXT line counts toward BOTH sides; a kept
+          ;; '-' only old; a kept '+' only new. Context and '-'
+          ;; FLUSH held lines first; a kept '+' jumps over them
+          ;; (git coalesces '-b -c +B +C': selecting b→B must emit
+          ;; -b +B ' c', not -b ' c' +B).
+          (if (or ctx rem)
+            (stagehand-diff-partial-scan (cdr body) (cdr flags)
+              (cons line (append held out))
+              (list)
+              (+ oldC 1) (+ newC (if ctx 1 0))
+              leadN t t (+ changes (if ctx 0 1))
+              oStart nStart tail header)
+            (stagehand-diff-partial-scan (cdr body) (cdr flags)
+              (cons line out) held
+              oldC (+ newC 1)
+              leadN t t (+ changes 1)
+              oStart nStart tail header)))
+        ((and rem (not ctx))
+          ;; DROPPED '-': CONTEXT conversion (old position keeps its
+          ;; line; both side counts advance) — HELD behind kept '+'.
+          (stagehand-diff-partial-scan (cdr body) (cdr flags)
+            out
+            (cons (concat " " (substring line 1 (length line))) held)
+            (+ oldC 1) (+ newC 1)
+            leadN t nil changes
+            oStart nStart tail header))
+        (t
+          ;; DROPPED '+': omit; a leading one shifts the new start.
+          (stagehand-diff-partial-scan (cdr body) (cdr flags)
+            out held oldC newC
+            (+ leadN (if keptAny 0 1))
+            keptAny nil changes
+            oStart nStart tail header))))))
+
+(defun stagehand-diff-swap-body (lines)
+  "Swap '+'/'-' prefixes (context and markers untouched) — the
+CACHED-side partial construction's sign mirror."
+  (if (null lines)
+    (list)
+    (let ((l (car lines)))
+      (cons (cond
+              ((string-prefix-p "-" l) (concat "+" (substring l 1 (length l))))
+              ((string-prefix-p "+" l) (concat "-" (substring l 1 (length l))))
+              (t l))
+        (stagehand-diff-swap-body (cdr lines))))))
+
+(defun stagehand-diff-partial-patch-cached (idx flags)
+  "The CACHED-side (unstage) partial patch: the roles INVERT — the
+patch's old side is the INDEX content, so the body's signs swap
+(a dropped change STAYS in the index: its '+' line becomes CONTEXT
+' +content', its '-' line omits; a SELECTED change swaps to
+'-new/+old') and the header starts exchange places. Built with the
+SAME scan; applied via `git apply --cached -` WITHOUT -R. Returns
+the patch string, or nil with the refusal named."
+  (setq stagehand-diff-partial-refusal nil)
+  (let* ((split (stagehand-diff-split-patch (stagehand-diff-hunk-patch idx))))
+    (if (null split)
+      (progn
+        (setq stagehand-diff-partial-refusal "no hunk at that index")
+        nil)
+      (let* ((header (nth 0 split))
+             (hunk (nth 1 split))
+             (spec (stagehand-diff-hunk-spec (car hunk))))
+        (stagehand-diff-partial-scan
+          (stagehand-diff-swap-body (cdr hunk)) flags (list) (list)
+          0 0
+          0
+          nil nil 0
+          (nth 2 spec) (nth 0 spec) (nth 4 spec) header)))))
+
+(defun stagehand-diff-flags-for-lines (idx from-line to-line)
+  "FLAGS for hunk IDX restricted to the view lines FROM..TO
+(inclusive, view-line space): body line k of hunk IDX sits at view
+line hunk-start + 1 + k. The list spans the hunk's FULL body (a
+short flag list would default-to-keep its tail and over-stage)."
+  (let* ((split (stagehand-diff-split-patch (stagehand-diff-hunk-patch idx)))
+         (body-len (if split (- (length (nth 1 split)) 1) 0))
+         (start (nth idx stagehand-diff-hunks)))
+    (stagehand-diff-flags-scan 0 body-len start from-line to-line (list))))
+
+(defun stagehand-diff-flags-scan (k body-len start from to acc)
+  (if (>= k body-len)
+    (reverse acc)
+    (stagehand-diff-flags-scan (+ k 1) body-len start from to
+      (cons (and (>= (+ start 1 k) from) (<= (+ start 1 k) to)) acc))))
+
 (defun stagehand-diff-stage-hunk ()
   "s (worktree view) — stage the hunk at point: git apply --cached -
 with the reconstructed patch on stdin."
