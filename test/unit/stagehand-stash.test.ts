@@ -81,7 +81,8 @@ describe("#292 — creation (the z prefix)", () => {
     writeFileSync(join(process.cwd(), "untracked.txt"), "u\n");
     openStash();
     e(editor, "(stagehand/stash/stagehand-stash-z)");
-    e(editor, "(stagehand/stash/stagehand-stash-u)"); // toggle -u
+    e(editor, "(stagehand/stash/stagehand-stash-u)"); // z u
+    e(editor, "(stagehand/stash/stagehand-stash-z)");
     e(editor, "(stagehand/stash/stagehand-stash-z)"); // z z
     expect(st(editor)).toContain("stashed stash@{0}");
     expect(git("stash", "show", "--include-untracked", "stash@{0}")).toContain("untracked.txt");
@@ -97,7 +98,8 @@ describe("#292 — creation (the z prefix)", () => {
     writeFileSync(join(process.cwd(), "g.txt"), "worktree\n");
     openStash();
     e(editor, "(stagehand/stash/stagehand-stash-z)");
-    e(editor, "(stagehand/stash/stagehand-stash-k)"); // toggle -k
+    e(editor, "(stagehand/stash/stagehand-stash-k)"); // z k
+    e(editor, "(stagehand/stash/stagehand-stash-z)");
     e(editor, "(stagehand/stash/stagehand-stash-z)"); // z z
     expect(st(editor)).toContain("stashed stash@{0}");
     // The staged change SURVIVES (keep-index); g.txt is stashed.
@@ -112,10 +114,12 @@ describe("#292 — creation (the z prefix)", () => {
     execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
     writeFileSync(join(process.cwd(), "untracked.txt"), "u\n");
     openStash();
-    e(editor, "(stagehand/stash/stagehand-stash-z)"); // arm
-    e(editor, "(stagehand/stash/stagehand-stash-u)"); // -u (armed)
-    e(editor, "(stagehand/stash/stagehand-stash-k)"); // -k (armed)
-    e(editor, "(stagehand/stash/stagehand-stash-z)"); // create -u -k
+    e(editor, "(stagehand/stash/stagehand-stash-z)");
+    e(editor, "(stagehand/stash/stagehand-stash-u)"); // z u
+    e(editor, "(stagehand/stash/stagehand-stash-z)");
+    e(editor, "(stagehand/stash/stagehand-stash-k)"); // z k
+    e(editor, "(stagehand/stash/stagehand-stash-z)");
+    e(editor, "(stagehand/stash/stagehand-stash-z)"); // z z → create -u -k
     expect(st(editor)).toContain("stashed stash@{0}");
     expect(git("diff", "--cached")).toContain("STAGED");
     expect(git("status", "--porcelain")).not.toContain("untracked.txt");
@@ -139,6 +143,32 @@ describe("#292 — creation (the z prefix)", () => {
     e(editor, "(stagehand/stash/stagehand-stash-z)");
     e(editor, "(stagehand/stash/stagehand-stash-u)");
     expect(strip(bufferText(editor))).toContain("no stashes");
+  });
+
+  test("KEY-DRIVEN: the keymap dispatches the z-prefix create (z u then z z via handleKey)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "untracked.txt"), "u\n");
+    openStash();
+    await editor.handleKey("z");
+    await editor.handleKey("u"); // z u via the REAL keymap
+    await editor.handleKey("z");
+    await editor.handleKey("z"); // z z
+    expect(st(editor)).toContain("stashed stash@{0}");
+    expect(git("status", "--porcelain")).not.toContain("untracked.txt");
+  });
+
+  test("KEY-DRIVEN: a bare Enter (the n-first default) cancels the drop via the real confirm", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    git("stash");
+    openStash();
+    toRow("stash@{0}");
+    await editor.handleKey("D");
+    await editor.handleKey("Enter"); // the n-first default cancels
+    expect(st(editor)).toContain("cancelled");
+    expect(git("stash", "list")).toContain("stash@{0}");
   });
 
   test("the toggle state RESETS on reopen; the header shows it", () => {

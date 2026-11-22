@@ -279,9 +279,13 @@ with a different id is the covered refusal)."
                (list "git" "stash" op ref)
                (stagehand-stash-root))))
     (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
-      (progn
+      (let ((here (buffer-current)))
         (stagehand-stash-refresh-silent)
         (stagehand/status/stagehand-status-refresh)
+        ;; valve r1: both refreshes switch away — return the user to
+        ;; the (re-rendered) stash list.
+        (if (not (string= (buffer-current) here))
+          (buffer-switch here))
         (editor-set-status
           (concat "Stagehand: stash " op " " ref " done")))
       (editor-set-status
@@ -313,19 +317,24 @@ SECOND z creates — the spec's `z z`)."
         "Stagehand: z u (untracked) z k (keep-index) z z (create)"))))
 
 (defun stagehand-stash-u ()
-  "z u — toggle include-untracked (header re-renders; the prefix STAYS armed — a following z still creates)."
+  "z u — toggle include-untracked (header re-renders). The prefix is
+CONSUMED: each z is an independent two-key sequence (valve r1 — a
+staying-armed prefix fired a create mid-way through the spec's z u /
+z k / z z interleaving)."
   (if (not stagehand-stash-z-pending)
     (editor-set-status "Stagehand: z first (the creation prefix)")
     (progn
+      (setq stagehand-stash-z-pending nil)
       (setq stagehand-stash-toggle-u
         (not stagehand-stash-toggle-u))
       (stagehand-stash-rerender-preserving))))
 
 (defun stagehand-stash-k ()
-  "z k — toggle keep-index (header re-renders; the prefix stays armed)."
+  "z k — toggle keep-index (header re-renders; the prefix is consumed)."
   (if (not stagehand-stash-z-pending)
     (editor-set-status "Stagehand: z first (the creation prefix)")
     (progn
+      (setq stagehand-stash-z-pending nil)
       (setq stagehand-stash-toggle-k
         (not stagehand-stash-toggle-k))
       (stagehand-stash-rerender-preserving))))
