@@ -85,6 +85,14 @@ it belonged to is gone).")
   "r145 (#4): the FULL batch call list at park time — the reconstructed
 assistant message must carry EVERY call in the reply (calls before the
 parked one were dropped; their results rode without their call).")
+
+;; The index of CALL in the batch list (0 when absent).
+(defun fikra-ollama-batch-index-of (call i)
+  (if (>= i (length fikra-ollama-batch-calls))
+    0
+    (if (equal (nth i fikra-ollama-batch-calls) call)
+      i
+      (fikra-ollama-batch-index-of call (+ i 1)))))
 (defvar fikra-ollama-last-parked-calls nil
   "r139b: the parked call + its remainder (the exchange's TRUE assistant
 message — the reject/approve-with-empty-rest path records from here).")
@@ -582,6 +590,16 @@ with its post-exit capture.")
             (progn
               (setq fikra-ollama-pending-message nil)
               (editor-set-status "Fikra-ollama: sentinel home focus failed")
+              ;; r145b (codex r145 catch): SETTLE by the home thread's id
+              ;; (focus-by-id inside its own condition-case, end,
+              ;; restore — the failed focus left an arbitrary current).
+              (condition-case nil
+                (progn
+                  (fikra/thread/fikra-thread-focus (if home home prev))
+                  (if (string= (fikra/thread/fikra-thread-status) "running")
+                    (fikra/thread/fikra-thread-turn-end "error"))
+                  (fikra/thread/fikra-thread-focus prev))
+                (error () nil))
               'focus-failed)
             (progn
         ;; The HOME focus for everything this sentinel does.
@@ -1584,14 +1602,19 @@ with its post-exit capture.")
                   ;; branch).
                   (let ((entry (hashmap-get fikra-ollama-async-procs
                                   (number-to-string approved))))
-                    ;; r139 (codex catch): the stash carries the FULL
-                    ;; call list with skip-index 1 — the approved call's
-                    ;; message arrives as the sentinel's msg, and the
-                    ;; remembered exchange then reconstructs the TRUE
-                    ;; assistant message (rest-only stashes lied).
+                    ;; r139+r145b (codex r145 catch): the stash carries
+                    ;; the FULL BATCH list with the parked call's INDEX —
+                    ;; the approved call's message arrives as the
+                    ;; sentinel's msg; calls BEFORE the parked one
+                    ;; (parked-call + rest stashes dropped them) must
+                    ;; ride too.
                     (if entry
                       (keymap-mutable-set! entry "cont"
-                        (list (append (list call) fikra-ollama-parked-rest) 1
+                        (list (if (and fikra-ollama-batch-calls
+                                       (> (length fikra-ollama-batch-calls) 0))
+                                fikra-ollama-batch-calls
+                                (append (list call) fikra-ollama-parked-rest))
+                              (+ (fikra-ollama-batch-index-of call 0) 1)
                               fikra-ollama-parked-acc))
                       nil)
                     (setq fikra-ollama-parked-rest nil)

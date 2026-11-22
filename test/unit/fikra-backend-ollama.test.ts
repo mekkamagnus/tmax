@@ -1162,6 +1162,35 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(msgs).toContain("user rejected this command");
   });
 
+  // r145b (codex r145 catch): an APPROVED mixed batch also carries
+  // every call — the async continuation reconstructs the full list
+  // (the approved path previously serialized parked-call + rest only).
+  tt("an APPROVED mixed batch reconstructs BOTH calls too", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "mix145b.txt"), "APPROVE-MIX-CONTENT");
+    e(ed, '(fikra/chat/fikra-turn-send "read then approve")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 310 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [
+        { function: { name: "buffer_read", arguments: { path: "mix145b.txt" } } },
+        { function: { name: "bash", arguments: { command: "rm -rf mix145bdir/" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 310 "${r}")`);
+    e(ed, `(fikra-http-complete 310 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    await settleRefireFrom(ed, "310", "APPROVE-MIX-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    e(ed, '(fikra/chat/fikra-turn-send "follow approve-mix")');
+    const msgs = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    const readCallAt = msgs.indexOf('"name":"buffer_read"');
+    const bashCallAt = msgs.indexOf('"name":"bash"');
+    expect(readCallAt).toBeGreaterThan(-1);
+    expect(bashCallAt).toBeGreaterThan(readCallAt);
+    expect(msgs).toContain("APPROVE-MIX-CONTENT");
+    // The approved command's result rides (no re-execution: one result).
+    expect((msgs.match(/"name":"bash"/g) ?? []).length).toBe(1);
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
