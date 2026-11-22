@@ -85,7 +85,8 @@ rerun. Returns the generation id."
     (setq grep-stack
       (append grep-stack
         (list (list grep-current-gen grep-meta grep-hits
-                grep-completed grep-status grep-saved-content)))))
+                grep-completed grep-status grep-saved-content
+                grep-message)))))
   (setq grep-saved-content (grep-buffer-content))
   (setq grep-generation-counter (+ grep-generation-counter 1))
   (setq grep-current-gen grep-generation-counter)
@@ -174,6 +175,8 @@ generation's content. A restored generation's id RETIRES."
           (setq grep-status (if snap (nth 4 snap) nil))
           (setq grep-saved-content
             (if snap (nth 5 snap) grep-saved-content))
+          (setq grep-message
+            (if snap (nth 6 snap) nil))
           (if snap
             (grep-rerender-hits)
             (grep-restore-content grep-saved-content)))
@@ -187,6 +190,9 @@ generation's content. A restored generation's id RETIRES."
       last)))
 
 (defun grep-rerender-hits ()
+  (if (not (member (grep-buffer-name) (buffer-list)))
+    nil
+    (progn
   (grep-switch-in)
   (buffer-set-read-only nil)
   (grep-clear-buffer)
@@ -194,7 +200,7 @@ generation's content. A restored generation's id RETIRES."
   ;; desynced hit indices after a rollback + append).
   (grep-rerender-scan grep-hits 0)
   (buffer-set-read-only t)
-  (grep-switch-out))
+  (grep-switch-out))))
 
 (defun grep-rerender-scan (hits i)
   (if (< i (length hits))
@@ -211,9 +217,18 @@ generation's content. A restored generation's id RETIRES."
 
 ;; ── the buffer ──────────────────────────────────────────────────────
 (defun grep-buffer-content ()
-  (if (member (grep-buffer-name) (buffer-list))
-    (buffer-text)
-    ""))
+  ;; gate valve r1: capture *grep*'s content FROM *grep* (the bare
+  ;; buffer-text read the CURRENT buffer — another buffer's text
+  ;; became the snapshot).
+  (if (not (member (grep-buffer-name) (buffer-list)))
+    ""
+    (if (string= (buffer-current) (grep-buffer-name))
+      (buffer-text)
+      (progn
+        (grep-switch-in)
+        (let ((text (buffer-text)))
+          (grep-switch-out)
+          text)))))
 
 (defun grep-restore-content (text)
   ;; gate r2 P1 (the r1-missed DATA DESTROYER): switch + restore
@@ -306,6 +321,10 @@ and flipped it read-only).")
   (grep-render-complete-with grep-status grep-message))
 
 (defun grep-render-complete-with (rstatus rmessage)
+  ;; valve r1: a killed *grep* (post-q) — NO render at all (the
+  ;; body would otherwise run against the user's CURRENT buffer).
+  (if (not (member (grep-buffer-name) (buffer-list)))
+    nil
   (let ((grep-status rstatus)
         (grep-message rmessage))
   (grep-switch-in)
@@ -349,7 +368,7 @@ and flipped it read-only).")
         ((string= grep-status "error") "error")
         ((= (length grep-hits) 0) "no matches")
         (t (concat (number-to-string (length grep-hits)) " hits")))))
-  (grep-switch-out)))
+  (grep-switch-out))))
 
 (defun grep-clear-buffer ()
   (let ((count (buffer-line-count)))
