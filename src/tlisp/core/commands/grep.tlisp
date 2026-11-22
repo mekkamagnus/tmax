@@ -86,7 +86,7 @@ rerun. Returns the generation id."
       (append grep-stack
         (list (list grep-current-gen grep-meta grep-hits
                 grep-completed grep-status grep-saved-content
-                grep-message)))))
+                grep-message (grep-buffer-content))))))
   (setq grep-saved-content (grep-buffer-content))
   (setq grep-generation-counter (+ grep-generation-counter 1))
   (setq grep-current-gen grep-generation-counter)
@@ -168,6 +168,11 @@ generation's content. A restored generation's id RETIRES."
         ;; id retires explicitly; the popped gen becomes current.
         (setq grep-retired (cons gen grep-retired))
         (let ((snap (grep-stack-pop)))
+          ;; valve r2: EVERY restored id retires (SPEC-291: a restored
+          ;; generation accepts NO further callbacks — re-searching
+          ;; requires a fresh register).
+          (if snap
+            (setq grep-retired (cons (nth 0 snap) grep-retired)))
           (setq grep-current-gen (if snap (nth 0 snap) nil))
           (setq grep-meta (if snap (nth 1 snap) nil))
           (setq grep-hits (if snap (nth 2 snap) (list)))
@@ -177,8 +182,11 @@ generation's content. A restored generation's id RETIRES."
             (if snap (nth 5 snap) grep-saved-content))
           (setq grep-message
             (if snap (nth 6 snap) nil))
+          ;; valve r2: restore the generation's EXACT rendered content
+          ;; (the placeholder / zero-hit result / completion or error
+          ;; message — rebuilding from hits lost them).
           (if snap
-            (grep-rerender-hits)
+            (grep-restore-content (nth 7 snap))
             (grep-restore-content grep-saved-content)))
         (editor-set-status "grep: rolled back")))))
 
@@ -425,17 +433,16 @@ and flipped it read-only).")
       (number-to-string target) note))))
 
 (defun grep-last-content-line ()
-  ;; 1-based index of the last NON-EMPTY line (a trailing newline
-  ;; makes buffer-line-count count an empty final row).
-  (grep-last-content-scan (- (buffer-line-count) 1)))
-
-(defun grep-last-content-scan (i)
-  (if (<= i 0)
-    1
-    (let ((l (buffer-line i)))
-      (if (and l (> (length l) 0))
-        (+ i 1)
-        (grep-last-content-scan (- i 1))))))
+  ;; valve r2: the ACTUAL last line — buffer-line-count counts a
+  ;; PHANTOM final row when the text ends with a newline; drop only
+  ;; that one artifact, PRESERVING legitimate trailing blank lines.
+  (let* ((count (buffer-line-count))
+         (text (buffer-text))
+         (drop (if (and (> count 1)
+                        (> (length text) 0)
+                        (string-suffix-p "\n" text))
+                 1 0)))
+    (max 1 (- count drop))))
 
 (defun grep-next ()
   "n — next hit (wrap; count prefix = stride)."

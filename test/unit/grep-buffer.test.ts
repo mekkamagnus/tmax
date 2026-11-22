@@ -103,9 +103,10 @@ describe("#307 — the producer interface", () => {
     expect(String(e(editor, "(editor/commands/grep/grep-current-gen-get)").value)).toBe("1");
     // The RESTORED generation accepts no callbacks for its OLD id.
     e(editor, `(grep-buffer-append-hit 2 ${hit("x", 1, 1, "no")})`); // silent (not current)
-    // Completing the restored gen 1 works; rolling back a COMPLETED gen errors.
+    // valve r2: EVERY restored id retires — completing gen 1 drops
+    // silently too (re-searching requires a fresh register).
     e(editor, '(grep-buffer-complete 1 "done" nil)');
-    expect(() => e(editor, "(grep-buffer-rollback 1)")).toThrow(/already complete/);
+    expect(String(e(editor, "(editor/commands/grep/grep-status-get)").value)).not.toBe("done");
   });
 
   test("ERROR completion: zero hits renders the message; with hits it rides as a suffix", () => {
@@ -409,5 +410,43 @@ describe("#307 — valve r1 fixes", () => {
     e(editor, "(grep-buffer-rollback 2)");
     expect(strip(bufferText(editor))).toContain("a:1:1:one"); // g1's hits — not *else*'s text
     expect(strip(bufferText(editor))).not.toContain("NOT THE SNAPSHOT");
+  });
+});
+
+describe("#307 — valve r2 fixes", () => {
+  test("rollback restores the EXACT display (placeholder/zero-hit/message)", () => {
+    // g1 completes with zero hits (a message display); g2 registers;
+    // rolling back g2 restores g1's EXACT rendered state.
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, '(grep-buffer-complete 1 "no-matches" nil)');
+    const g1Display = strip(bufferText(editor));
+    expect(g1Display).toContain("no matches for pat");
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 2 ${hit("g2", 1, 1, "two")})`);
+    e(editor, "(grep-buffer-rollback 2)");
+    expect(strip(bufferText(editor))).toBe(g1Display);
+    // The searching… placeholder round-trips directly: g1 sits at
+    // its placeholder (uncompleted), g2 registers over it, rolling
+    // g2 back restores the placeholder display verbatim.
+    const gA = Number(String(e(editor, "(editor/commands/grep/grep-generation-get)").value)) + 1;
+    e(editor, `(grep-buffer-register ${reg()})`); // fresh: searching…
+    const searching = strip(bufferText(editor));
+    expect(searching).toContain("searching…");
+    const gB = gA + 1;
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit ${gB} ${hit("z", 1, 1, "z")})`);
+    e(editor, `(grep-buffer-rollback ${gB})`);
+    expect(strip(bufferText(editor))).toBe(searching);
+  });
+
+  test("the line clamp PRESERVES legitimate trailing blank lines", () => {
+    writeFileSync(join(process.cwd(), "blanks.txt"), "one\ntwo\n\n\n");
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("blanks.txt", 99, 1, "x")})`);
+    e(editor, '(grep-buffer-complete 1 "done" nil)');
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(editor/commands/grep/grep-ret)");
+    // 4 content lines (two REAL trailing blanks) + the newline artifact.
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(3); // the last REAL line
   });
 });
