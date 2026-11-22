@@ -1,6 +1,7 @@
 (defmodule editor/commands/grep-scope
   (export grep-scope-here grep-scope-project grep-scope-accept
-          grep-scope-table grep-scope-start-path grep-scope-resolve)
+          grep-scope-table grep-scope-start-path grep-scope-resolve
+          grep-scope-dirname)
 
 ;; #310 — the grep subsystem's user-facing scope commands (RFC-031
 ;; §2.3). FRESH root detection on EVERY invocation (the *project-root*
@@ -19,26 +20,28 @@ BASENAME — a buffer visiting /other/sub/file.txt with cwd elsewhere
 resolved against cwd, scoping the search to the WRONG project).
 Absolute → the leading segments; relative → same, '.' when bare."
   (let ((segs (string-split path "/")))
-    (grep-scope-dirname-join (reverse segs) (list))))
+    (grep-scope-dirname-join (reverse segs))))
 
-(defun grep-scope-dirname-join (rev acc)
-  ;; Skip the first (the basename), join the rest absolute-first.
-  (if (null rev)
-    "."
-    (let ((rest (cdr rev)))
-      (if (null rest)
-        "."
-        (grep-scope-join-segs (reverse rest))))))
+(defun grep-scope-dirname-join (rev)
+  ;; Skip the first (the basename); the REST is the dir. Absolute
+  ;; paths: "/file.txt" splits to ("" "file.txt") → rest ("") — a
+  ;; single EMPTY leading segment means the ROOT: "/". Gate r2's
+  ;; finding: the old join produced "" (resolve("") = cwd — the
+  ;; wrong-project class AGAIN) and the "/" special-case was dead
+  ;; code (segments are "/"-free by construction, never length 1).
+  (let ((rest (cdr rev)))
+    (cond
+      ((null rest) ".")
+      ((and (= (length rest) 1) (= (length (car rest)) 0)) "/")
+      (t (grep-scope-join-segs (reverse rest))))))
 
 (defun grep-scope-join-segs (segs)
-  (if (null segs)
-    "."
-    (let ((joined (car segs)))
-      (dolist (sg (cdr segs))
-        (setq joined (concat joined "/" sg)))
-      (if (and (string-prefix-p "/" joined) (= (length joined) 1))
-        "/"
-        joined))))
+  ;; segs is REVERSED-to-absolute-order (the leading "" of an
+  ;; absolute path first).
+  (let ((joined (car segs)))
+    (dolist (sg (cdr segs))
+      (setq joined (concat joined "/" sg)))
+    (if (= (length joined) 0) "." joined)))
 
 (defun grep-scope-start-path ()
   "The detection start: the current buffer's file DIR; no file →

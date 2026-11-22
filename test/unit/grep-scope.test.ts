@@ -92,6 +92,15 @@ describe("#310 — scope resolution (FRESH, cache-bypassed)", () => {
     execFileSync("git", ["-C", other, "add", "."]);
   });
 
+  test("DIRNAME edges (gate r2): the root is '/', never ''", () => {
+    const dn = (x: string) => String(e(editor, `(editor/commands/grep-scope/grep-scope-dirname "${x}")`).value);
+    expect(dn("/")).toBe("/");
+    expect(dn("/file.txt")).toBe("/"); // the r2 repro: was "" → resolve("") = cwd
+    expect(dn("/a/b.txt")).toBe("/a");
+    expect(dn("x.txt")).toBe(".");
+    expect(dn("a/b.txt")).toBe("a");
+  });
+
   test("outside a project: 'here' falls back to the start path; 'project' refuses", () => {
     const dir = mkdtempSync(join(tmpdir(), "i310-out-"));
     dirs.push(dir);
