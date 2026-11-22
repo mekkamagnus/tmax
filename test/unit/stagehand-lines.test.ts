@@ -195,3 +195,87 @@ describe("#331 — the view-line flag mapping", () => {
 function hexBs(): string {
   return "\\ No newline";
 }
+
+/** Wait for the async apply sentinel. */
+const waitApply = async (ed: Editor, ms = 6000) => {
+  for (let i = 0; i < ms / 25; i++) {
+    const st = String(e(ed, "(editor-status)").value);
+    if (st.includes("hunk applied") || st.includes("apply failed") || st.includes("refused") || st.includes("stay selected") || st.includes("nothing selected")) return st;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return "TIMEOUT:" + String(e(ed, "(editor-status)").value);
+};
+
+describe("#331 — the mark-based selection UI (end-to-end)", () => {
+  test("m + s: only the mark..cursor lines reach the index; the mark clears", async () => {
+    // Changes SEPARATED by context (b→B, e→E — NOT coalesced): a
+    // contiguous mark..cursor range selects exactly one change's
+    // rows. (Coalesced adjacent changes are inherently un selectable
+    // by a contiguous range — the same constraint git add -p solves
+    // with hunk splitting.)
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nB\nc\nd\nE\nf\ng\n");
+    openDiff("f.txt");
+    const hdr = Number(e(editor, "(nth 0 (stagehand/diff/stagehand-diff-hunk-lines))").value);
+    // Body: " a","-b","+B"," c"," d","-e","+E"," f"," g" — "-b"/"+B"
+    // are body k=1,2 → view hdr+2..hdr+3.
+    e(editor, `(cursor-move ${hdr + 2} 0)`);        // "-b"
+    e(editor, "(stagehand/diff/stagehand-diff-toggle-mark)");
+    e(editor, `(cursor-move ${hdr + 3} 0)`);        // "+B"
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("show", ":f.txt")).toBe("a\nB\nc\nd\ne\nf\ng"); // only b→B
+    expect(file("f.txt")).toBe("a\nB\nc\nd\nE\nf\ng\n");      // worktree intact
+    expect(String(e(editor, "(stagehand/diff/stagehand-diff-mark-get)").value)).toContain("null"); // cleared
+  });
+
+  test("m + u (cached view): only the selected lines leave the index", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nB\nC\nd\nE\nf\ng\n");
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    openDiff("f.txt");
+    const hdr = Number(e(editor, "(nth 0 (stagehand/diff/stagehand-diff-hunk-lines))").value);
+    e(editor, `(cursor-move ${hdr + 7} 0)`);        // "-e" (body k=6)
+    e(editor, "(stagehand/diff/stagehand-diff-toggle-mark)");
+    e(editor, `(cursor-move ${hdr + 8} 0)`);        // "+E" (body k=7)
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("show", ":f.txt")).toBe("a\nB\nC\nd\ne\nf\ng"); // e→E unstaged only
+  });
+
+  test("a mark OUTSIDE the cursor's hunk falls back to whole-hunk", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nB\nc\nd\ne\nf\ng\n");
+    openDiff("f.txt");
+    // Mark on the FILE HEADER line (outside any hunk), cursor in the hunk.
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-toggle-mark)");
+    e(editor, "(cursor-move 6 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("show", ":f.txt")).toBe("a\nB\nc\nd\ne\nf\ng"); // the WHOLE hunk
+  });
+
+  test("selecting around a no-newline final line refuses through the UI", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nB");
+    openDiff("f.txt");
+    const hdr = Number(e(editor, "(nth 0 (stagehand/diff/stagehand-diff-hunk-lines))").value);
+    // Mark+cursor on the CONTEXT " a" only — the b→B change (with
+    // its marker) is excluded → refusal, nothing applied.
+    e(editor, `(cursor-move ${hdr + 1} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-toggle-mark)");
+    e(editor, `(cursor-move ${hdr + 1} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("no-newline");
+    expect(git("diff", "--cached")).toBe("");
+  });
+});

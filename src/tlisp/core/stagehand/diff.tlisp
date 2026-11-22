@@ -2,6 +2,8 @@
   (export stagehand-diff-parse stagehand-diff-classify
           stagehand-diff-face stagehand-diff-face-line
           stagehand-diff-partial-patch stagehand-diff-partial-patch-cached
+          stagehand-diff-toggle-mark stagehand-diff-selection-range
+          stagehand-diff-mark-get
           stagehand-diff-partial-refusal-get
           stagehand-diff-flags-for-lines
           stagehand-diff-buffer-name stagehand-diff-open
@@ -242,6 +244,7 @@ diff)."
 Valve r2: bump the view gen — an in-flight apply's sentinel must
 not recreate or switch back to a quit view."
   (setq stagehand-diff-view-gen (+ (or stagehand-diff-view-gen 0) 1))
+  (setq stagehand-diff-mark nil)
   (buffer-kill (stagehand-diff-buffer-name)))
 
 ;; ── hunk extraction + patch reconstruction (#291) ───────────────────
@@ -679,39 +682,101 @@ stale y must not discard ANOTHER view's hunk — valve r3).")
           (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
             (if (null idx)
               (editor-set-status "Stagehand: no hunk at point")
-              (stagehand-diff-apply-hunk-at idx op))))))))
+              (let ((sel (stagehand-diff-selection-range)))
+                (if sel
+                  (stagehand-diff-apply-partial-at idx (nth 0 sel) (nth 1 sel) op)
+                  (stagehand-diff-apply-hunk-at idx op))))))))))
+
+(defun stagehand-diff-spawn-apply (flags patch)
+  "The shared apply spawn: `git apply <flags> -` with PATCH on stdin.
+git apply's diagnostics go to STDERR, and make-process filters see
+STDOUT only — so it runs `sh -c \"git apply <flags> - 2>&1\"` (a
+FIXED constant — no user data crosses the shell)."
+  (let* ((cmd (concat "git apply " (string-join " " flags) " - 2>&1"))
+         (pid (make-process
+                :command cmd
+                :cwd (or stagehand-diff-root ".")
+                :filter "stagehand/diff/stagehand-diff-apply-filter"
+                :sentinel "stagehand/diff/stagehand-diff-apply-sentinel")))
+    (setq stagehand-diff-apply-err nil)
+    (setq stagehand-diff-apply-exit nil)
+    (setq stagehand-diff-apply-view-gen stagehand-diff-view-gen)
+    (setq stagehand-diff-apply-in-flight t)
+    (process-write pid (concat patch "\n"))
+    (process-close-stdin pid)
+    (editor-set-status "Stagehand: applying hunk…")))
 
 (defun stagehand-diff-apply-hunk-at (idx op)
-  (let* ((flags (cond
-                      ((string= op "discard") (list "-R"))
-                      ((string= op "unstage") (list "--cached" "-R"))
-                      (t (list "--cached"))))
-             ;; git apply takes the PATCH (here '-') — no pathspec
-             ;; args (the patch itself carries the paths; `--` after
-             ;; the patch would parse as a second patch). Each flag
-             ;; is its own argv element ("--cached -R" as ONE string
-             ;; was a usage error; exit 129).
-             ;; #291 gate r1: git apply's diagnostics go to STDERR,
-             ;; and make-process filters see STDOUT only — so the
-             ;; apply runs `sh -c "git apply <flags> - 2>&1"` (a
-             ;; FIXED constant — no user data crosses the shell; the
-             ;; patch rides stdin) and the filter captures the
-             ;; merged diagnostics for the failure message.
-             (cmd (concat "git apply "
-                          (string-join " " flags) " - 2>&1"))
-             (patch (stagehand-diff-hunk-patch idx))
-             (pid (make-process
-                    :command cmd
-                    :cwd (or stagehand-diff-root ".")
-                    :filter "stagehand/diff/stagehand-diff-apply-filter"
-                    :sentinel "stagehand/diff/stagehand-diff-apply-sentinel")))
-        (setq stagehand-diff-apply-err nil)
-        (setq stagehand-diff-apply-exit nil)
-        (setq stagehand-diff-apply-view-gen stagehand-diff-view-gen)
-        (setq stagehand-diff-apply-in-flight t)
-        (process-write pid (concat patch "\n"))
-        (process-close-stdin pid)
-        (editor-set-status "Stagehand: applying hunk…")))
+  (let ((flags (cond
+                 ((string= op "discard") (list "-R"))
+                 ((string= op "unstage") (list "--cached" "-R"))
+                 (t (list "--cached")))))
+    ;; git apply takes the PATCH (here '-') — no pathspec args (the
+    ;; patch itself carries the paths). Each flag is its own argv
+    ;; element ("--cached -R" as ONE string was a usage error).
+    (stagehand-diff-spawn-apply flags (stagehand-diff-hunk-patch idx))))
+
+;; ── selected-line staging: the mark + the partial apply (#331) ──────
+(defvar stagehand-diff-mark nil
+  "The MARKED view line (m toggles; s/u with the mark inside the
+cursor's hunk stage/unstage the mark..cursor LINE RANGE). Cleared
+at apply-launch, refresh and quit (line numbers shift).")
+
+(defun stagehand-diff-toggle-mark ()
+  "m — set the mark at point; a second m on the same line clears."
+  (if (and (numberp stagehand-diff-mark)
+           (= stagehand-diff-mark (cursor-line)))
+    (progn
+      (setq stagehand-diff-mark nil)
+      (editor-set-status "Stagehand: mark cleared"))
+    (progn
+      (setq stagehand-diff-mark (cursor-line))
+      (editor-set-status
+        (concat "Stagehand: mark at line "
+          (number-to-string (+ (cursor-line) 1))
+          " — s/u stages the mark..cursor lines")))))
+
+(defun stagehand-diff-mark-get ()
+  "The marked view line (a test/inspection seam)."
+  stagehand-diff-mark)
+
+(defun stagehand-diff-selection-range ()
+  "The (FROM TO) view lines (ordered) when the mark is set AND both
+the mark and the cursor sit inside the SAME hunk; nil otherwise
+(whole-hunk mode)."
+  (if (not (numberp stagehand-diff-mark))
+    nil
+    (let ((idx (stagehand-diff-hunk-idx-at-cursor)))
+      (if (null idx)
+        nil
+        (let* ((start (nth idx stagehand-diff-hunks))
+               (split (stagehand-diff-split-patch (stagehand-diff-hunk-patch idx)))
+               (end (+ start (if split (length (nth 1 split)) 1)))
+               (a stagehand-diff-mark)
+               (b (cursor-line)))
+          (if (and (>= a start) (< a end)
+                   (>= b start) (< b end))
+            (if (<= a b) (list a b) (list b a))
+            nil))))))
+
+(defun stagehand-diff-apply-partial-at (idx from to op)
+  "s/u over the mark..cursor RANGE: build the partial patch and
+spawn the SAME apply flow. The cached side uses the SIGN-SWAP
+variant (applied WITHOUT -R). The constructor's refusal surfaces
+as the named status (nothing launched)."
+  (let* ((flags (if (string= op "unstage") (list "--cached") (list "--cached")))
+         (patch (if (string= op "unstage")
+                  (stagehand-diff-partial-patch-cached idx
+                    (stagehand-diff-flags-for-lines idx from to))
+                  (stagehand-diff-partial-patch idx
+                    (stagehand-diff-flags-for-lines idx from to)))))
+    (if (not (stringp patch))
+      (editor-set-status
+        (concat "Stagehand: "
+          (or stagehand-diff-partial-refusal "selection refused")))
+      (progn
+        (setq stagehand-diff-mark nil)
+        (stagehand-diff-spawn-apply flags patch)))))
 
 (defun stagehand-diff-refusal-reason ()
   ;; Binary / rename-copy / mode-only hunks REFUSE (named, no-op).
@@ -917,6 +982,7 @@ does not)."
         (editor/keymaps/keymap-set-key kmap "n" "(stagehand/diff/stagehand-diff-next)")
         (editor/keymaps/keymap-set-key kmap "p" "(stagehand/diff/stagehand-diff-prev)")
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/diff/stagehand-diff-quit)")
+        (editor/keymaps/keymap-set-key kmap "m" "(stagehand/diff/stagehand-diff-toggle-mark)")
         (editor/keymaps/keymap-set-key kmap "s" "(stagehand/diff/stagehand-diff-stage-hunk)")
         (editor/keymaps/keymap-set-key kmap "u" "(stagehand/diff/stagehand-diff-unstage-hunk)")
         (editor/keymaps/keymap-set-key kmap "D" "(stagehand/diff/stagehand-diff-discard-hunk)")
