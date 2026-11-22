@@ -56,7 +56,11 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // #318 rebase re-verify).
     // #287: 434 → 435 — shell-exec-argv (the argv-list exec primitive).
     // #291: 435 → 436 — process-close-stdin (the EOF primitive).
-    expect(live.length).toBe(436);
+    // #338 (drift catch-up): 436 → 439 — scan-visible-column (landed
+    // without its refreeze) + #308's rg-event->hit/exec-lookup (the
+    // grep backend primitives; reconciled on the #308 branch, frozen
+    // here with the drift).
+    expect(live.length).toBe(439);
     expect(live).toEqual(expected);
   });
 

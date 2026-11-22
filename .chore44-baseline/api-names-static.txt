@@ -329,6 +329,7 @@ replace-state-init
 rg-event->hit
 run-hooks
 scan-number-on-line
+scan-visible-column
 scope-at-cursor
 search-backward
 search-clear

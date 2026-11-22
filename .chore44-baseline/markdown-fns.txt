@@ -23,6 +23,11 @@ markdown-demote-heading
 markdown-demote-subtree
 markdown-dirname
 markdown-do
+markdown-edit-src
+markdown-edit-src-abort
+markdown-edit-src-abort-pending
+markdown-edit-src-commit
+markdown-edit-src-ensure-keymap
 markdown-embed-target-at-point
 markdown-execute-all-blocks
 markdown-execute-block
@@ -105,6 +110,13 @@ markdown-slugify-set
 markdown-sparse-tree-level
 markdown-sparse-tree-regex
 markdown-sparse-tree-tag
+markdown-src-block-at-point
+markdown-src-block-content
+markdown-src-edit-active-p
+markdown-src-fence-language
+markdown-src-fence-p
+markdown-src-lang-ext
+markdown-src-mode-for-language
 markdown-tab
 markdown-table-eval-expr
 markdown-table-eval-formula
