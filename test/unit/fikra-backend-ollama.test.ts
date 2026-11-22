@@ -1108,6 +1108,31 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(acc).toContain("TRUNCATED: 5");
   });
 
+  // r144b (codex gate catch): STAGED-only content also refuses — the
+  // worktree matches the post-ref but the index holds user-staged
+  // content on the path (the revert would silently replace it).
+  tt("the action revert REFUSES staged-only divergence too", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "stage then revert")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 290 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [
+        { function: { name: "buffer_edit", arguments: { path: "staged144.txt", content: "ACTION-CONTENT\n" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 290 "${r}")`);
+    e(ed, `(fikra-http-complete 290 200 "${hex("{}")}")`);
+    expect(existsSync(join(process.cwd(), "staged144.txt"))).toBe(true);
+    // Stage user content, then make the WORKTREE match the action again.
+    execFileSync("git", ["add", "staged144.txt"]);
+    writeFileSync(join(process.cwd(), "staged144.txt"), "USER-STAGED\n");
+    execFileSync("git", ["add", "staged144.txt"]);
+    writeFileSync(join(process.cwd(), "staged144.txt"), "ACTION-CONTENT\n");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
+    // The staged content survives.
+    const staged = execFileSync("git", ["show", ":staged144.txt"]).toString();
+    expect(staged).toContain("USER-STAGED");
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —

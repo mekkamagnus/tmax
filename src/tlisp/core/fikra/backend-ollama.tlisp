@@ -944,13 +944,24 @@ with its post-exit capture.")
       (substring rest 0 slash)
       (fikra/thread/fikra-thread-current))))
 
-;; r144 (#1): does the WORKTREE diverge from the post-ref on the paths?
+;; r144 (#1): does the WORKTREE or the INDEX diverge from the post-ref
+;; on the paths? (git diff <ref> compares the ref to the INDEX+worktree
+;; combination; a STAGED change with a matching worktree file still
+;; diverges — the revert would silently replace the staged content.)
 (defun fikra-ollama-worktree-diverged-p (root post paths)
-  (not (string= (string-trim (shell-command
-    (concat "git -C " (fikra/thread/fikra-thread-shq root)
-            " diff --quiet " post " -- "
-            (fikra-ollama-paths-args paths)
-            " 2>/dev/null && echo CLEAN || echo DIRTY"))) "CLEAN")))
+  ;; BOTH the worktree (diff) and the INDEX (--cached) must match the
+  ;; post-ref — staged-only content otherwise silently replaced.
+  (let ((wt (string-trim (shell-command
+           (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                   " diff --quiet " post " -- "
+                   (fikra-ollama-paths-args paths)
+                   " 2>/dev/null && echo CLEAN || echo DIRTY"))))
+        (ix (string-trim (shell-command
+           (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                   " diff --cached --quiet " post " -- "
+                   (fikra-ollama-paths-args paths)
+                   " 2>/dev/null && echo CLEAN || echo DIRTY")))))
+    (not (and (string= wt "CLEAN") (string= ix "CLEAN")))))
 
 ;; r142: THE ACTION-LEVEL REVERT — restore the LATEST action's touched
 ;; paths from ITS pre-ref. r144 hardening: the thread/root come FROM
