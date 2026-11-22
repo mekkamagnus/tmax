@@ -483,6 +483,16 @@ y/n confirm (#287's lesson: a bare Enter cancels)."
      0))
 
 (defun stagehand-do-pick (op sha)
+  ;; PRE-FLIGHT (valve r1): pre-existing unmerged files would be
+  ;; ATTRIBUTED to this op (the router cannot tell whose conflicts
+  ;; they are) — refuse by name, never run.
+  (if (stagehand-pick-unmerged-p stagehand-log-root)
+    (editor-set-status
+      (concat "Stagehand: pre-existing conflicts in the worktree — resolve them first ("
+        op " not run)"))
+    (stagehand-do-pick-1 op sha)))
+
+(defun stagehand-do-pick-1 (op sha)
   (let ((had-in-progress (stagehand-pick-in-progress-p op stagehand-log-root)))
     (let* ((res (shell-exec-argv
                   (list "git"
@@ -558,10 +568,16 @@ unmerged entries (DD/AU/UD/UA/DU/AA/UU) are the truth."
           (stagehand-pick-first-line (nth 0 res) (nth 1 res)))))))
 
 (defun stagehand-pick-first-line (stdout stderr)
-  "The first non-empty diagnostic line, STDOUT first (git 2.49 emits
-CONFLICT/advice on stdout) then stderr."
-  (stagehand-pick-first-line-scan
-    (string-split (concat stdout "\n" stderr) "\n")))
+  "The first non-empty diagnostic line, STDERR first (the failure
+text lives there — 'error: could not apply…'; stdout leads with
+'Auto-merging' progress, valve r1's ordinary-status finding), then
+stdout as the fallback."
+  (let ((from-err (stagehand-pick-first-line-scan
+                    (string-split (concat stderr) "\n"))))
+    (if (string= from-err "(no diagnostics)")
+      (stagehand-pick-first-line-scan
+        (string-split (concat stdout) "\n"))
+      from-err)))
 
 (defun stagehand-pick-first-line-scan (lines)
   (if (null lines)

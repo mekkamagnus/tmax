@@ -91,6 +91,10 @@ describe("#330 — cherry-pick + revert (the log view)", () => {
     // stderr used to hijack this case).
     expect(st).toContain("cherry-pick failed (");
     expect(st).not.toContain("conflict —");
+    // STDERR-first diagnostics (valve r1): the failure text, not
+    // stdout's 'Auto-merging' progress line.
+    expect(st).toContain("previous cherry-pick is now empty");
+    expect(st).not.toContain("Auto-merging");
     expect(git("status", "--porcelain")).toBe(""); // structurally clean
     expect(git("log", "-1", "--format=%s")).toContain("feature"); // HEAD still unmoved
     // GATE R2: OUR op's CHERRY_PICK_HEAD residue is ABORTED (the
@@ -137,6 +141,30 @@ describe("#330 — cherry-pick + revert (the log view)", () => {
     execFileSync("git", ["revert", "--abort"], { cwd: process.cwd() });
   });
 
+
+  test("PRE-EXISTING unmerged files: the pick refuses and never runs (valve r1)", async () => {
+    writeFileSync("a.txt", "line\n"); commit("base");
+    writeFileSync("a.txt", "first\n"); commit("first");
+    writeFileSync("a.txt", "second\n"); commit("second");
+    await openLog(3);
+    // Manufacture a PRE-EXISTING conflicted state (a conflicted
+    // revert of 'first'), then abort it partway? Simpler: a
+    // conflicted cherry-pick left in place.
+    const row = commitRow(1); // first
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-revert)");
+    e(editor, '(stagehand/log/stagehand-log-pick-accept "y")');
+    expect(git("status", "--porcelain")).toContain("UU");
+    // NOW attempt another pick over the unmerged tree → refuse.
+    const row0 = commitRow(0);
+    e(editor, `(cursor-move ${row0} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-revert)");
+    e(editor, '(stagehand/log/stagehand-log-pick-accept "y")');
+    const st = String(e(editor, "(editor-status)").value);
+    expect(st).toContain("pre-existing conflicts");
+    expect(st).toContain("not run");
+    execFileSync("git", ["revert", "--abort"], { cwd: process.cwd() });
+  });
 
   test("a non-commit row refuses with the named status", async () => {
     writeFileSync("a.txt", "base\n"); commit("base");
