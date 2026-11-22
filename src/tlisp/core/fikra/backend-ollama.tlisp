@@ -1270,12 +1270,19 @@ availability gate must be synchronous; the turn itself is async)."
               ;; have changed the tree since the baseline; the ref a
               ;; revert restores to is the state immediately before THIS
               ;; mutation. The post-exit capture (evidence) remains.
+              ;; r141b (codex r141 catch): the capture's RETURN is
+              ;; checked — nil (disabled or failed) triggers the honest
+              ;; status, not just exceptions.
               (condition-case nil
-                (progn (require-module fikra/checkpoint)
-                       (fikra/checkpoint/fikra-checkpoint-set-emit-owner
-                         (if home-thread home-thread (fikra/thread/fikra-thread-current)))
-                       (fikra/checkpoint/fikra-checkpoint-capture "action")
-                       (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil))
+                (let ((sha (progn (require-module fikra/checkpoint)
+                                  (fikra/checkpoint/fikra-checkpoint-set-emit-owner
+                                    (if home-thread home-thread (fikra/thread/fikra-thread-current)))
+                                  (let ((r (fikra/checkpoint/fikra-checkpoint-capture "action")))
+                                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+                                    r))))
+                  (if (not sha)
+                    (editor-set-status
+                      "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref")))
                 (error (m)
                   (editor-set-status
                     (concat "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref ("
