@@ -1,0 +1,411 @@
+(defmodule editor/commands/grep
+  (export grep-exact-keys-p grep-buffer-register grep-buffer-append-hit
+          grep-buffer-complete grep-buffer-rollback
+          grep-test-producer grep-hits-get grep-generation-get
+          grep-current-gen-get grep-status-get
+          grep-ret grep-next grep-prev grep-rerun grep-quit)
+
+;; #307 — the *grep* HIT-BUFFER subsystem (RFC-031 §2.1; SPEC-291).
+;; The generic cross-file hit buffer every search backend feeds:
+;; a GENERATION-SCOPED producer interface (register → append-hit* →
+;; complete; rollback restores), structured hits (display text is
+;; never parsed), streaming selection stability, RET landing with
+;; clamps, and recency-based q restoration. Ships with a TEST
+;; PRODUCER so the subsystem completes independently of #308/#309.
+
+;; ── state ───────────────────────────────────────────────────────────
+(defvar grep-generation-counter 0 "The last issued generation id.")
+(defvar grep-current-gen nil "The ACTIVE generation (nil before any register).")
+(defvar grep-completed nil "t once the active generation completed.")
+(defvar grep-status nil "The active generation's completion status.")
+(defvar grep-message nil "The error message / diagnostic suffix.")
+(defvar grep-hits (list) "((file line col text) ...) — newest LAST.")
+(defvar grep-meta nil "The active generation's registered metadata (hashmap).")
+(defvar grep-retired (list) "The RETIRED generation ids (no callbacks).")
+(defvar grep-saved-content nil "The pre-register buffer content (rollback of the only generation).")
+(defvar grep-stack (list) "((gen meta hits completed status) ...) — the generation snapshots, newest LAST.")
+
+(defun grep-buffer-name () "*grep*")
+(defun grep-hits-get () grep-hits)
+(defun grep-generation-get () grep-generation-counter)
+(defun grep-current-gen-get () grep-current-gen)
+(defun grep-status-get () grep-status)
+
+;; ── validation (BEFORE any generation test — the spec's precedence) ─
+(defun grep-error (msg)
+  (error (concat "grep: " msg)))
+
+(defun grep-exact-keys-p (hmap keys)
+  ;; EXACTLY the given keys (unknown OR missing keys fail); returns
+  ;; the list of OFFENDERS (empty when exact).
+  (let ((have (hashmap-keys hmap))
+        (missing (list))
+        (unknown (list)))
+    (dolist (k keys)
+      (if (not (member k have))
+        (setq missing (cons k missing))))
+    (dolist (k have)
+      (if (not (member k keys))
+        (setq unknown (cons k unknown))))
+    (append missing unknown)))
+
+(defun grep-name-offenders (offenders kind)
+  (if (null offenders) ""
+    (concat kind ": " (string-join ", " offenders) "; ")))
+
+;; ── the producer interface ──────────────────────────────────────────
+(defun grep-buffer-register (regmap)
+  "Register a search generation. MAP: EXACTLY backend/pattern/scope/
+rerun. Returns the generation id."
+  (let ((offenders (grep-exact-keys-p regmap (list "backend" "pattern" "scope" "rerun"))))
+    (if (> (length offenders) 0)
+      (grep-error (concat "register: bad fields — "
+                    (grep-name-offenders offenders "unknown/missing"))))
+    (if (not (and (stringp (hashmap-get regmap "backend"))
+                  (> (length (hashmap-get regmap "backend")) 0)))
+      (grep-error "register: backend must be a non-empty string"))
+    (if (not (stringp (hashmap-get regmap "pattern")))
+      (grep-error "register: pattern must be a string (may be empty)"))
+    (if (not (and (stringp (hashmap-get regmap "scope"))
+                  (> (length (hashmap-get regmap "scope")) 0)))
+      (grep-error "register: scope must be a non-empty string"))
+    (if (not (functionp (hashmap-get regmap "rerun")))
+      (grep-error "register: rerun must be a function")))
+  ;; Snapshot the prior generation + save the pre-register content.
+  (if grep-current-gen
+    (setq grep-stack
+      (append grep-stack
+        (list (list grep-current-gen grep-meta grep-hits grep-completed grep-status)))))
+  (setq grep-saved-content (grep-buffer-content))
+  (setq grep-generation-counter (+ grep-generation-counter 1))
+  (setq grep-current-gen grep-generation-counter)
+  (setq grep-completed nil)
+  (setq grep-status nil)
+  (setq grep-message nil)
+  (setq grep-hits (list))
+  (setq grep-meta regmap)
+  (grep-render-open)
+  grep-generation-counter)
+
+(defun grep-buffer-append-hit (gen hitmap)
+  "Append one structured hit to generation GEN."
+  ;; Validation FIRST (even on stale generations).
+  (let ((offenders (grep-exact-keys-p hitmap (list "file" "line" "col" "text"))))
+    (if (> (length offenders) 0)
+      (grep-error (concat "append-hit: bad fields — "
+                    (grep-name-offenders offenders "unknown/missing"))))
+    (if (not (and (stringp (hashmap-get hitmap "file"))
+                  (> (length (hashmap-get hitmap "file")) 0)))
+      (grep-error "append-hit: file must be a non-empty string"))
+    (if (not (stringp (hashmap-get hitmap "text")))
+      (grep-error "append-hit: text must be a string (may be empty)"))
+    (if (not (and (numberp (hashmap-get hitmap "line"))
+                  (>= (hashmap-get hitmap "line") 1)))
+      (grep-error "append-hit: line must be an integer >= 1"))
+    (if (not (and (numberp (hashmap-get hitmap "col"))
+                  (>= (hashmap-get hitmap "col") 1)))
+      (grep-error "append-hit: col must be an integer >= 1")))
+  ;; Well-formed + stale/completed/retired → SILENT drop.
+  (if (grep-live-gen-p gen)
+    (progn
+      (setq grep-hits
+        (append grep-hits
+          (list (list (hashmap-get hitmap "file")
+                      (hashmap-get hitmap "line")
+                      (hashmap-get hitmap "col")
+                      (hashmap-get hitmap "text")))))
+      (grep-render-append (length grep-hits)))
+    nil))
+
+(defun grep-buffer-complete (gen status message)
+  "Complete generation GEN: done | error | no-matches."
+  (if (not (numberp gen))
+    (grep-error "complete: gen must be an integer"))
+  (if (not (member status (list "done" "error" "no-matches")))
+    (grep-error (concat "complete: unknown status '" status "'")))
+  (if (and (string= status "error")
+           (not (and (stringp message) (> (length message) 0))))
+    (grep-error "complete: status 'error' requires a non-empty message"))
+  (if (grep-live-gen-p gen)
+    (progn
+      (setq grep-completed t)
+      (setq grep-status status)
+      (setq grep-message
+        (if (stringp message) message nil))
+      (grep-render-complete)))
+  nil)
+
+(defun grep-buffer-rollback (gen)
+  "Roll back generation GEN — ONLY the newest; restores the previous
+generation's content. A restored generation's id RETIRES."
+  (if (not (numberp gen))
+    (grep-error "rollback: gen must be an integer"))
+  (cond
+    ((not (= gen grep-current-gen))
+      (grep-error "rollback: not the latest generation"))
+    (grep-completed
+      (grep-error "rollback: generation already complete"))
+    (t
+      (progn
+        ;; PEEK the previous snapshot (this gen was never pushed);
+        ;; its gen becomes current again — its id was never retired.
+        (setq grep-current-gen
+          (if (> (length grep-stack) 0) (nth 0 (nth (- (length grep-stack) 1) grep-stack)) nil))
+        (setq grep-meta
+          (if (> (length grep-stack) 0) (nth 1 (nth (- (length grep-stack) 1) grep-stack)) nil))
+        (setq grep-hits
+          (if (> (length grep-stack) 0) (nth 2 (nth (- (length grep-stack) 1) grep-stack)) (list)))
+        (setq grep-completed
+          (if (> (length grep-stack) 0) (nth 3 (nth (- (length grep-stack) 1) grep-stack)) nil))
+        (setq grep-status
+          (if (> (length grep-stack) 0) (nth 4 (nth (- (length grep-stack) 1) grep-stack)) nil))
+        (if (= (length grep-stack) 0)
+          (grep-restore-content grep-saved-content)
+          (grep-rerender-hits))
+        (editor-set-status "grep: rolled back")))))
+
+(defun grep-rerender-hits ()
+  (buffer-set-read-only nil)
+  (grep-clear-buffer)
+  (dolist (h grep-hits)
+    (buffer-append (concat (grep-hit-line h) "\n")))
+  (buffer-set-read-only t))
+
+(defun grep-live-gen-p (gen)
+  ;; Well-formed gen is LIVE only when current, uncompleted, unretired.
+  (and (= gen grep-current-gen)
+       (not grep-completed)
+       (not (member gen grep-retired))))
+
+;; ── the buffer ──────────────────────────────────────────────────────
+(defun grep-buffer-content ()
+  (if (member (grep-buffer-name) (buffer-list))
+    (buffer-text)
+    ""))
+
+(defun grep-restore-content (text)
+  (if (member (grep-buffer-name) (buffer-list))
+    (progn
+      (buffer-set-read-only nil)
+      (grep-clear-buffer)
+      (if (> (length text) 0)
+        (buffer-append text))
+      (buffer-set-read-only t))))
+
+(defun grep-render-open ()
+  (if (not (member (grep-buffer-name) (buffer-list)))
+    (buffer-create (grep-buffer-name)))
+  (buffer-switch (grep-buffer-name))
+  (major-mode-set "grep")
+  (editor-set-mode "normal")
+  (buffer-set-read-only nil)
+  (grep-clear-buffer)
+  (buffer-append (concat "grep " (grep-pattern-display) " — searching…\n"))
+  (buffer-set-read-only t)
+  (grep-ensure-keymap)
+  (cursor-move 0 0))
+
+(defun grep-pattern-display ()
+  (let ((p (hashmap-get grep-meta "pattern")))
+    (if (= (length p) 0) "<glob-only>" p)))
+
+(defun grep-render-append (n)
+  ;; Stream the newest hit; the POINT never moves (selection stable).
+  (if (member (grep-buffer-name) (buffer-list))
+    (progn
+      (buffer-set-read-only nil)
+      ;; First hit replaces the placeholder; later hits append.
+      (if (= n 1)
+        (progn
+          (grep-clear-buffer)
+          (buffer-append (grep-hit-line (nth 0 grep-hits))))
+        (buffer-append (concat "\n" (grep-hit-line (nth (- n 1) grep-hits)))))
+      (buffer-set-read-only t))))
+
+(defun grep-hit-line (hit)
+  (concat (nth 0 hit) ":" (number-to-string (nth 1 hit)) ":"
+    (number-to-string (nth 2 hit)) ":" (nth 3 hit)))
+
+(defun grep-render-complete ()
+  (buffer-set-read-only nil)
+  (cond
+    ((and (string= grep-status "done") (= (length grep-hits) 0))
+      (progn
+        ;; done with zero hits → the no-matches state.
+        (grep-clear-buffer)
+        (buffer-append (concat "no matches for " (grep-pattern-display) "\n"))))
+    ((string= grep-status "no-matches")
+      (progn
+        (grep-clear-buffer)
+        (buffer-append (concat "no matches for " (grep-pattern-display) "\n"))))
+    ((string= grep-status "error")
+      (if (= (length grep-hits) 0)
+        (progn
+          (grep-clear-buffer)
+          (buffer-append (concat "grep error: " grep-message "\n")))
+        ;; Hits landed before the error: the message rides as a suffix.
+        (buffer-append (concat "\n— error: " grep-message))))
+    (t nil))
+  (buffer-set-read-only t)
+  (editor-set-status
+    (concat "grep: "
+      (cond
+        ((string= grep-status "error") "error")
+        ((= (length grep-hits) 0) "no matches")
+        (t (concat (number-to-string (length grep-hits)) " hits"))))))
+
+(defun grep-clear-buffer ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+;; ── keymap: RET / n / p / g / q ─────────────────────────────────────
+(defun grep-hit-at-cursor ()
+  ;; The hit INDEX at the cursor line (nil elsewhere).
+  (let ((i (- (cursor-line) 0)))
+    (if (and (>= i 0) (< i (length grep-hits))) i nil)))
+
+(defun grep-ret ()
+  "RET — open the hit at point (file at line/col; both clamps)."
+  (let ((i (grep-hit-at-cursor)))
+    (cond
+      ((null i) (editor-set-status "grep: no hit on this line"))
+      ((= (length grep-hits) 0) (editor-set-status "grep: no hits"))
+      (t
+        (let* ((hit (nth i grep-hits))
+               (path (grep-resolve-path (nth 0 hit))))
+          (if (not (file-exists-p path))
+            (editor-set-status (concat "grep: file gone: " (nth 0 hit)))
+            (progn
+              (find-file path)
+              (grep-land (nth 1 hit) (nth 2 hit)))))))))
+
+(defun grep-resolve-path (path)
+  ;; Relative hit paths resolve against the registered SCOPE.
+  (if (string-prefix-p "/" path)
+    path
+    (let ((scope (hashmap-get grep-meta "scope")))
+      (if (and (stringp scope) (> (length scope) 0))
+        (concat scope "/" path)
+        path))))
+
+(defun grep-land (line col)
+  ;; Line beyond EOF → clamp to the LAST CONTENT line + a status
+  ;; note; col beyond EOL → silent clamp.
+  (let ((count (grep-last-content-line))
+        (target line)
+        (note ""))
+    (if (> line count)
+      (progn (setq target count) (setq note " (clamped to last line)")))
+    (cursor-move (- target 1) 0)
+    (let ((l (buffer-line (- target 1))))
+      (if (and l (>= (length l) col))
+        (cursor-move (- target 1) (- col 1))
+        (cursor-move (- target 1) (max 0 (- (length l) 1)))))
+    (editor-set-status (concat "grep: landed at "
+      (number-to-string target) note))))
+
+(defun grep-last-content-line ()
+  ;; 1-based index of the last NON-EMPTY line (a trailing newline
+  ;; makes buffer-line-count count an empty final row).
+  (grep-last-content-scan (- (buffer-line-count) 1)))
+
+(defun grep-last-content-scan (i)
+  (if (<= i 0)
+    1
+    (let ((l (buffer-line i)))
+      (if (and l (> (length l) 0))
+        (+ i 1)
+        (grep-last-content-scan (- i 1))))))
+
+(defun grep-next ()
+  "n — next hit (wrap; count prefix = stride)."
+  (grep-nav 1))
+
+(defun grep-prev ()
+  "p — previous hit (wrap)."
+  (grep-nav -1))
+
+(defun grep-nav (dir)
+  (if (= (length grep-hits) 0)
+    (editor-set-status "grep: no hits")
+    (let* ((i (or (grep-hit-at-cursor) 0))
+           (stride (let ((c (count-get))) (if (and (numberp c) (> c 0)) c 1)))
+           (n (length grep-hits))
+           ;; Wrap arithmetic (floor-mod by additions — T-Lisp has no mod).
+           (j (grep-wrap (+ i (* dir stride)) n)))
+      (cursor-move j 0)
+      (editor-set-status
+        (concat "grep: hit " (number-to-string (+ j 1)) " of "
+          (number-to-string n))))))
+
+(defun grep-wrap (i n)
+  (if (< i 0) (grep-wrap (+ i n) n)
+    (if (>= i n) (grep-wrap (- i n) n)
+      i)))
+
+(defun grep-rerun ()
+  "g — call the registered rerun function."
+  (let ((rerun (hashmap-get grep-meta "rerun")))
+    (if (functionp rerun)
+      (funcall rerun)
+      (editor-set-status "grep: no rerun registered"))))
+
+(defun grep-quit ()
+  "q — kill the results buffer; the CURRENT window switches to the
+most-recent NON-results buffer (recency; *scratch* if none). No
+windows are ever deleted."
+  (let ((target (grep-recency-target)))
+    (buffer-kill (grep-buffer-name))
+    (if target (buffer-switch target))
+    (editor-set-status "grep: closed")))
+
+(defun grep-recency-target ()
+  ;; The most-recent buffer that is NOT the results buffer.
+  (grep-recency-scan (buffer-list) (grep-buffer-name)))
+
+(defun grep-recency-scan (bufs self)
+  (if (null bufs)
+    nil
+    (if (not (string= (car bufs) self))
+      (car bufs)
+      (grep-recency-scan (cdr bufs) self))))
+
+;; ── the test producer (drives the interface; #307's own harness) ────
+(defun grep-test-producer (script)
+  "Drive the producer interface from a SCRIPT alist — the test
+surface: ((op arg ...) ...) with ops register/append/complete/rollback."
+  (dolist (step script)
+    (let ((op (nth 0 step)))
+      (cond
+        ((string= op "register")
+          (grep-buffer-register (nth 1 step)))
+        ((string= op "append")
+          (grep-buffer-append-hit (nth 1 step) (nth 2 step)))
+        ((string= op "complete")
+          (grep-buffer-complete (nth 1 step) (nth 2 step) (nth 3 step)))
+        ((string= op "rollback")
+          (grep-buffer-rollback (nth 1 step)))))))
+
+;; ── mode + keymap registration ──────────────────────────────────────
+(major-mode-register "grep" '() nil)
+(major-mode-doc "grep" "grep results — RET opens the hit, n/p navigate (wrap), g re-runs, q closes")
+
+(defun grep-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap (grep-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "grep-results"))
+        (editor/keymaps/keymap-set-key kmap "Enter" "(editor/commands/grep/grep-ret)")
+        (editor/keymaps/keymap-set-key kmap "n" "(editor/commands/grep/grep-next)")
+        (editor/keymaps/keymap-set-key kmap "p" "(editor/commands/grep/grep-prev)")
+        (editor/keymaps/keymap-set-key kmap "g" "(editor/commands/grep/grep-rerun)")
+        (editor/keymaps/keymap-set-key kmap "q" "(editor/commands/grep/grep-quit)")
+        (editor/keymaps/buffer-set-keymap (grep-buffer-name) kmap))))
+  t)
+
+(provide "editor/commands/grep")
+)
