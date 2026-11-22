@@ -286,3 +286,83 @@ describe("#307 — gate r1 fixes", () => {
     expect(String(e(editor, "(buffer-name)").value)).not.toBe("*grep*");
   });
 });
+
+describe("#307 — gate r2 fixes", () => {
+  test("P1: rollback while ANOTHER buffer is current never destroys it", () => {
+    e(editor, '(buffer-create "*work2*")');
+    e(editor, '(buffer-switch "*work2*")');
+    e(editor, '(buffer-insert "PRECIOUS")');
+    e(editor, `(grep-buffer-register ${reg()})`); // opens *grep*
+    e(editor, '(buffer-switch "*work2*")');
+    e(editor, '(grep-buffer-rollback 1)'); // the bottom-out path
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*work2*");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("PRECIOUS");
+  });
+
+  test("P2: done + message + HITS keeps the hits (the suffix rides after)", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "one")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("b", 1, 1, "two")})`);
+    e(editor, '(grep-buffer-complete 1 "done" "stopped early")');
+    const v = strip(bufferText(editor));
+    expect(v).toContain("a:1:1:one");
+    expect(v).toContain("b:1:1:two");
+    expect(v).toContain("stopped early");
+    expect(v).not.toContain("no matches");
+  });
+
+  test("P3: bottom-out rollback restores the TRUE pre-register content", () => {
+    // Seed *grep* with pre-search content.
+    e(editor, '(buffer-create "*grep*")');
+    e(editor, '(buffer-switch "*grep*")');
+    e(editor, '(buffer-set-read-only nil)');
+    e(editor, '(buffer-insert "BEFORE")');
+    e(editor, `(grep-buffer-register ${reg()})`); // g1 (saved: BEFORE)
+    e(editor, `(grep-buffer-append-hit 1 ${hit("g1", 1, 1, "one")})`);
+    e(editor, `(grep-buffer-register ${reg()})`); // g2 (saved: g1's hits)
+    e(editor, `(grep-buffer-append-hit 2 ${hit("g2", 1, 1, "two")})`);
+    e(editor, "(grep-buffer-rollback 2)"); // → g1
+    e(editor, "(grep-buffer-rollback 1)"); // → BOTTOM: the pre-register content
+    expect(strip(bufferText(editor))).toBe("BEFORE");
+    expect(String(e(editor, "(editor/commands/grep/grep-current-gen-get)").value)).toBe("null");
+  });
+
+  test("P5: a streamed append never resets the USER's point in their own buffer", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "one")})`);
+    e(editor, '(buffer-create "*user*")');
+    e(editor, '(buffer-switch "*user*")');
+    e(editor, '(buffer-insert "0123456789")');
+    e(editor, "(cursor-move 0 7)");
+    e(editor, `(grep-buffer-append-hit 1 ${hit("b", 1, 1, "two")})`);
+    expect(Number(String(e(editor, "(cursor-column)").value))).toBe(7); // NOT reset
+  });
+
+  test("P6: an n/p traversal in *grep* survives a later append", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "one")})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("b", 1, 1, "two")})`);
+    e(editor, "(editor/commands/grep/grep-next)"); // → hit 2
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(1);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("c", 1, 1, "three")})`);
+    expect(Number(String(e(editor, "(cursor-line)").value))).toBe(1); // STABLE on hit 2
+  });
+
+  test("P4: a post-q callback neither throws nor half-applies", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    e(editor, `(grep-buffer-append-hit 1 ${hit("a", 1, 1, "one")})`);
+    e(editor, "(editor/commands/grep/grep-quit)");
+    // A late complete after q: no throw (the render guards the
+    // missing buffer); the transition APPLIES cleanly (q does not
+    // retire the generation) — never half-applied.
+    expect(() => e(editor, '(grep-buffer-complete 1 "done" nil)')).not.toThrow();
+    expect(String(e(editor, "(editor/commands/grep/grep-status-get)").value)).toBe("done");
+  });
+
+  test("P7: FLOAT gens error in append/complete/rollback", () => {
+    e(editor, `(grep-buffer-register ${reg()})`);
+    expect(() => e(editor, `(grep-buffer-append-hit 1.5 ${hit("f", 1, 1, "t")})`)).toThrow(/gen/);
+    expect(() => e(editor, '(grep-buffer-complete 1.5 "done" nil)')).toThrow(/gen/);
+    expect(() => e(editor, "(grep-buffer-rollback 1.5)")).toThrow(/gen/);
+  });
+});

@@ -77,11 +77,15 @@ rerun. Returns the generation id."
       (grep-error "register: scope must be a non-empty string"))
     (if (not (functionp (hashmap-get regmap "rerun")))
       (grep-error "register: rerun must be a function")))
-  ;; Snapshot the prior generation + save the pre-register content.
+  ;; Snapshot the prior generation — INCLUDING its saved-content
+  ;; (gate r2 P3: the single saved-content slot was overwritten at
+  ;; every register, so bottoming-out restored the LAST register's
+  ;; snapshot instead of the true pre-register content).
   (if grep-current-gen
     (setq grep-stack
       (append grep-stack
-        (list (list grep-current-gen grep-meta grep-hits grep-completed grep-status)))))
+        (list (list grep-current-gen grep-meta grep-hits
+                grep-completed grep-status grep-saved-content)))))
   (setq grep-saved-content (grep-buffer-content))
   (setq grep-generation-counter (+ grep-generation-counter 1))
   (setq grep-current-gen grep-generation-counter)
@@ -96,7 +100,7 @@ rerun. Returns the generation id."
 (defun grep-buffer-append-hit (gen hitmap)
   "Append one structural hit to generation GEN."
   ;; Validation FIRST (even on stale generations).
-  (if (not (numberp gen))
+  (if (not (grep-coord-p gen))
     (grep-error "append-hit: gen must be an integer"))
   (let ((offenders (grep-exact-keys-p hitmap (list "file" "line" "col" "text"))))
     (if (> (length offenders) 0)
@@ -125,7 +129,7 @@ rerun. Returns the generation id."
 
 (defun grep-buffer-complete (gen status message)
   "Complete generation GEN: done | error | no-matches."
-  (if (not (numberp gen))
+  (if (not (grep-coord-p gen))
     (grep-error "complete: gen must be an integer"))
   (if (not (member status (list "done" "error" "no-matches")))
     (grep-error (concat "complete: unknown status '" status "'")))
@@ -133,18 +137,22 @@ rerun. Returns the generation id."
            (not (and (stringp message) (> (length message) 0))))
     (grep-error "complete: status 'error' requires a non-empty message"))
   (if (grep-live-gen-p gen)
+    ;; gate r2 P4: the RENDER runs against the passed status first;
+      ;; the state commits only after it succeeds (a post-q throw
+      ;; used to half-apply the transition).
     (progn
+      (grep-render-complete-with status
+        (if (stringp message) message nil))
       (setq grep-completed t)
       (setq grep-status status)
       (setq grep-message
-        (if (stringp message) message nil))
-      (grep-render-complete)))
+        (if (stringp message) message nil))))
   nil)
 
 (defun grep-buffer-rollback (gen)
   "Roll back generation GEN — ONLY the newest; restores the previous
 generation's content. A restored generation's id RETIRES."
-  (if (not (numberp gen))
+  (if (not (grep-coord-p gen))
     (grep-error "rollback: gen must be an integer"))
   (cond
     ((not (= gen grep-current-gen))
@@ -164,6 +172,8 @@ generation's content. A restored generation's id RETIRES."
           (setq grep-hits (if snap (nth 2 snap) (list)))
           (setq grep-completed (if snap (nth 3 snap) nil))
           (setq grep-status (if snap (nth 4 snap) nil))
+          (setq grep-saved-content
+            (if snap (nth 5 snap) grep-saved-content))
           (if snap
             (grep-rerender-hits)
             (grep-restore-content grep-saved-content)))
@@ -206,13 +216,17 @@ generation's content. A restored generation's id RETIRES."
     ""))
 
 (defun grep-restore-content (text)
+  ;; gate r2 P1 (the r1-missed DATA DESTROYER): switch + restore
+  ;; like every other render path.
   (if (member (grep-buffer-name) (buffer-list))
     (progn
+      (grep-switch-in)
       (buffer-set-read-only nil)
       (grep-clear-buffer)
       (if (> (length text) 0)
         (buffer-append text))
-      (buffer-set-read-only t))))
+      (buffer-set-read-only t)
+      (grep-switch-out))))
 
 (defvar grep-prev-buffer nil
   "The render's saved current buffer (gate r1 DATA DESTROYER: the
@@ -221,17 +235,33 @@ buffer primitives are NAMELESS — every async render switches to
 landing while the user edited elsewhere appended into THEIR buffer
 and flipped it read-only).")
 
+(defvar grep-prev-line 0 "The render's saved point (line).")
+(defvar grep-prev-col 0 "The render's saved point (col).")
+
 (defun grep-switch-in ()
-  (setq grep-prev-buffer (buffer-current))
-  (buffer-switch (grep-buffer-name)))
+  ;; gate r2: SKIP when *grep* is already current (buffer-switch
+  ;; resets the cursor — #127 — clobbering an n/p traversal), else
+  ;; save the user's buffer AND point. Guarded: after q the buffer
+  ;; is GONE (a late callback must not throw).
+  (if (string= (buffer-current) (grep-buffer-name))
+    nil
+    (progn
+      (setq grep-prev-buffer (buffer-current))
+      (setq grep-prev-line (cursor-line))
+      (setq grep-prev-col (cursor-column))
+      (if (member (grep-buffer-name) (buffer-list))
+        (buffer-switch (grep-buffer-name))
+        (setq grep-prev-buffer nil)))))
 
 (defun grep-switch-out ()
-  (if (and (not (string= (buffer-current) (grep-buffer-name)))
-           grep-prev-buffer)
-    nil
-    (if (and grep-prev-buffer
-             (member grep-prev-buffer (buffer-list)))
-      (buffer-switch grep-prev-buffer))))
+  ;; Restore the user's buffer AND point (gate r2 P5/P6: the
+  ;; buffer-switch cursor reset). No-op when we never switched.
+  (if (and grep-prev-buffer
+           (member grep-prev-buffer (buffer-list)))
+    (progn
+      (buffer-switch grep-prev-buffer)
+      (cursor-move grep-prev-line grep-prev-col)))
+  (setq grep-prev-buffer nil))
 
 (defun grep-render-open ()
   (if (not (member (grep-buffer-name) (buffer-list)))
@@ -273,12 +303,20 @@ and flipped it read-only).")
     (number-to-string (nth 2 hit)) ":" (nth 3 hit)))
 
 (defun grep-render-complete ()
+  (grep-render-complete-with grep-status grep-message))
+
+(defun grep-render-complete-with (rstatus rmessage)
+  (let ((grep-status rstatus)
+        (grep-message rmessage))
   (grep-switch-in)
   (buffer-set-read-only nil)
   (cond
     ((and (stringp grep-message) (> (length grep-message) 0)
-          (not (string= grep-status "error")))
-      ;; done/no-matches with a message: a diagnostic suffix.
+          (not (string= grep-status "error"))
+          (= (length grep-hits) 0))
+      ;; done/no-matches + message + NO hits: the suffix (gate r2
+      ;; P2: without the hits guard this wiped displayed hits with
+      ;; a FALSE 'no matches' line).
       (progn
         (grep-clear-buffer)
         (buffer-append (concat "no matches for " (grep-pattern-display)
@@ -299,7 +337,11 @@ and flipped it read-only).")
           (buffer-append (concat "grep error: " grep-message "\n")))
         ;; Hits landed before the error: the message rides as a suffix.
         (buffer-append (concat "\n— error: " grep-message))))
-    (t nil))
+    (t
+      (if (and (stringp grep-message) (> (length grep-message) 0)
+               (> (length grep-hits) 0)
+               (not (string= grep-status "error")))
+        (buffer-append (concat "\n— " grep-message)))))
   (buffer-set-read-only t)
   (editor-set-status
     (concat "grep: "
@@ -307,7 +349,7 @@ and flipped it read-only).")
         ((string= grep-status "error") "error")
         ((= (length grep-hits) 0) "no matches")
         (t (concat (number-to-string (length grep-hits)) " hits")))))
-  (grep-switch-out))
+  (grep-switch-out)))
 
 (defun grep-clear-buffer ()
   (let ((count (buffer-line-count)))
