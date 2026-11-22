@@ -214,4 +214,36 @@ describe("#308 — the backend", () => {
     expect(String(r.value)).toContain("t"); // rg present → auto detects
     e(editor, '(editor/commands/grep/grep-backend-set! "auto")');
   });
+
+  // ── gate r2: the two unasserted matrix ERROR rows ──────────────────
+
+  test("MATRIX auto + rg MISSING → the named no-backend error", () => {
+    e(editor, '(editor/commands/grep/grep-backend-set! "auto")');
+    e(editor, '(editor/commands/grep/grep-rg-detected-set! nil)');
+    e(editor, '(editor/commands/grep/grep-rg-executable-set! "/nonexistent/rg-missing-308")');
+    const r = e(editor, '(editor/commands/grep/grep-backend-available-p)');
+    expect(String(r.value)).not.toContain("true"); // unavailable
+    expect(st(editor)).toContain("rg missing (grep fallback pending #309)");
+  });
+
+  test("MATRIX rg-explicit + rg MISSING → the named not-on-PATH error", () => {
+    e(editor, '(editor/commands/grep/grep-backend-set! "rg")');
+    e(editor, '(editor/commands/grep/grep-rg-executable-set! "/nonexistent/rg-missing-308")');
+    const r = e(editor, '(editor/commands/grep/grep-backend-available-p)');
+    expect(String(r.value)).not.toContain("true"); // unavailable
+    expect(st(editor)).toContain("grep-backend is rg but rg is not on PATH");
+  });
+
+  test("ERROR + stderr + DIAGNOSTICS: the aggregation FOLLOWS the stderr message", () => {
+    const gen = Number(e(editor,
+      '(grep-test-producer (list (list "register" (hashmap "backend" "rg" "pattern" "x" "scope" "." "rerun" (lambda () nil)))))').value);
+    e(editor, `(editor/commands/grep/grep-rg-test-state! ${gen} 424244 "boom: bad regex\n" 1 2)`);
+    e(editor, '(editor/commands/grep/grep-rg-sentinel 424244 2)');
+    e(editor, '(buffer-switch "*grep*")');
+    const v = strip(bufferText(editor));
+    const i = v.indexOf("boom: bad regex");
+    const j = v.indexOf("(1 undecodable paths, 2 unparseable lines)");
+    expect(i).toBeGreaterThanOrEqual(0); // stderr text present
+    expect(j).toBeGreaterThan(i); // diagnostics FOLLOW it
+  });
 });
