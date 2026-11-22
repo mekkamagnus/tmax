@@ -1,0 +1,122 @@
+(defmodule editor/modes/auto-revert
+  (export auto-revert-mode global-auto-revert-mode
+          auto-revert-handle auto-revert-watched-p
+          auto-revert-stop-all auto-revert-buffers-get)
+
+;; auto-revert-mode.tlisp — revert-on-external-change (#329, RFC-028's
+;; want; the classic emacs auto-revert). The PRIMITIVE layer is
+;; file-watch-start/file-watch-stop (node:fs.watch in TS, per API
+;; context); this mode is the buffer integration: when ON (globally —
+;; buffer-local scoping rides a consumer need), every file-backed
+;; buffer registers a watch; a change event reverts the matching
+;; buffer UNLESS it is modified (dirty buffers are never clobbered —
+;; the data-destroyer guard). A no-consumer-today caveat: the mode
+;; ships OFF.
+
+(defvar auto-revert-watches nil
+  "The ((path id buffer-name) ...) registry — one watch per DISTINCT
+file path (multiple buffers on one file share it).")
+(defvar auto-revert-buffers 0
+  "A diagnostic counter: reverts performed.")
+
+(defun auto-revert-handle (path _event)
+  "The watch callback: revert every registered buffer backing PATH
+(unless MODIFIED — a dirty buffer is never clobbered). Registered
+globally as the watch callback; the path arrives via hex-decode."
+  (dolist (entry (or auto-revert-watches (list)))
+    (if (string= (nth 0 entry) path)
+      (auto-revert-revert-buffer (nth 2 entry))))
+  nil)
+
+(defun auto-revert-revert-buffer (bufname)
+  "Revert BUFNAME unless it is modified (the guard) or already gone."
+  (if (member bufname (buffer-list))
+    (let ((cur (buffer-current)))
+      ;; Switch-scan-revert-restore: the T-Lisp buffer primitives are
+      ;; nameless/current-buffer-scoped (#127's class).
+      (buffer-switch bufname)
+      (if (buffer-modified-p)
+        (editor-set-status (concat "auto-revert: " bufname " modified — not reverted"))
+        (progn
+          (revert-buffer)
+          (setq auto-revert-buffers (+ auto-revert-buffers 1))
+          (editor-set-status (concat "auto-revert: " bufname " reverted"))))
+      (buffer-switch cur))
+    nil))
+
+(defun auto-revert-register-1 (bufname cur)
+  ;; In BUFNAME's context: read its filename, restore, register.
+  (buffer-switch bufname)
+  (let ((fn (buffer-filename)))
+    (buffer-switch cur)
+    (if (and (stringp fn) (> (length fn) 0)
+             (not (auto-revert-watched-p fn))
+             (file-exists-p fn))
+      (let ((id (file-watch-start fn "editor/modes/auto-revert/auto-revert-handle")))
+        (if (numberp id)
+          (setq auto-revert-watches
+            (append (or auto-revert-watches (list))
+              (list (list fn id bufname))))
+          nil))
+      nil)))
+
+(defun auto-revert-register (bufname)
+  "One watch for BUFNAME's file (shared per distinct path)."
+  (auto-revert-register-1 bufname (buffer-current)))
+
+(defun auto-revert-watched-p (path)
+  (auto-revert-watched-scan (or auto-revert-watches (list)) path))
+
+(defun auto-revert-watched-scan (entries path)
+  (if (null entries)
+    nil
+    (if (string= (nth 0 (car entries)) path)
+      t
+      (auto-revert-watched-scan (cdr entries) path))))
+
+(defun auto-revert-buffers-get ()
+  "A diagnostic seam: the revert counter."
+  auto-revert-buffers)
+
+(defun auto-revert-scan-buffers ()
+  "Register watches for every file-backed buffer not yet watched."
+  (dolist (b (buffer-list))
+    (auto-revert-register b))
+  nil)
+
+(defun auto-revert-stop-all ()
+  "Stop every registered watch and clear the registry (the OFF path
+and the test seam)."
+  (dolist (entry (or auto-revert-watches (list)))
+    (file-watch-stop (nth 1 entry)))
+  (setq auto-revert-watches nil)
+  t)
+
+(defun auto-revert-mode (&optional (arg nil arg-supplied-p))
+  "Toggle auto-revert mode (GLOBAL in v1 — buffer-local scoping
+rides a consumer need). On = scan+watch every file-backed buffer;
+OFF = stop all. Dirty buffers are never clobbered."
+  (if (not arg-supplied-p)
+    (auto-revert-mode (not (auto-revert-active-p)))
+    (if (equal arg t)
+      (progn
+        (setq auto-revert-enabled t)
+        (auto-revert-scan-buffers)
+        (editor-set-status "auto-revert mode enabled"))
+      (progn
+        (setq auto-revert-enabled nil)
+        (auto-revert-stop-all)
+        (editor-set-status "auto-revert mode disabled")))))
+
+(defun global-auto-revert-mode (&optional (arg nil arg-supplied-p))
+  "The global alias (v1 IS global; kept for emacs muscle memory)."
+  (auto-revert-mode arg arg-supplied-p))
+
+(defvar auto-revert-enabled nil
+  "Whether auto-revert mode is on.")
+
+(defun auto-revert-active-p ()
+  (if (null auto-revert-enabled) nil t))
+
+(provide "auto-revert-mode")
+)

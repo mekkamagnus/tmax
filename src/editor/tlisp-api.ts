@@ -48,6 +48,7 @@ import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps } from "./api/visual-ops.ts";
 import { createFlashOps } from "./api/flash-ops.ts";
 import { createGrepOps } from "./api/grep-ops.ts";
+import { createWatchOps } from "./api/watch-ops.ts";
 import { createGhostOps } from "./api/ghost-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
@@ -1669,6 +1670,14 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       name: "grep",
       factory: (_ctx: EditorAPIContext): Map<string, TLispFunctionImpl> =>
         createGrepOps(),
+    },
+
+    // ── filesystem watching (#329: Bun.watch → T-Lisp) ─────────────────
+    {
+      name: "watch",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> =>
+        createWatchOps(ctx.evalTlisp, (category, entry) =>
+          ctx.logProgram?.(category as "shell" | "process" | "test" | "autosave", entry)),
     },
 
     // ── subprocess (make-process + process-write + signal) ──────────────
