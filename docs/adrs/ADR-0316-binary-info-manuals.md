@@ -25,7 +25,8 @@ texinfo corpus — the .info files were never in the binary.
 
 ## Consequences
 
-- Follow-ups (gate-named, untracked): an automated `--asset`
-  regression gate (unit tests cover resolution only; a live rebuild
-  catches asset-list drift); helpgrep's silent catch→continue (the
+- The automated binary regression gate LANDED
+  (test/integration/binary-info-332.test.ts: rebuild + both-manual
+  repro under a unique isolated socket). Remaining follow-up
+  (gate-named, untracked): helpgrep's silent catch→continue (the
   same class that hid #332).

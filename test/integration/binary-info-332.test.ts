@@ -37,6 +37,15 @@ describe("#332 — the binary Info repro (integration)", () => {
     expect(r.stdout.trim().split("\n").pop()).toBe("*Info*");
   });
 
+  test("BOTH manuals are embedded (tlisp.info too — the claim held only for tmax)", () => {
+    const r = spawnSync(bin, ["-e", '(file-exists-p (concat (helpgrep-docs-dir) "/tlisp.info"))'], {
+      env: { ...process.env, TMAX_SOCKET: socket },
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(r.stdout.trim().split("\n").pop()?.toLowerCase()).toBe("t");
+  });
+
   afterAll(() => {
     try {
       spawnSync(bin, ["--stop"], { env: { ...process.env, TMAX_SOCKET: socket }, timeout: 10_000 });
