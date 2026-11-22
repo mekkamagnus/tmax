@@ -1302,6 +1302,90 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(String(e(ed, "(editor-status)").value)).toContain("no action");
   });
 
+  // ── r151 SELF-AUDIT: the grader's probe list as regressions ──────
+  // (staged-addition removal, partial retry, no-op skip, failed
+  // append then turn — probed by codex in r144-r150, now pinned.)
+  describe("r151 self-audit probes", () => {
+    const fire = (ed: Editor, seed: number, calls: unknown[]) => {
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+      const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: calls } }));
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+      e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+    };
+    const edit = (path: string, content: string) => ({ function: { name: "buffer_edit", arguments: { path, content } } });
+
+    tt("a STAGED added file: the revert removes it from the worktree AND the index", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "stage an addition")');
+      fire(ed, 600, [edit("added151.txt", "ADDED\n")]);
+      expect(existsSync(join(process.cwd(), "added151.txt"))).toBe(true);
+      // The user stages the addition.
+      execFileSync("git", ["add", "added151.txt"]);
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      expect(existsSync(join(process.cwd(), "added151.txt"))).toBe(false);
+      // AND from the index (a staged addition must not outlive the rm).
+      expect(execFileSync("git", ["ls-files", "added151.txt"]).toString()).toBe("");
+    });
+
+    tt("a PARTIAL restore retries to completion (obstruction cleared)", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "two files then obstruct")');
+      fire(ed, 601, [edit("p1.txt", "ONE\n"), edit("p2.txt", "TWO\n")]);
+      expect(existsSync(join(process.cwd(), "p2.txt"))).toBe(true);
+      // Obstruct the second path's removal (macOS immutable flag).
+      execFileSync("chflags", ["uchg", join(process.cwd(), "p2.txt")]);
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("INCOMPLETE");
+      // The action REMAINS revertable; p1 restored, p2 obstructed.
+      execFileSync("chflags", ["nouchg", join(process.cwd(), "p2.txt")]);
+      // Each edit is its OWN action (its own pair) — the obstructed
+      // action is p2's; the retry reverts IT.
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      expect(existsSync(join(process.cwd(), "p2.txt"))).toBe(false);
+      // p1's action is next on the stack; it reverts cleanly.
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      expect(existsSync(join(process.cwd(), "p1.txt"))).toBe(false);
+    });
+
+    tt("a no-change MEDIATED command skips (its pair pops; older reverts unblock)", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "noop destructive then edit")');
+      // A destructive no-op: rm -rf a directory that does not exist.
+      fire(ed, 602, [{ function: { name: "bash", arguments: { command: "rm -rf nonexistent-dir-151/" } } }]);
+      expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+      e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+      await settleRefireFrom(ed, "602", "NOOP-DONE");
+      expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("skipped");
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("no action");
+    });
+
+    tt("a FAILED exchange append: the next turn still carries the in-memory exchange", async () => {
+      const ed = await armed();
+      // Obstruct the exchanges file with a DIRECTORY at its path.
+      e(ed, '(shell-command "mkdir -p .tmax/fikra/threads/main/exchanges.jsonl")');
+      e(ed, '(fikra/chat/fikra-turn-send "failing append")');
+      fire(ed, 603, [{ function: { name: "bash", arguments: { command: "echo FAILAPPEND-CTX" } } }]);
+      await until(ed, "(buffer-text)", "FAILAPPEND-CTX", 60);
+      // (The failure status fires in the SENTINEL's own editor session —
+      // a separate context — so the main session's status is not the
+      // observable here; the BEHAVIOR is: nothing durable landed, and
+      // memory still serves the next turn.)
+      await settleRefireFrom(ed, "603", "FA-DONE");
+      expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+      // The NEXT turn's request body still carries the tool exchange.
+      e(ed, '(fikra/chat/fikra-turn-send "after failed append")');
+      const msgs = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+      expect(msgs).toContain("FAILAPPEND-CTX");
+      expect(msgs).toContain('"role":"tool"');
+    });
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —

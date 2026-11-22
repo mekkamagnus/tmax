@@ -1216,13 +1216,14 @@ with its post-exit capture.")
                            " 2>/dev/null && echo RESTORED || echo FAILED"))) "RESTORED")
                  ;; Removal: the file AND its staged addition go; the
                  ;; removal is verified (the path must be gone).
-                 (string= (string-trim (shell-command
+                 (let ((__out (shell-command
                    (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p)) " 2>/dev/null; "
                            "git -C " (fikra/thread/fikra-thread-shq root)
                            " rm -f --cached --ignore-unmatch -- " (fikra/thread/fikra-thread-shq p)
-                           " 2>/dev/null; "
+                           " >/dev/null 2>&1; "
                            "test ! -e " (fikra/thread/fikra-thread-shq (concat root "/" p))
-                           " && echo RESTORED || echo FAILED"))) "RESTORED"))))
+                           " && echo RESTORED || echo FAILED"))))
+                   (string= (string-trim __out) "RESTORED")))))
       (fikra-ollama-restore-paths root ref (cdr paths)
         (if ok fails (append fails (list p)))))))
 
