@@ -262,6 +262,39 @@ describe("#331 — the mark-based selection UI (end-to-end)", () => {
     expect(git("show", ":f.txt")).toBe("a\nB\nc\nd\ne\nf\ng"); // the WHOLE hunk
   });
 
+  test("REGRESSION (gate probe): kept '+' jumping over held context REFUSES (marker re-attachment corruption)", async () => {
+    // old 'x\n' → new 'B' (no trailing newline): body '-x','+B',
+    // marker. Keeping ONLY '+B' would flush the converted ' x'
+    // between +B and its marker — the marker re-attached to x and
+    // the index silently became 'B\nx' with x's newline EATEN.
+    // Must refuse by name; nothing applied.
+    writeFileSync(join(process.cwd(), "f.txt"), "x\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "B");
+    openDiff("f.txt");
+    const hdr = Number(e(editor, "(nth 0 (stagehand/diff/stagehand-diff-hunk-lines))").value);
+    e(editor, `(cursor-move ${hdr + 2} 0)`); // "+B"
+    e(editor, "(stagehand/diff/stagehand-diff-toggle-mark)");
+    e(editor, `(cursor-move ${hdr + 2} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("no-newline");
+    expect(git("diff", "--cached")).toBe("");
+  });
+
+  test("REGRESSION (gate probe): the mark RESETS on refresh (stale-mark misselection)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nB\nc\nd\ne\nf\ng\n");
+    openDiff("f.txt");
+    const hdr = Number(e(editor, "(nth 0 (stagehand/diff/stagehand-diff-hunk-lines))").value);
+    e(editor, `(cursor-move ${hdr + 1} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-toggle-mark)");
+    expect(String(e(editor, "(stagehand/diff/stagehand-diff-mark-get)").value)).not.toContain("null");
+    e(editor, "(stagehand/diff/stagehand-diff-refresh-view)");
+    expect(String(e(editor, "(stagehand/diff/stagehand-diff-mark-get)").value)).toContain("null");
+  });
+
   test("selecting around a no-newline final line refuses through the UI", async () => {
     writeFileSync(join(process.cwd(), "f.txt"), "a\nb");
     commit("base");

@@ -16,13 +16,15 @@ the `\ No newline` marker semantics, applied through #291's stdin
   lines (` `) are ALWAYS kept (their flags are ignored); `+`/`-`
   lines are kept iff flagged; the `\ No newline` marker rides its
   line's fate.
-- **Header arithmetic**: `oldCount = kept-context + kept '-'`;
-  `newCount = kept-context + kept '+'`. Starts adjust for LEADING
-  dropped lines only: `oldStart = orig + dropped '-' before the
-  first kept line`; `newStart = orig + dropped '+' before the first
-  kept line`. Trailing drops never move the starts. Any heading text
-  after the second `@@` is preserved verbatim.
-- **No-newline refusal**: dropping a marker-annotated line REFUSES
+- **Header arithmetic** (the conversion-rule reading, per
+  ADR-0320): a dropped `-` stays represented as context, so
+  `oldStart` NEVER moves and `oldCount` equals the original old
+  span (context + kept '-'); `newCount = context + kept '+'` with
+  converted lines counting as context. The ONLY start movement is a
+  LEADING dropped `+` (a new-start shift); trailing drops never
+  move the starts. Any heading text after the second `@@` is
+  preserved verbatim (space carried).
+- **No-newline refusal**: the marker must IMMEDIATELY follow its kept line in the OUTPUT (held context flushing between them re-attaches it — live-probed corruption; refuse). Dropping a marker-annotated line REFUSES
   the operation (nil + a named status reason) — the replacement
   final line's newline state is not computable from the diff alone.
 - **The patch** = the file-header block (per #291's collect:

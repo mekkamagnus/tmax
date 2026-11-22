@@ -156,6 +156,7 @@ context passes through bare)."
 (defun stagehand-diff-buffer-name () "*Stagehand-Diff*")
 
 (defun stagehand-diff-open (text title &optional (side "worktree" side-supplied-p) (root nil root-supplied-p) (paths nil paths-supplied-p))
+  (setq stagehand-diff-mark nil) ;; refresh-safe: line numbers shift
   "Render the parsed, FACED diff into *Stagehand-Diff* and switch to
 it. TEXT is raw `git diff --no-color` output; TITLE rides the first
 line. SIDE ('worktree'|'cached') selects which hunk ops apply; ROOT
@@ -455,11 +456,21 @@ omits entirely."
             (setq stagehand-diff-partial-refusal
               "the no-newline line must stay selected")
             nil))
+        ((and marker (not (null held)))
+          ;; Gate-probe CONFIRMED corruption: flushing held context
+          ;; between the kept line and its marker RE-ATTACHES the
+          ;; marker to the converted line (old 'x\n' → new 'B':
+          ;; index silently became 'B\nx' with x's newline eaten).
+          ;; The marker must IMMEDIATELY follow its kept line —
+          ;; refuse this configuration by name.
+          (progn
+            (setq stagehand-diff-partial-refusal
+              "the no-newline line must stay selected")
+            nil))
         (marker
-          ;; Rides its kept line (after flushing held context);
-          ;; counts toward NEITHER side.
+          ;; Rides its kept line ADJACENTLY; counts toward NEITHER side.
           (stagehand-diff-partial-scan (cdr body) (cdr flags)
-            (cons line (append held out))
+            (cons line out)
             (list) oldC newC leadN keptAny prevKept changes
             oStart nStart tail header))
         (keep
@@ -764,7 +775,7 @@ the mark and the cursor sit inside the SAME hunk; nil otherwise
 spawn the SAME apply flow. The cached side uses the SIGN-SWAP
 variant (applied WITHOUT -R). The constructor's refusal surfaces
 as the named status (nothing launched)."
-  (let* ((flags (if (string= op "unstage") (list "--cached") (list "--cached")))
+  (let* ((flags (list "--cached")) ;; both sides: --cached (the cached variant carries the swap)
          (patch (if (string= op "unstage")
                   (stagehand-diff-partial-patch-cached idx
                     (stagehand-diff-flags-for-lines idx from to))
