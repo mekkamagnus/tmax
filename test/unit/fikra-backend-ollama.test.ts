@@ -1033,47 +1033,23 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(postTree).not.toContain("pre141.txt");
   });
 
-  // r142 (codex 9-item): the ACTION-LEVEL revert — an edit's touched
-  // paths restore from ITS pre-ref (an earlier action's change stays).
-  tt("reverting the LATEST action restores its pre-state; earlier actions stay", async () => {
+  // r142+r144 (codex): the ACTION-LEVEL REVERT — a divergent worktree
+  // REFUSES (later user edits survive); the action stays revertable.
+  tt("the action revert REFUSES a divergent worktree (user edits survive)", async () => {
     const ed = await armed();
-    e(ed, '(fikra/chat/fikra-turn-send "two edits then revert")');
-    const fireEdits = (seed: number, paths: string[]) => {
-      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
-      const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
-        tool_calls: paths.map((p) => ({ function: { name: "buffer_edit", arguments: { path: p, content: "CONTENT-" + p + "\n" } } })) } }));
-      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
-      e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
-    };
-    fireEdits(260, ["first142.txt"]);
-    fireEdits(261, ["second142.txt"]);
-    // Both actions recorded; the LATEST is second142.
-    let posts = "";
-    for (let i = 0; i < 40; i++) {
-      posts = String(e(ed, "(fikra/backend-ollama/fikra-ollama-action-posts-get)").value);
-      if ((posts.match(/-a\d+/g) ?? []).length >= 2) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect((posts.match(/-a\d+/g) ?? []).length).toBeGreaterThanOrEqual(2);
-    // Revert the latest action.
-    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    e(ed, '(fikra/chat/fikra-turn-send "edit then user edit")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 260 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [
+        { function: { name: "buffer_edit", arguments: { path: "first142.txt", content: "CONTENT-first142.txt\n" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 260 "${r}")`);
+    e(ed, `(fikra-http-complete 260 200 "${hex("{}")}")`);
     expect(existsSync(join(process.cwd(), "first142.txt"))).toBe(true);
-    expect(existsSync(join(process.cwd(), "second142.txt"))).toBe(false);
-    // The PRE-state content of first142 is untouched.
-    expect(String(e(ed, '(shell-command "cat first142.txt")').value)).toContain("CONTENT-first142");
-    // r142b (codex r142 catch): the STASH preserves the action's own
-    // change (non-empty; git-apply restores it).
-    const stash = String(e(ed, "(fikra/backend-ollama/fikra-ollama-last-action-stash-get)").value);
-    expect(stash).toMatch(/\.patch$/);
-    const stashText = readFileSync(stash, "utf8");
-    expect(stashText.length).toBeGreaterThan(0);
-    expect(stashText).toContain("second142.txt");
-    // A second revert reverts the FIRST action (its own pre-state).
+    writeFileSync(join(process.cwd(), "first142.txt"), "USER-EDITED-AFTER\n");
     e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
-    expect(existsSync(join(process.cwd(), "first142.txt"))).toBe(false);
-    // Nothing left to revert: an honest status, not a throw.
-    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
-    expect(String(e(ed, "(editor-status)").value)).toContain("no action");
+    expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
+    expect(String(e(ed, '(shell-command "cat first142.txt")').value)).toContain("USER-EDITED-AFTER");
+    expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-action-posts-get)").value)).toMatch(/-a\d+/);
   });
 
   // r143 (codex 9-item): DURABLE exchanges — a simulated restart (the
@@ -1111,6 +1087,25 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     }
     expect(body).toContain("DURABLE-CTX");
     expect(body).toContain('"role":"tool"');
+  });
+
+  // r144 (#6): truncation is HONEST — a >30-line output carries a
+  // TRUNCATED:N notice the model and the user both see.
+  tt("a long bash output carries an honest truncation notice", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "long output")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 280 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "seq 1 35 | sed s/^/LINE-/" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 280 "${r}")`);
+    e(ed, `(fikra-http-complete 280 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "→ ok", 60);
+    // The RENDERER shows 3 lines + a counted tail (r106, by design);
+    // the MODEL-visible message carries the full head + the notice.
+    const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(acc).toContain("LINE-30");
+    expect(acc).not.toContain("LINE-31");
+    expect(acc).toContain("TRUNCATED: 5");
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the

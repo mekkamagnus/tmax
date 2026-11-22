@@ -500,7 +500,7 @@ with its post-exit capture.")
                 (make-process
                   :command (list "sh" "-c"
                                  (concat "cd " (fikra/thread/fikra-thread-shq dir)
-                                         " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; echo EXIT:$__e"))
+                                         " && __o=\"$( (" cmd ") 2>&1 )\"; __e=$?; echo \"$__o\" | head -30; __t=$(echo \"$__o\" | tail -n +31 | wc -l); [ \"$__t\" -gt 0 ] && echo TRUNCATED:$__t; echo EXIT:$__e"))
                   :cwd dir
                   :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
                   :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
@@ -935,13 +935,37 @@ with its post-exit capture.")
 ;; paths from ITS pre-ref (checkout when the pre-ref has the path,
 ;; remove when the action ADDED it). A verified stash patch lands first
 ;; (the turn-revert discipline).
+;; The THREAD id embedded in a refs/fikra/<thread>/<turn>-aN ref.
+;; The THREAD id embedded in a refs/fikra/<thread>/<turn>-aN ref.
+(defun fikra-ollama-ref-thread (ref)
+  (let* ((rest (substring ref (length "refs/fikra/") (length ref)))
+         (slash (string-match "/" rest)))
+    (if (and slash (numberp slash) (> slash 0))
+      (substring rest 0 slash)
+      (fikra/thread/fikra-thread-current))))
+
+;; r144 (#1): does the WORKTREE diverge from the post-ref on the paths?
+(defun fikra-ollama-worktree-diverged-p (root post paths)
+  (not (string= (string-trim (shell-command
+    (concat "git -C " (fikra/thread/fikra-thread-shq root)
+            " diff --quiet " post " -- "
+            (fikra-ollama-paths-args paths)
+            " 2>/dev/null && echo CLEAN || echo DIRTY"))) "CLEAN")))
+
+;; r142: THE ACTION-LEVEL REVERT — restore the LATEST action's touched
+;; paths from ITS pre-ref. r144 hardening: the thread/root come FROM
+;; THE REF (the focused thread never selects another thread's action);
+;; a DIVERGENT worktree refuses (later user edits survive); a failed
+;; path leaves the action revertable (the stack pops only on success).
 (defun fikra-ollama-revert-latest-action ()
   (require-module fikra/checkpoint)
   (if (or (not fikra-ollama-action-posts) (= (length fikra-ollama-action-posts) 0))
     (editor-set-status "Fikra: no action to revert")
     (let* ((post (car fikra-ollama-action-posts))
            (pre (hashmap-get fikra-ollama-action-pairs post))
-           (root (fikra/thread/fikra-thread-working-dir)))
+           (owner (fikra-ollama-ref-thread post))
+           (root (or (fikra/thread/fikra-thread-working-dir-of owner)
+                     (fikra/thread/fikra-thread-working-dir))))
       (if (not pre)
         (editor-set-status (concat "Fikra: no pre-ref recorded for " post))
         (let* ((stash (concat root "/.tmax/fikra/stash/action-"
@@ -955,13 +979,13 @@ with its post-exit capture.")
           (cond
             ((= (length paths) 0)
               (editor-set-status "Fikra: the action changed nothing"))
+            ((fikra-ollama-worktree-diverged-p root post paths)
+              (editor-set-status
+                (concat "Fikra: action revert REFUSED — the working tree "
+                        "changed since the action (commit or stash first)")))
             (t (progn
               (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                (concat root "/.tmax/fikra/stash"))))
-              ;; r142b/r142c (codex catches): the stash preserves the
-              ;; ACTION'S OWN change (pre→post per path — git-apply
-              ;; restores it). A FAILED stash-write ABORTS the revert —
-              ;; an unrecoverable restore must never proceed silently.
               (let* ((stash-q (fikra/thread/fikra-thread-shq stash))
                      (patch-out (shell-command
                                   (concat "git -C " (fikra/thread/fikra-thread-shq root)
@@ -973,20 +997,24 @@ with its post-exit capture.")
                 (if (not (string= (string-trim patch-out) "STASH-OK"))
                   (progn
                     (editor-set-status
-                      (concat "Fikra: action revert ABORTED — the stash patch could not be written ("
-                              (string-trim patch-out) "); nothing was changed"))
+                      (concat "Fikra: action revert ABORTED — the stash patch "
+                              "could not be written; nothing was changed"))
                     'stash-failed)
                   (progn
-                (setq fikra-ollama-last-action-stash stash)
-                (let ((fails (fikra-ollama-restore-paths root pre paths (list))))
-                  (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
-                  (keymap-mutable-set! fikra-ollama-action-pairs post nil)
-                  (editor-set-status
-                    (concat "Fikra: action reverted to " pre
-                            (if (> (length fails) 0)
-                              (concat " — " (number-to-string (length fails)) " path(s) FAILED")
-                              "")))
-                  fails))))))))))))
+                    (setq fikra-ollama-last-action-stash stash)
+                    (let ((fails (fikra-ollama-restore-paths root pre paths (list))))
+                      (if (> (length fails) 0)
+                        (progn
+                          (editor-set-status
+                            (concat "Fikra: action revert INCOMPLETE — "
+                                    (number-to-string (length fails))
+                                    " path(s) failed; the action remains revertable"))
+                          fails)
+                        (progn
+                          (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
+                          (keymap-mutable-set! fikra-ollama-action-pairs post nil)
+                          (editor-set-status (concat "Fikra: action reverted to " pre))
+                          'ok))))))))))))))
 
 ;; Paths as sh-quoted argv text.
 (defun fikra-ollama-paths-args (paths)
@@ -1459,6 +1487,13 @@ with its post-exit capture.")
               ;; r141b (codex r141 catch): the capture's RETURN is
               ;; checked — nil (disabled or failed) triggers the honest
               ;; status, not just exceptions.
+              ;; r144 (codex re-grade #3): the capture runs under the
+              ;; HOME focus — settle-home restored the away focus before
+              ;; this point, so the pre-ref belonged to the WRONG thread
+              ;; and tree while the command ran in the home tree.
+              (let ((capture-prev (fikra/thread/fikra-thread-current)))
+                (if (and home-thread (not (string= home-thread capture-prev)))
+                  (fikra/thread/fikra-thread-focus home-thread))
               (condition-case nil
                 (let ((sha (progn (require-module fikra/checkpoint)
                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner
@@ -1479,6 +1514,9 @@ with its post-exit capture.")
                   (editor-set-status
                     (concat "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref ("
                             (if (stringp m) m "capture error") ")"))))
+              ;; r144: restore the away focus (the capture borrowed HOME).
+              (if (and home-thread (not (string= home-thread capture-prev)))
+                (condition-case nil (fikra/thread/fikra-thread-focus capture-prev) (error () nil)))
               ;; r142: the pre-name for the sentinel's pair record.
               (setq fikra-ollama-last-pre-name
                 (condition-case nil
@@ -1518,7 +1556,7 @@ with its post-exit capture.")
                       (concat fikra-ollama-parked-acc approved))
                     ;; r120-r121: the remainder resumes; a RE-PARK holds
                     ;; the next model request until ITS decision.
-                    (fikra-ollama-continue-home home-thread)))))))))))
+                    (fikra-ollama-continue-home home-thread))))))))))))
 
 ;; r120: run the parked reply's remaining calls (their results append;
 ;; a SECOND destructive call parks again — the rest re-rides).
