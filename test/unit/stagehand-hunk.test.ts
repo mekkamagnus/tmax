@@ -636,3 +636,101 @@ describe("#291 — valve r1 fixes", () => {
     await waitApply(editor, 3000);
   });
 });
+
+describe("#291 — valve r2 fixes", () => {
+  test("refresh pathspecs are LITERAL: a glob-shaped filename never sweeps siblings", async () => {
+    writeFileSync(join(process.cwd(), "a*.txt"), "x\n");
+    writeFileSync(join(process.cwd(), "ab.txt"), "y\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "a*.txt"), "X\n");
+    writeFileSync(join(process.cwd(), "ab.txt"), "Y\n"); // the glob would match this
+    openDiff("a*.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    // The refresh ran BEFORE the status set: the view already shows
+    // the empty notice scoped to :(literal)a*.txt — ab.txt NEVER
+    // appears (a raw pathspec would glob it in).
+    const view1 = strip(bufferText(editor));
+    expect(view1).toContain("no changes on this side");
+    expect(view1).not.toContain("ab.txt");
+  });
+
+  test("refresh carries rename ORIGINS: the view keeps the rename, not a bare add", async () => {
+    // A rename's OWN hunks refuse by design (#287) — exercise the
+    // origin through a SIBLING: unstage f.txt's hunk in a section
+    // view that also holds a staged rename; the refresh must still
+    // render the rename (both sides in the pathspec).
+    writeFileSync(join(process.cwd(), "ren.txt"), "a\nb\n");
+    writeFileSync(join(process.cwd(), "f.txt"), "x\ny\n");
+    commit("base");
+    execFileSync("git", ["mv", "ren.txt", "z-new.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "f.txt"), "x\nY\n");
+    execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
+    e(editor, "(stagehand/status/stagehand-status)");
+    const ls0 = strip(bufferText(editor)).split("\n");
+    const hdr = ls0.findIndex((l) => l.startsWith("Staged ("));
+    e(editor, `(cursor-move ${hdr} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    // Cursor into f.txt's block (f sorts before z-new) onto its hunk.
+    const ls = strip(bufferText(editor)).split("\n");
+    const fh = ls.findIndex((l) => l.startsWith("diff --git a/f.txt"));
+    e(editor, `(cursor-move ${fh} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("diff", "--cached")).not.toContain("+Y"); // unstaged
+    // The refreshed view keeps the RENAME — not a bare new-file add
+    // (the pathspec carries z-new's origin ren.txt too).
+    const view = strip(bufferText(editor));
+    expect(view).toContain("rename from");
+    expect(view).not.toContain("new file mode");
+  });
+
+  test("D no-ops while an apply is in flight (entry guard)", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
+    e(editor, "(stagehand/diff/stagehand-diff-discard-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("an apply is still running");
+  });
+
+  test("the discard ACCEPT re-checks in-flight before launching", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "CHANGED\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    // Open the confirm (pending set, no apply running)...
+    e(editor, "(stagehand/diff/stagehand-diff-discard-hunk)");
+    // ...then an apply starts before y lands.
+    e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
+    e(editor, '(stagehand/diff/stagehand-diff-accept "y")');
+    expect(String(e(editor, "(editor-status)").value)).toContain("an apply is still running");
+    await waitApply(editor, 3000); // drain the stage apply
+    // The DISCARD never ran: the worktree keeps CHANGED.
+    expect(file("f.txt")).toBe("CHANGED\n");
+  });
+
+  test("a sentinel whose view was QUIT never recreates it", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
+    e(editor, "(stagehand/diff/stagehand-diff-quit)");
+    e(editor, "(stagehand/diff/stagehand-diff-apply-sentinel 0 0)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("the view changed");
+    expect(String(e(editor, "(buffer-name)").value)).not.toContain("Stagehand-Diff");
+  });
+});

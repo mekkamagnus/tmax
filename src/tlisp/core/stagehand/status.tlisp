@@ -355,7 +355,9 @@ the buffer is untouched."
         (stagehand-diff-run (stagehand-side-of-section (nth 3 pair))
           (stagehand-row-paths-arg pair)
           (car (cdr pair))
-          (list (car (cdr pair))))))))
+          (if (nth 4 pair)
+            (list (car (cdr pair)) (nth 4 pair))
+            (list (car (cdr pair)))))))))
 
 (defun stagehand-side-of-section (section-name)
   ;; Staged rows carry index-side codes → --cached; everything else
@@ -379,11 +381,17 @@ the buffer is untouched."
   (stagehand-section-paths-scan entries (list)))
 
 (defun stagehand-section-paths-scan (entries out)
+  ;; Valve r2: renamed entries contribute their ORIGIN too — the
+  ;; view's refresh pathspec needs both sides or git shows a bare
+  ;; add where the rename was.
   (if (null entries)
     (reverse out)
-    (let ((p (car (cdr (car entries)))))
+    (let* ((e (car entries))
+           (p (car (cdr e)))
+           (o (car (cdr (cdr e)))))
       (stagehand-section-paths-scan (cdr entries)
-        (if (member p out) out (cons p out))))))
+        (let ((acc (if (member p out) out (cons p out))))
+          (if (and o (not (member o acc))) (cons o acc) acc))))))
 
 (defun stagehand-paths-arg (entries)
   ;; " -- ':(literal)p1' ':(literal)p2' ..." — one -- separator

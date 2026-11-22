@@ -235,7 +235,10 @@ diff)."
   (if (null (cdr lst)) (car lst) (stagehand-diff-last (cdr lst))))
 
 (defun stagehand-diff-quit ()
-  "q — close (buffer-kill's Editor path picks the recency survivor)."
+  "q — close (buffer-kill's Editor path picks the recency survivor).
+Valve r2: bump the view gen — an in-flight apply's sentinel must
+not recreate or switch back to a quit view."
+  (setq stagehand-diff-view-gen (+ (or stagehand-diff-view-gen 0) 1))
   (buffer-kill (stagehand-diff-buffer-name)))
 
 ;; ── hunk extraction + patch reconstruction (#291) ───────────────────
@@ -328,8 +331,15 @@ with the reconstructed patch on stdin."
   "D (worktree view) — discard the hunk at point in the WORKTREE:
 git apply -R - (a worktree mutation, NOT an index op). Confirms via
 the n-first y/n."
-  (if (not (string= stagehand-diff-side "worktree"))
-    (editor-set-status "Stagehand: D discards worktree hunks")
+  (cond
+    (stagehand-diff-apply-in-flight
+      ;; Valve r2: the async y/n confirm outlives the keypress —
+      ;; never open it (or launch from its accept) over a running
+      ;; apply.
+      (editor-set-status "Stagehand: an apply is still running"))
+    ((not (string= stagehand-diff-side "worktree"))
+      (editor-set-status "Stagehand: D discards worktree hunks"))
+    (t
     (let ((refusal (stagehand-diff-refusal-reason)))
       (if refusal
         (editor-set-status (concat "Stagehand: " refusal))
@@ -342,7 +352,7 @@ the n-first y/n."
             (concat "Discard this hunk in the worktree? (y/n)")
             "stagehand/diff/stagehand-diff-table"
             nil t "" "stagehand-diff-hist"
-            "stagehand/diff/stagehand-diff-accept"))))))))
+            "stagehand/diff/stagehand-diff-accept")))))))))
 
 (defvar stagehand-diff-pending nil
   "The hunk idx awaiting the discard y/n.")
@@ -359,8 +369,11 @@ the n-first y/n."
   (if (string= answer "y")
     (let ((idx stagehand-diff-pending))
       (setq stagehand-diff-pending nil)
-      (if idx (stagehand-diff-apply-hunk-at idx "discard")
-        (editor-set-status "Stagehand: no discard pending")))
+      (cond
+        (stagehand-diff-apply-in-flight
+          (editor-set-status "Stagehand: an apply is still running"))
+        (idx (stagehand-diff-apply-hunk-at idx "discard"))
+        (t (editor-set-status "Stagehand: no discard pending"))))
     (progn
       (setq stagehand-diff-pending nil)
       (editor-set-status "Stagehand: discard cancelled"))))
@@ -573,9 +586,11 @@ failure message's first line possible)."
   (setq stagehand-diff-apply-exit code)
   (setq stagehand-diff-apply-in-flight nil)
   (if (and (numberp code) (= code 0))
-    (if (not (= stagehand-diff-apply-view-gen stagehand-diff-view-gen))
-      ;; valve r1: the view CHANGED since this apply launched —
-      ;; refreshing now would render the WRONG view's targets.
+    (if (or (not (= stagehand-diff-apply-view-gen stagehand-diff-view-gen))
+            (not (string= (buffer-name) (stagehand-diff-buffer-name))))
+      ;; valve r1/r2: the view CHANGED (gen) or is no longer the
+      ;; current buffer (quit/switch) — refreshing now would render
+      ;; the WRONG view's targets or recreate a quit view.
       (editor-set-status "Stagehand: hunk applied (the view changed — press g to refresh)")
       (progn
         (stagehand-diff-refresh-view)
@@ -598,7 +613,12 @@ refresh-and-retry hint's action — bound to g)."
                 (append (list "git" "diff" "--no-color")
                   (append (if cached (list "--cached") (list))
                     (if stagehand-diff-paths
-                      (append (list "--") stagehand-diff-paths)
+                      ;; Valve r2: every path in git's :(literal)
+                      ;; magic — a raw glob-shaped filename would
+                      ;; sweep its siblings into the refreshed view.
+                      (append (list "--")
+                        (mapcar (lambda (p) (concat ":(literal)" p))
+                          stagehand-diff-paths))
                       (list))))
                 (or stagehand-diff-root "."))))
     (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
