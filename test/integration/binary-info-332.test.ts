@@ -43,7 +43,7 @@ describe("#332 — the binary Info repro (integration)", () => {
       encoding: "utf8",
       timeout: 30_000,
     });
-    expect(r.stdout.trim().split("\n").pop()?.toLowerCase()).toBe("t");
+    expect(r.stdout.trim().split("\n").pop()?.toLowerCase()).toBe("true");
   });
 
   afterAll(() => {
