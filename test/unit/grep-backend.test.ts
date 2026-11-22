@@ -319,25 +319,75 @@ describe("#308 — the backend", () => {
     expect(Number(e(editor, "mp308k-exit").value)).toBe(143);
   });
 
-  test("BACKLOG: the sentinel observes the COMPLETE output of an in-grace producer", async () => {
-    // 20000 lines (60KB) written near-instantly: reads EOF well
-    // inside the 150ms grace, so completion must see every byte
-    // (valve r2 fix 2's invariant — re-coupling reads to serialized
-    // evals would fire the sentinel with a partial buffer).
+  test("STREAMING COMPLETENESS (real workload): a 400-hit rg search lands every hit", async () => {
+    // End-to-end completeness over a realistic multi-hit search (a
+    // plain streaming check — NOT the decoupling guard; grep's own
+    // per-event eval is cheaper than rg's per-file emission, so
+    // re-coupling cannot starve GREP reads — the decoupling guard
+    // below prices the filter directly at the make-process layer).
+    mkdirSync(join(process.cwd(), "bl"));
+    for (let i = 0; i < 400; i++) {
+      writeFileSync(join(process.cwd(), "bl", `f${i}.txt`), `hit-${i} backlogneedle\n`);
+    }
+    e(editor, '(grep-search "backlogneedle" "bl")');
+    const s = await waitDone(editor);
+    expect(s).toContain("400 hits");
+    e(editor, '(buffer-switch "*grep*")');
+    const v = strip(bufferText(editor));
+    expect(v).toContain("f0.txt");
+    expect(v).toContain("f399.txt");
+  });
+
+  test("BACKLOG GUARD (priced filter): the sentinel observes the COMPLETE output when evals far outlast the grace", async () => {
+    // Invariant: completion NEVER observes a partial stream, even
+    // when per-chunk evals (~250ms × 2 measured chunks for 200KB)
+    // far outlast the 150ms drain-grace. Mutation-verified depth
+    // (three layers, each experimentally probed): (1) pipe
+    // backpressure + the `await proc.exited` gate serialize the
+    // producer's exit behind reader progress; (2) evalTlisp is
+    // SYNCHRONOUS — a running filter eval owns the single thread, so
+    // the sentinel callback cannot interleave mid-eval; (3) the
+    // post-grace `await filterChain` settles every enqueued eval
+    // before the sentinel regardless. Re-coupling reads to evals is
+    // therefore UNOBSERVABLE through any pipe-bounded producer —
+    // this guard pins the invariant against future async-eval
+    // refactors (where the chain-awaits become load-bearing) and
+    // against grace/chain regressions in observable combination.
     e(editor, '(defvar mp308b-out "")');
     e(editor, '(defvar mp308b-len-at-done nil)');
     e(editor, '(defvar mp308b-done nil)');
-    e(editor, '(defun mp308b-filter (pid out) (setq mp308b-out (concat mp308b-out out)))');
+    e(editor, '(defun mp308-burn (n) (if (= n 0) nil (mp308-burn (- n 1))))');
+    e(editor, '(defun mp308b-filter (pid out) (mp308-burn 40000) (setq mp308b-out (concat mp308b-out out)))');
     e(editor, '(defun mp308b-sentinel (pid code) (setq mp308b-done t) (setq mp308b-len-at-done (length mp308b-out)))');
-    const r = e(editor, `(make-process :command (list "sh" "-c" (hex-decode "${Buffer.from("yes ab | head -n 20000", "utf8").toString("hex")}")) :filter "mp308b-filter" :sentinel "mp308b-sentinel")`);
+    const script = "tr '\\\\0' x < /dev/zero | head -c 200000";
+    const r = e(editor, `(make-process :command (list "sh" "-c" (hex-decode "${Buffer.from(script, "utf8").toString("hex")}")) :filter "mp308b-filter" :sentinel "mp308b-sentinel")`);
     expect(Number.isFinite(Number(r.value))).toBe(true);
-    for (let i = 0; i < 160; i++) {
+    for (let i = 0; i < 240; i++) {
       if (String(e(editor, '(if mp308b-done "t" "nil")').value).includes("t")) break;
       await new Promise((res) => setTimeout(res, 25));
     }
     expect(String(e(editor, '(if mp308b-done "t" "nil")').value)).toContain("t");
-    // "ab\n" × 20000 = 60000 bytes — COMPLETE at sentinel time.
-    expect(Number(e(editor, "mp308b-len-at-done").value)).toBe(60000);
-    expect(Number(e(editor, "(length mp308b-out)").value)).toBe(60000);
+    // The COMPLETE 200KB was delivered before the sentinel observed
+    // the buffer.
+    expect(Number(e(editor, "mp308b-len-at-done").value)).toBe(200000);
+  });
+
+  test("SIGNAL-KILLED rg END-TO-END: *grep* reports 'rg exited 143 (no stderr)'", async () => {
+    // The composed story (gate r6 gap 2): kill rg MID-SEARCH (not
+    // the make-process-layer unit) → the sentinel maps SIGTERM to
+    // 128+15 → the error completion carries the named exit.
+    mkdirSync(join(process.cwd(), "sig"));
+    for (let i = 0; i < 3000; i++) {
+      writeFileSync(join(process.cwd(), "sig", `s${i}.txt`), "filler content line\n");
+    }
+    e(editor, '(grep-search "zzz-never-matches-308" "sig")');
+    const dump = String(e(editor, "(editor/commands/grep/grep-rg-dump)").value);
+    const m = /pid=(\d+)/.exec(dump);
+    expect(m).not.toBeNull();
+    e(editor, `(signal ${m![1]} "SIGTERM")`);
+    const s = await waitDone(editor);
+    expect(s).toContain("error");
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toContain("rg exited 143 (no stderr)");
   });
 });
