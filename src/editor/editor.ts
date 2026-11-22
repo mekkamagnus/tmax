@@ -576,7 +576,7 @@ export class Editor {
       getUnifiedLog: () => editor.logging.getUnifiedLog(),
       logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
       setEchoOnly: (text: string) => editor.setEchoOnly(text),
-      logProgram: (category: 'shell' | 'process' | 'test' | 'autosave', entry: any) => editor.logProgram(category, entry),
+      logProgram: (category: LogCategory, entry: any) => editor.logProgram(category, entry),
       access: {
         getModel: () => editor.model,
         applyModel: (m) => { editor.model = m; },
@@ -2722,7 +2722,7 @@ export class Editor {
    * buffer (SPEC-055). The mirror rule automatically surfaces warn/error
    * entries into *Messages*, so callers do not mirror by hand.
    */
-  logProgram(category: 'shell' | 'process' | 'test' | 'autosave', entry: Omit<LogEntry, 'ts' | 'category'> & { ts?: number }): void {
+  logProgram(category: LogCategory, entry: Omit<LogEntry, 'ts' | 'category'> & { ts?: number }): void {
     this.logging.logProgram(category, entry);
   }
 

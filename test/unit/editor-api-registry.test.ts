@@ -60,7 +60,7 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // without its refreeze) + #308's rg-event->hit/exec-lookup (the
     // grep backend primitives; reconciled on the #308 branch, frozen
     // here with the drift).
-    expect(live.length).toBe(439);
+    expect(live.length).toBe(442);
     expect(live).toEqual(expected);
   });
 

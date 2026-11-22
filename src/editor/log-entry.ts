@@ -15,7 +15,7 @@
 import type { LogLevel } from "./message-log.ts";
 
 /** Event source. Determines which buffer an entry renders into. */
-export type LogCategory = 'editor' | 'daemon' | 'shell' | 'process' | 'test' | 'autosave';
+export type LogCategory = 'editor' | 'daemon' | 'shell' | 'process' | 'test' | 'autosave' | 'watch';
 
 /**
  * A single observability entry. `ts` is epoch ms (full date, unambiguous across

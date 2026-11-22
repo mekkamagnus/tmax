@@ -1,12 +1,12 @@
-# Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
-# r88 L2-token arc's primitive landed without the refreeze — caught at the #318
-# rebase re-verify; also carries #318's editor-transient-timer-start/-stop).
-# #319: 433 -> 434 — editor-time-now (the transient clock primitive).
 # #287: 434 -> 435 — shell-exec-argv (the argv-list exec: no shell in the path).
 # #291: 435 -> 436 — process-close-stdin (the EOF primitive; git apply - reads until EOF).
+# #319: 433 -> 434 — editor-time-now (the transient clock primitive).
 # #338 (drift catch-up): 436 -> 439 — the ANCHOR carries #308's rg-event->hit +
-# exec-lookup (frozen on its branch; the anchor lagged) and scan-visible-column
 # (an earlier landing's unfrozen addition; +1 file line, 438 -> 439).
+# Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
+# exec-lookup (frozen on its branch; the anchor lagged) and scan-visible-column
+# r88 L2-token arc's primitive landed without the refreeze — caught at the #318
+# rebase re-verify; also carries #318's editor-transient-timer-start/-stop).
 add-hook
 append-file
 aref
@@ -189,6 +189,9 @@ file-realpath
 file-remove
 file-rename
 file-stat
+file-watch-list
+file-watch-start
+file-watch-stop
 find-char-position
 find-heading-ranges
 find-references

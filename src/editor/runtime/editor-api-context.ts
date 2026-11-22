@@ -163,7 +163,7 @@ export interface EditorAPIContext {
   /** Logging surface for the *Messages* buffer (SPEC-055). */
   logMessage?: (msg: string, level?: string, command?: string, frameId?: string) => void;
   setEchoOnly?: (text: string) => void;
-  logProgram?: (category: "shell" | "process" | "test" | "autosave", entry: { level: string; text: string; exitCode?: number; durationMs?: number; outputTail?: string; pid?: number; command?: string; frameId?: string }) => void;
+  logProgram?: (category: import("../log-entry.ts").LogCategory, entry: { level: string; text: string; exitCode?: number; durationMs?: number; outputTail?: string; pid?: number; command?: string; frameId?: string }) => void;
   getMessageLog?: () => ViewBoundLog;
   getUnifiedLog?: () => Log;
 }

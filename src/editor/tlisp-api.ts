@@ -1676,8 +1676,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
     {
       name: "watch",
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> =>
-        createWatchOps(ctx.evalTlisp, (category, entry) =>
-          ctx.logProgram?.(category as "shell" | "process" | "test" | "autosave", entry)),
+        createWatchOps(ctx.evalTlisp, ctx.logProgram),
     },
 
     // ── subprocess (make-process + process-write + signal) ──────────────

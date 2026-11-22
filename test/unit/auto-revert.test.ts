@@ -48,19 +48,23 @@ describe("#329 — the watch primitive", () => {
   test("start returns an id; events fire the callback; stop stops; list reflects", async () => {
     writeFileSync("w.txt", "v1\n");
     e(editor, '(defvar w329-events nil)');
-    e(editor, '(defun w329-cb (path ev) (setq w329-events (append (or w329-events (list)) (list (concat ev ":" ev)))))');
+    e(editor, '(defun w329-cb (path ev) (setq w329-events (append (or w329-events (list)) (list (concat path ":" ev)))))');
     const id = Number(e(editor, '(file-watch-start "w.txt" "w329-cb")').value);
     expect(Number.isFinite(id)).toBe(true);
     expect(String(e(editor, '(if (member "w.txt" (file-watch-list)) "t" "nil")').value)).toContain("t");
     writeFileSync("w.txt", "v2\n");
-    const fired = await waitFor(() => String(e(editor, "w329-events").value) !== "nil");
+    // REAL delivery: the callback recorded path AND event (gate r1:
+    // the old predicate was vacuous — nil prints 'null' ≠ 'nil').
+    const fired = await waitFor(() =>
+      String(e(editor, '(if w329-events (car w329-events) "")').value).includes("w.txt"));
     expect(fired).toBe(true);
+    expect(String(e(editor, '(car w329-events)').value)).toContain("change");
     expect(String(e(editor, '(file-watch-stop ' + id + ")").value)).toContain("t");
     // After stop: no further events.
     e(editor, "(setq w329-events nil)");
     writeFileSync("w.txt", "v3\n");
     await new Promise((r) => setTimeout(r, 400));
-    expect(["nil", "null"].includes(String(e(editor, "w329-events").value))).toBe(true);
+    expect(String(e(editor, '(if w329-events "still-firing" "quiet")').value)).toContain("quiet");
   });
 
   test("a bogus path refuses with a named error", () => {
@@ -96,6 +100,32 @@ describe("#329 — auto-revert integration", () => {
     // The buffer keeps the unsaved content; the disk differs.
     expect(strip(String(bufferText(editor)))).toContain("unsaved");
     expect(readFileSync("g.txt", "utf8")).toBe("changed-on-disk\n");
+    e(editor, "(auto-revert-mode nil)");
+  });
+
+  test("LATE buffers (opened after mode-ON) register via find-file-hook (gate r1)", async () => {
+    writeFileSync("late.txt", "first\n");
+    e(editor, "(auto-revert-mode t)");
+    // Opened AFTER the mode went on — the hook registers it.
+    e(editor, '(find-file "late.txt")');
+    expect(String(e(editor, '(if (member "late.txt" (file-watch-list)) "t" "nil")').value)).toContain("t");
+    writeFileSync("late.txt", "second\n");
+    const reverted = await waitFor(() =>
+      strip(String(bufferText(editor))).includes("second"));
+    expect(reverted).toBe(true);
+    e(editor, "(auto-revert-mode nil)");
+  });
+
+  test("MULTIPLE buffers on one file ALL revert (the shared watch fans out; gate r1)", async () => {
+    writeFileSync("shared.txt", "v1\n");
+    e(editor, '(find-file "shared.txt")');
+    e(editor, "(auto-revert-mode t)");
+    // A SECOND buffer on the same file (the shared-watch append).
+    e(editor, '(find-file "shared.txt")');
+    writeFileSync("shared.txt", "v2\n");
+    await new Promise((r) => setTimeout(r, 700));
+    // Both registrations reverted (the counter counts per-buffer).
+    expect(Number(e(editor, "(auto-revert-buffers-get)").value)).toBeGreaterThanOrEqual(2);
     e(editor, "(auto-revert-mode nil)");
   });
 

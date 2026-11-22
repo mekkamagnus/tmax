@@ -28,6 +28,26 @@ verified-available watcher.
 3. **Callback evals are try/caught and logged** (a throwing callback
    must not take down the watcher loop).
 
+## Gate-r1 amendments
+
+- **Late buffers**: every `find-file` runs `find-file-hook` (a
+  condition-cased no-op when the hook is unpopulated); the mode
+  registers via a LAMBDA hook entry — string entries eval globally
+  and cannot see module functions (ADR-0311's bridge lesson).
+- **Multi-buffer fan-out**: the registry entry is
+  `(path id buf1 buf2 ...)` — one watch per distinct path, EVERY
+  buffer on it reverts. (nthcdr does not exist in the T-Lisp
+  stdlib — the scan is hand-rolled.)
+- **Eval-failure logging**: production `evalTlisp` returns Either
+  (it does not throw) — the watcher checks for `Left` and logs;
+  TS-level throws remain caught.
+- **LogCategory**: the union now carries `'watch'` end-to-end
+  (log-entry → runtime → context) — no casts.
+- **Upstream blind spot recorded**: Bun 1.4.4's node:fs.watch
+  fails ENOENT (at watch, not open) for existing filenames
+  containing a backslash — a raw-runtime repro with no tmax code
+  involved; `file-watch-start` surfaces it as a named error.
+
 ## Consequences
 
 - RFC-028/logseq-mode has its want satisfied at the primitive layer;

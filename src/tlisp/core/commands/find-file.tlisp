@@ -36,6 +36,7 @@
         (cursor-move 0 0)
         (set-buffer-modified-p false)
         (major-mode-auto-detect)
+        (condition-case nil (run-hooks "find-file-hook") (error () nil))
         (message (concat "Opened " path)))
       (progn
         (buffer-create path)
@@ -44,6 +45,7 @@
         (set-buffer-filename path)
         (set-buffer-modified-p false)
         (major-mode-auto-detect)
+        (condition-case nil (run-hooks "find-file-hook") (error () nil))
         (message (concat "New file " path))))))
 
 ;; find-file-read-only — open a file into a read-only buffer (view without editing).

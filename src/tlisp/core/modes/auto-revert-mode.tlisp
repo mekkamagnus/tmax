@@ -20,12 +20,14 @@ file path (multiple buffers on one file share it).")
   "A diagnostic counter: reverts performed.")
 
 (defun auto-revert-handle (path _event)
-  "The watch callback: revert every registered buffer backing PATH
+  "The watch callback: revert EVERY registered buffer backing PATH
 (unless MODIFIED — a dirty buffer is never clobbered). Registered
 globally as the watch callback; the path arrives via hex-decode."
   (dolist (entry (or auto-revert-watches (list)))
     (if (string= (nth 0 entry) path)
-      (auto-revert-revert-buffer (nth 2 entry))))
+      ;; Entry = (path id buf1 buf2 ...): revert EVERY buffer on it.
+      (dolist (b (auto-revert-buffers-of entry))
+        (auto-revert-revert-buffer b))))
   nil)
 
 (defun auto-revert-revert-buffer (bufname)
@@ -50,15 +52,36 @@ globally as the watch callback; the path arrives via hex-decode."
   (let ((fn (buffer-filename)))
     (buffer-switch cur)
     (if (and (stringp fn) (> (length fn) 0)
-             (not (auto-revert-watched-p fn))
              (file-exists-p fn))
-      (let ((id (file-watch-start fn "editor/modes/auto-revert/auto-revert-handle")))
-        (if (numberp id)
-          (setq auto-revert-watches
-            (append (or auto-revert-watches (list))
-              (list (list fn id bufname))))
-          nil))
+      (if (auto-revert-watched-p fn)
+        ;; SHARED watch: append this buffer to the existing entry's
+        ;; buffer list (gate r1: only the first buffer reverted).
+        (setq auto-revert-watches
+          (auto-revert-append-buffer (or auto-revert-watches (list)) fn bufname))
+        (let ((id (file-watch-start fn "editor/modes/auto-revert/auto-revert-handle")))
+          (if (numberp id)
+            (setq auto-revert-watches
+              (append (or auto-revert-watches (list))
+                (list (list fn id bufname))))
+            nil)))
       nil)))
+
+(defun auto-revert-buffers-of (entry)
+  ;; Entry = (path id buf1 buf2 ...) — the buffer names from index 2.
+  ;; (nthcdr does NOT exist in the stdlib.)
+  (auto-revert-buffers-scan (reverse entry) (- (length entry) 2) (list)))
+
+(defun auto-revert-buffers-scan (rev n acc)
+  (if (<= n 0)
+    acc
+    (auto-revert-buffers-scan (cdr rev) (- n 1) (cons (car rev) acc))))
+
+(defun auto-revert-append-buffer (entries path bufname)
+  (if (null entries)
+    (list)
+    (if (string= (nth 0 (car entries)) path)
+      (cons (append (car entries) (list bufname)) (cdr entries))
+      (cons (car entries) (auto-revert-append-buffer (cdr entries) path bufname)))))
 
 (defun auto-revert-register (bufname)
   "One watch for BUFNAME's file (shared per distinct path)."
@@ -114,6 +137,20 @@ OFF = stop all. Dirty buffers are never clobbered."
 
 (defvar auto-revert-enabled nil
   "Whether auto-revert mode is on.")
+
+;; LATE buffers (gate r1: the scan ran only at mode-ON): every
+;; find-file runs find-file-hook; when the mode is on, the new
+;; buffer registers. add-hook is idempotent per function.
+;; ADR-0311's gotcha: string hook entries eval GLOBALLY as
+;; (name) — module paths are invisible there. The LAMBDA closes
+;; over this module's env; execEntry calls it directly.
+(add-hook "find-file-hook"
+  (lambda () (auto-revert-on-find-file)))
+
+(defun auto-revert-on-find-file ()
+  (if (auto-revert-active-p)
+    (auto-revert-register (buffer-current)))
+  nil)
 
 (defun auto-revert-active-p ()
   (if (null auto-revert-enabled) nil t))

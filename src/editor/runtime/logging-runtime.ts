@@ -60,7 +60,7 @@ export class LoggingRuntime {
   }
 
   /** Log a program-run event; renders its category buffer + mirrors failures. */
-  logProgram(category: "shell" | "process" | "test" | "autosave", entry: ProgramEntry): void {
+  logProgram(category: import("../log-entry.ts").LogCategory, entry: ProgramEntry): void {
     const e = this.log.log({ category, ...entry });
     if (e) queueMicrotask(() => appendEntry(this.logPath, e));
     const view = category as "shell" | "process" | "test";

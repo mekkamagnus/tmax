@@ -11,24 +11,24 @@
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createList, createString, createNumber, createBoolean, createNil } from "../../tlisp/values.ts";
+import { createList, createString, createNumber, createBoolean } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
 import { createValidationError, type AppError } from "../../error/types.ts";
 import { watch } from "node:fs";
+import type { LogCategory } from "../log-entry.ts";
+
+type Eitherish = { type?: string } | undefined | null;
 
 export function createWatchOps(
   evalTlisp: ((expr: string) => unknown) | undefined,
-  logProgram?: (category: string, entry: { level: string; text: string; [k: string]: unknown }) => void,
+  logProgram?: (category: LogCategory, entry: { level: string; text: string; [k: string]: unknown }) => void,
 ): Map<string, TLispFunctionImpl> {
   const ops = new Map<string, TLispFunctionImpl>();
   const watches = new Map<number, { stop: () => void; path: string; callback: string }>();
   let nextWatchId = 1;
 
-  const asString = (v: TLispValue, op: string, i: number): string | null => {
-    if (v.type !== "string") {
-      void op; void i;
-      return null;
-    }
+  const asString = (v: TLispValue): string | null => {
+    if (v.type !== "string") return null;
     return String(v.value);
   };
 
@@ -40,8 +40,8 @@ export function createWatchOps(
         "args", args.length, "2",
       ));
     }
-    const path = asString(args[0]!, "file-watch-start", 0);
-    const callback = asString(args[1]!, "file-watch-start", 1);
+    const path = asString(args[0]!);
+    const callback = asString(args[1]!);
     if (path === null || callback === null) {
       return Either.left(createValidationError(
         "TypeError",
@@ -64,7 +64,17 @@ export function createWatchOps(
         const hex = Buffer.from(path, "utf8").toString("hex");
         const expr = `(${callback} (hex-decode "${hex}") "${_eventType}")`;
         try {
-          evalTlisp(expr);
+          const result = evalTlisp(expr) as Eitherish;
+          // Production evalTlisp returns Either — a T-Lisp error is
+          // a LEFT, not a throw (gate r1: the catch alone never fired;
+          // undefined callbacks were silent).
+          if (result && typeof result === "object" && "type" in result && (result as { type: string }).type === "Left") {
+            logProgram?.("watch", {
+              level: "error",
+              text: `watch callback eval failed (T-Lisp error): ${expr.slice(0, 80)}`,
+              path,
+            });
+          }
         } catch (e: unknown) {
           logProgram?.("watch", {
             level: "error",
@@ -114,6 +124,5 @@ export function createWatchOps(
     return Either.right(createList(out));
   });
 
-  void createNil; // (kept for symmetry with the other op modules)
   return ops;
 }
