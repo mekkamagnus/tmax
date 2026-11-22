@@ -158,3 +158,5 @@
 {"ts":"2026-11-23T02:57:00Z","event":"valve-launch","issue":291,"round":3,"head":"bd6f95d","task":"bspcdrylw"}
 {"ts":"2026-11-23T03:45:00Z","event":"valve-round","issue":291,"round":3,"grade":"7/10","top_fixes":["pending discard confirm not bound to view gen (stale y discards wrong view's hunk)","switched-away view not refreshed in place (r2 too conservative)","refresh-failed status overwritten by hunk applied"],"disposition":"all three fixed in ecd193b with 3 proven-failing discriminators; 37/37 x2, siblings 62/62, typecheck clean"}
 {"ts":"2026-11-23T03:47:00Z","event":"valve-launch","issue":291,"round":4,"head":"ecd193b","task":"bwozj8tfk"}
+{"ts":"2026-11-23T04:20:00Z","event":"valve-round","issue":291,"round":4,"grade":"9/10","disposition":"THRESHOLD MET — land; one TOP_FIX (flaky sentinel-drive test) applied as 5662888 before landing"}
+{"ts":"2026-11-23T04:25:00Z","event":"landed","issue":291,"head":"18a2712","rebase":"22 commits onto 8d92e73-origin/main, re-verified (37/37, 62/62, typecheck full)","close":"receipts + gate history r1-r5 + valve history 7/7/7/9 + follow-ups (diff --cc, #331, ledger hygiene)"}
