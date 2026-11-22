@@ -660,23 +660,30 @@ function renderSingleWindowWrapped(
 
     const wrappedRows = wrapLine(displayLine, cw);
 
-    // Find which wrapped row the cursor is on
+    // #328: the BLOCK cursor walks VISUAL widths (the #321 lesson —
+    // comparing the LOGICAL displayCursorCol against terminal-cell
+    // widths picked the wrong row/cell under wide characters past a
+    // wrap boundary; the hardware cursor was already fixed via
+    // wrappedSegOf, the painted block lagged).
     let cursorWrapRow = 0;
+    let cursorWrapCol = -1;
     if (isCurrentLine) {
+      const visualCursor = stringWidth(displayLine.slice(0, Math.min(displayCursorCol, displayLine.length)));
       let accumWidth = 0;
       for (let wr = 0; wr < wrappedRows.length; wr++) {
         const rowWidth = stringWidth(wrappedRows[wr]!);
-        if (displayCursorCol < accumWidth + rowWidth) {
+        if (visualCursor < accumWidth + rowWidth) {
           cursorWrapRow = wr;
+          cursorWrapCol = visualCursor - accumWidth;
           break;
         }
         accumWidth += rowWidth;
-        if (wr === wrappedRows.length - 1) cursorWrapRow = wr;
+        if (wr === wrappedRows.length - 1) {
+          cursorWrapRow = wr;
+          cursorWrapCol = Math.max(0, visualCursor - accumWidth);
+        }
       }
     }
-    const cursorWrapCol = isCurrentLine
-      ? displayCursorCol - (cursorWrapRow > 0 ? wrappedRows.slice(0, cursorWrapRow).reduce((s, r) => s + stringWidth(r), 0) : 0)
-      : -1;
 
     for (let wr = 0; wr < wrappedRows.length && screenRow < visibleLines; wr++) {
       const gutter = (wr === 0)
