@@ -479,3 +479,29 @@ describe("#291 — gate r4 regressions (quoted/space paths)", () => {
     expect(String(e(editor, "(editor-status)").value)).toContain("no hunk at point");
   });
 });
+
+describe("#291 — the cursor-line/raw-line seam", () => {
+  test("a cursor on a block's LAST line scopes its OWN block (never the next)", async () => {
+    // f1.txt (block 0, a normal hunk) sorts before the rename
+    // (block 1); the cursor parks on f1's block-final line.
+    writeFileSync(join(process.cwd(), "f1.txt"), "x\ny\n");
+    writeFileSync(join(process.cwd(), "ren2.txt"), "r\n");
+    commit("base");
+    execFileSync("git", ["mv", "ren2.txt", "z-renamed.txt"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "f1.txt"), "x\nY\n");
+    execFileSync("git", ["add", "f1.txt"], { cwd: process.cwd() });
+    e(editor, "(stagehand/status/stagehand-status)");
+    const ls0 = strip(bufferText(editor)).split("\n");
+    const hdr = ls0.findIndex((l) => l.startsWith("Staged ("));
+    e(editor, `(cursor-move ${hdr} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    // The line BEFORE the rename's diff --git = f1's block-final.
+    const ls = strip(bufferText(editor)).split("\n");
+    const rhdr = ls.findIndex((l) => l.startsWith("diff --git") && l.includes("z-renamed"));
+    e(editor, `(cursor-move ${rhdr - 1} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-unstage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied"); // NOT the rename refusal
+    expect(git("diff", "--cached")).not.toContain("+Y"); // f1's hunk unstaged
+  });
+});

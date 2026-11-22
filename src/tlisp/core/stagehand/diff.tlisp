@@ -440,9 +440,15 @@ a rename-with-content hunk on a space/non-ASCII path reached git
 apply unrefused), and never hunk-at-point-keyed (the refusal
 classes — binary/rename/mode-only — have NO hunks, so their cursor
 sits in the block, not on a hunk)."
+  ;; The view prepends a TITLE line: buffer line 0 is the title and
+  ;; raw line k (0-based split index) renders at cursor-line k+1 —
+  ;; so the cursor's raw line is cursor-line - 1, CLAMPED to 0 (the
+  ;; cursor at the title scopes the FIRST block — the refusal tests'
+  ;; contract; an off-by-one here scopes a block-final cursor to the
+  ;; NEXT file's block).
   (stagehand-diff-block-scan
     (string-split (or stagehand-diff-raw "") "\n")
-    (cursor-line) 0 0))
+    (if (< (cursor-line) 1) 0 (- (cursor-line) 1)) 0 0))
 
 (defun stagehand-diff-block-scan (lines i idx seen)
   ;; IDX: raw line index; SEEN: diff --git lines passed (so far).
