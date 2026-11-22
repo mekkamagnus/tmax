@@ -98,6 +98,11 @@ export function createSpanOps(
             if (o.buffer === r.buffer) records.delete(o.id);
           }
           write({ type: "SetBufferSpans", buffer: r.buffer, spans: undefined, shape: undefined });
+          // valve r4: the edit-recovery hint — an invalidated BLAME
+          // view tells the user how to recover.
+          if (r.buffer.startsWith("*Stagehand-Blame*")) {
+            write({ type: "SetStatusMessage", message: "Stagehand: blame invalidated by an edit — press g to re-run" });
+          }
         }
       }
     });

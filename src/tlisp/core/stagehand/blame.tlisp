@@ -129,7 +129,7 @@ matches the disk."
     (t nil)))
 
 (defun stagehand-blame-git-exit (argv)
-  (let ((res (shell-exec-argv (cons "git" argv) (stagehand-blame-root-of))))
+  (let ((res (shell-exec-argv (cons "git" argv) (or stagehand-blame-root "."))))
     (if (numberp (nth 2 res)) (nth 2 res) 1)))
 
 (defun stagehand-blame-root-of ()
@@ -192,18 +192,25 @@ matches the disk."
 
 ;; ── the blame popup ─────────────────────────────────────────────────
 (defun stagehand-blame-row ()
-  "b (a status row) — blame the row's file (the row's path; untracked
-rows refuse in the preflight)."
+  "b (a status row) — blame the row's file in the STATUS BUFFER'S
+repository (valve r4: the row's provenance, not the client launch
+dir — a fileless buffer would otherwise select another repo)."
   (let* ((idx (stagehand/status/stagehand-current-index))
          (pairs (stagehand/status/stagehand-visible-pairs)))
     (if (and (>= idx 0) (< idx (length pairs)))
-      (stagehand-blame-file (nth 1 (nth idx pairs)))
+      (stagehand-blame-file (nth 1 (nth idx pairs))
+        (stagehand/status/stagehand-status-root))
       (editor-set-status "Stagehand: no row here"))))
 
-(defun stagehand-blame-file (path)
-  "Blame PATH against HEAD (the M-x entry + the status `b` row key)."
+(defun stagehand-blame-file (path &optional (row-root nil row-supplied-p))
+  "Blame PATH against HEAD. The M-x entry detects the repo from the
+file/launch dir; a STATUS ROW passes its buffer's root (the row's
+provenance — valve r4's two-repository case)."
   (setq stagehand-blame-path path)
-  (setq stagehand-blame-root (stagehand-blame-root-of))
+  (setq stagehand-blame-root
+    (if (and row-supplied-p row-root)
+      row-root
+      (stagehand-blame-root-of)))
   ;; The show view (RET) resolves against OUR root (valve r2).
   (stagehand/log/stagehand-log-root-set stagehand-blame-root)
   (let ((refusal (stagehand-blame-preflight path)))

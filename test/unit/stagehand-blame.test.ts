@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
@@ -313,5 +313,75 @@ describe("#296 — valve r3 fixes (blame)", () => {
     e(editor, "(stagehand/blame/stagehand-blame-next)");
     e(editor, "(stagehand/blame/stagehand-blame-next)");
     expect(String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value)).toContain("c2");
+  });
+});
+
+describe("#296 — valve r4 fixes", () => {
+  test("TWO REPOSITORIES: a status-row blame uses the STATUS's repo after the cwd moves on", () => {
+    // Repo B holds f.txt; the STATUS opens under B, then the process
+    // cwd moves to A (the 'launch dir' now resolves to A) — the row
+    // must still blame B (the row's provenance, valve r4).
+    const a = join(tmpdir(), "repoA-" + Date.now());
+    const b = join(tmpdir(), "repoB-" + Date.now());
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: b });
+    writeFileSync(join(b, "base.txt"), "seed\n");
+    execFileSync("git", ["add", "."], { cwd: b });
+    execFileSync("git", ["-c", "user.email=b@e.com", "-c", "user.name=Author B", "commit", "-q", "-m", "seed"], { cwd: b });
+    // A MODIFIED f.txt rows in the status...
+    writeFileSync(join(b, "f.txt"), "from-B\n");
+    execFileSync("git", ["add", "f.txt"], { cwd: b });
+    process.chdir(b);
+    editor.setClientLaunchDir(b);
+    e(editor, "(stagehand/status/stagehand-status)"); // root = B
+    // ...then it's COMMITTED (the row goes STALE but stays on screen).
+    execFileSync("git", ["-c", "user.email=b@e.com", "-c", "user.name=Author B", "commit", "-q", "-m", "B-commit"], { cwd: b });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: a });
+    writeFileSync(join(a, "unrelated.txt"), "x\n");
+    process.chdir(a);
+    editor.setClientLaunchDir(a); // the launch dir resolves to A now
+    const ls = strip(bufferText(editor)).split("\n");
+    const row = ls.findIndex((l) => l.includes("f.txt"));
+    expect(row).toBeGreaterThanOrEqual(0); // the STALE row is still rendered
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/blame/stagehand-blame-row)");
+    // The blame ran against B (B-commit), never A (where f.txt is
+    // untracked — the detect-first resolution would REFUSE).
+    e(editor, "(cursor-move 0 0)");
+    const att = String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value);
+    expect(att).toContain("B-commit");
+    expect(att).toContain("Author B");
+  });
+
+  test("EDIT-RECOVERY: an invalidating edit hints 'press g' and g recovers (real keys)", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("c1");
+    blame("f.txt");
+    // Edit the FILE (externally) + commit — then any state change
+    // prunes... the spans belong to the BLAME buffer whose text is
+    // unchanged; the hint fires when the blame buffer itself is
+    // edited (read-only off).
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(buffer-insert "X")');
+    const s = String(e(editor, "(editor-status)").value);
+    expect(s).toContain("press g to re-run");
+    await editor.handleKey("g");
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*Stagehand-Blame*");
+    e(editor, "(cursor-move 0 0)");
+    expect(String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value)).toContain("c1");
+  });
+
+  test("REAL KEY movement (j via handleKey) updates the echo", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "one\ntwo\nTHREE\n");
+    commit("c1");
+    writeFileSync(join(process.cwd(), "f.txt"), "one\ntwo\nCHANGED\n");
+    commit("c2");
+    blame("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    await editor.handleKey("j");
+    await editor.handleKey("j");
+    const att = String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value);
+    expect(att).toContain("c2"); // line 3 via two real j presses
   });
 });
