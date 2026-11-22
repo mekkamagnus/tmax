@@ -164,6 +164,31 @@ describe("#331 — partial-patch construction (round-trips vs REAL git)", () => 
   });
 
 
+  test("STAGED NEW FILE: partial unstage rewrites the creation header (valve r3)", () => {
+    // A staged new file's cached diff is a creation patch. Partial
+    // unstaging must apply as a MODIFICATION against the index copy
+    // (old side a/<path>, no 'new file mode') — the retained creation
+    // header made git refuse ('already exists').
+    writeFileSync(join(process.cwd(), "nf.txt"), "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n");
+    execFileSync("git", ["add", "nf.txt"], { cwd: process.cwd() });
+    // Cached view of the staged new file.
+    e(editor, "(stagehand/status/stagehand-status)");
+    const strip2 = (t: string) => t.replace(/\u001b\[[0-9;]*m/g, "");
+    const ls = strip2(bufferText(editor)).split("\n");
+    const row = ls.findIndex((l) => l.includes("nf.txt"));
+    e(editor, `(cursor-move ${row} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+    // Body: 8 '+' lines. Unstage the l4 line ONLY (body k=3): the
+    // swapped patch deletes it from the index copy.
+    const patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil nil nil t nil nil nil nil))").value);
+    expect(patch).toBeTruthy();
+    expect(patch).not.toContain("new file mode");
+    expect(patch).toContain("--- a/nf.txt");
+    execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
+    expect(new TextDecoder().decode(execFileSync("git", ["show", ":nf.txt"], { cwd: process.cwd() })))
+      .toBe("l1\nl2\nl3\nl5\nl6\nl7\nl8\n");
+  });
+
   test("WHOLE-HUNK equivalence: all-flags output applies the identical index", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
     commit("base");

@@ -595,6 +595,46 @@ Returns (lines flags)."
       (list (append (list (car dl) (car al)) (nth 0 rest))
             (append (list (car df) (car af)) (nth 1 rest))))))
 
+(defun stagehand-diff-cached-header (header)
+  "The cached-side header REWRITE for staged NEW FILES (valve r3):
+the swapped patch's old side is the INDEX CONTENT, but 'new file
+mode' + '--- /dev/null' would make git treat it as CREATING a file
+that already exists. Drop the mode line and point the old side at
+a/<path> (a modification header against the index copy)."
+  (let ((has-new (stagehand-diff-header-has header "new file mode"))
+        (devnull (stagehand-diff-header-has header "--- /dev/null"))
+        (bpath (stagehand-diff-header-path header)))
+    (if (and has-new devnull (not (null bpath)))
+      (stagehand-diff-cached-header-scan header bpath)
+      header)))
+
+(defun stagehand-diff-header-has (header prefix)
+  (if (null header)
+    nil
+    (if (string-prefix-p prefix (car header))
+      t
+      (stagehand-diff-header-has (cdr header) prefix))))
+
+(defun stagehand-diff-header-path (header)
+  (if (null header)
+    nil
+    (if (string-prefix-p "+++ b/" (car header))
+      (substring (car header) 6 (length (car header)))
+      (stagehand-diff-header-path (cdr header)))))
+
+(defun stagehand-diff-cached-header-scan (header bpath)
+  (if (null header)
+    (list)
+    (let ((l (car header)))
+      (cond
+        ((string-prefix-p "new file mode" l)
+          (stagehand-diff-cached-header-scan (cdr header) bpath))
+        ((string-prefix-p "--- /dev/null" l)
+          (cons (concat "--- a/" bpath)
+            (stagehand-diff-cached-header-scan (cdr header) bpath)))
+        (t
+          (cons l (stagehand-diff-cached-header-scan (cdr header) bpath)))))))
+
 (defun stagehand-diff-partial-patch-cached (idx flags)
   "The CACHED-side (unstage) partial patch: the roles INVERT — the
 patch's old side is the INDEX content, so the body's signs swap
@@ -616,13 +656,18 @@ the patch string, or nil with the refusal named."
              ;; permutation (valve r2: original-layout selections must
              ;; land on the right lines after the reorder).
              (paired (stagehand-diff-slot-pair
-                       (stagehand-diff-swap-body (cdr hunk)) flags)))
+                       (stagehand-diff-swap-body (cdr hunk)) flags))
+             ;; Staged NEW FILES: drop 'new file mode', point the old
+             ;; side at a/<path> — the swapped patch is a MODIFICATION
+             ;; against the index copy (valve r3: the retained creation
+             ;; header made git treat it as creating an existing file).
+             (cheader (stagehand-diff-cached-header header)))
         (stagehand-diff-partial-scan
           (nth 0 paired) (nth 1 paired) (list) (list)
           0 0
           0
           nil nil 0
-          (nth 2 spec) (nth 0 spec) (nth 4 spec) header)))))
+          (nth 2 spec) (nth 0 spec) (nth 4 spec) cheader)))))
 
 (defun stagehand-diff-flags-for-lines (idx from-line to-line)
   "FLAGS for hunk IDX restricted to the view lines FROM..TO
