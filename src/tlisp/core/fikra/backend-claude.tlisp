@@ -679,10 +679,12 @@ not mutate the focused thread's state."
     ;; process CURRENT for its thread. The abort path clears the slot and
     ;; a replacement turn refills it — resetting the aborted flag —
     ;; before the killed process's exit lands; that stale exit used to
-    ;; clear the REPLACEMENT's slot and end its turn. (No recorded
-    ;; process — the abort path, or a seam that routes only the pid —
-    ;; keeps the old behavior; the aborted flag still guards it.)
-    (if (and current (not (= pid current)))
+    ;; clear the REPLACEMENT's slot and end its turn. r154e (gate round
+    ;; 4): STRICT — with no process recorded the exit is stale too: once
+    ;; the replacement completed, the old exit was accepted again and
+    ;; appended a second ending to a finished turn. (A turn's process is
+    ;; always recorded before any of its exits can land.)
+    (if (not (and current (= pid current)))
       'superseded
       (progn
         ;; Gate round-2: unknown pid → no-op (never assume focused). The

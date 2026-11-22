@@ -234,6 +234,52 @@ describe("#224 backend registry + switcher", () => {
 // wired in by absolute path, lets the REAL start-turn/abort/sentinel path
 // run without the real CLI.
 describe("#224 process lifecycle — stale exits", () => {
+  // r154e (codex gate round 4): the old process's exit can also land
+  // AFTER its replacement completed — with the slot then empty, a
+  // lenient guard accepted it again and appended a second ending.
+  // The sentinels are invoked by BARE name — exactly how make-process
+  // invokes them (`(fikra-backend-<x>-sentinel <pid> <code>)`). A
+  // module-qualified top-level call of this sentinel reports "Undefined
+  // symbol" in some test editors (with the pre-change sources too; the
+  // bare name and a zero-arity lookup resolve) — a pre-existing
+  // interpreter quirk, named in the ledger, not pursued here.
+  test("a stale exit after the replacement COMPLETED appends no second ending", async () => {
+    const stubBin = mkdtempSync(join(tmpdir(), "fikra-codex-stub-"));
+    writeFileSync(join(stubBin, "codex"), "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+    try {
+      const editor = await createStartedEditor("");
+      e(editor, "(require-module fikra/backend-codex)");
+      e(editor, "(require-module fikra/thread)");
+      e(editor, "(fikra/thread/fikra-thread-init)");
+      e(editor, `(fikra/backend-codex/fikra-backend-codex-set-cli ${JSON.stringify(join(stubBin, "codex"))})`);
+      const status = () => String(e(editor, "(fikra/thread/fikra-thread-status)").value);
+      const endings = async () => {
+        const logPath = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
+        return readFileSync(logPath, "utf8").trimEnd().split("\n")
+          .map((l) => JSON.parse(l)).filter((l) => l.kind === "turn-end").map((l) => l.status as string);
+      };
+      const first = Number(e(editor, '(fikra/backend-codex/fikra-backend-codex-start-turn "first")').value);
+      expect(first).toBeGreaterThan(0);
+      expect(String(e(editor, "(fikra/backend-codex/fikra-backend-codex-abort)").value)).toBe("true");
+      expect(status()).toBe("interrupted");
+      const second = Number(e(editor, '(fikra/backend-codex/fikra-backend-codex-start-turn "second")').value);
+      expect(status()).toBe("running");
+      // The replacement completes first…
+      e(editor, `(fikra/backend-codex/fikra-backend-codex-sentinel ${second} 0)`);
+      expect(status()).toBe("idle");
+      // …then the old process's exit lands.
+      expect(String(e(editor, `(fikra-backend-codex-sentinel ${first} 1)`).value)).toBe("superseded");
+      expect(status()).toBe("idle");
+      // (So do both REAL exits.)
+      e(editor, `(signal ${second} "SIGKILL")`);
+      await new Promise((r) => setTimeout(r, 900));
+      expect(status()).toBe("idle");
+      expect(await endings()).toEqual(["interrupted", "completed"]);
+    } finally {
+      rmSync(stubBin, { recursive: true, force: true });
+    }
+  }, 60000);
+
   test("an interrupt ends the turn ONCE, and a killed process's late exit never ends its replacement", async () => {
     const stubBin = mkdtempSync(join(tmpdir(), "fikra-codex-stub-"));
     writeFileSync(join(stubBin, "codex"), "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });

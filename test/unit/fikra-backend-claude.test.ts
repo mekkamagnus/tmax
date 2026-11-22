@@ -241,6 +241,53 @@ describe("#214 claude normalization (recorded stream-json fixtures)", () => {
     }
   }, 60000);
 
+  // r154e (codex gate round 4): the old process's exit can also land
+  // AFTER its replacement completed — with the slot then empty, a
+  // lenient guard accepted it again and appended a second ending to a
+  // finished turn (replay then showed the replacement as failed).
+  // The sentinels are invoked by BARE name — exactly how make-process
+  // invokes them (`(fikra-backend-<x>-sentinel <pid> <code>)`). A
+  // module-qualified top-level call of this sentinel reports "Undefined
+  // symbol" in some test editors (with the pre-change sources too; the
+  // bare name and a zero-arity lookup resolve) — a pre-existing
+  // interpreter quirk, named in the ledger, not pursued here.
+  test("a stale exit after the replacement COMPLETED appends no second ending", async () => {
+    const stubBin = mkdtempSync(join(tmpdir(), "fikra-claude-stub-"));
+    writeFileSync(join(stubBin, "claude"), "#!/bin/sh\ncase \"$1\" in --version|--help|-h) echo '0.0.0-stub'; exit 0;; esac\nexec sleep 30\n", { mode: 0o755 });
+    try {
+      const editor = await createStartedEditor("");
+      e(editor, "(require-module fikra/backend-claude)");
+      e(editor, "(require-module fikra/thread)");
+      e(editor, "(fikra/thread/fikra-thread-init)");
+      e(editor, `(fikra/backend-claude/fikra-backend-claude-set-cli ${JSON.stringify(join(stubBin, "claude"))})`);
+      const status = () => String(e(editor, "(fikra/thread/fikra-thread-status)").value);
+      const endings = async () => {
+        const logPath = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
+        return readFileSync(logPath, "utf8").trimEnd().split("\n")
+          .map((l) => JSON.parse(l)).filter((l) => l.kind === "turn-end").map((l) => l.status as string);
+      };
+      const first = Number(e(editor, '(fikra/backend-claude/fikra-backend-claude-start-turn "first")').value);
+      expect(first).toBeGreaterThan(0);
+      expect(String(e(editor, "(fikra/backend-claude/fikra-backend-claude-abort)").value)).toBe("true");
+      expect(status()).toBe("interrupted");
+      const second = Number(e(editor, '(fikra/backend-claude/fikra-backend-claude-start-turn "second")').value);
+      expect(status()).toBe("running");
+      // The replacement completes first…
+      e(editor, `(fikra-backend-claude-sentinel ${second} 0)`);
+      expect(status()).toBe("idle");
+      // …then the old process's exit lands.
+      expect(String(e(editor, `(fikra-backend-claude-sentinel ${first} 1)`).value)).toBe("superseded");
+      expect(status()).toBe("idle");
+      // (So do both REAL exits.)
+      e(editor, `(signal ${second} "SIGKILL")`);
+      await new Promise((r) => setTimeout(r, 900));
+      expect(status()).toBe("idle");
+      expect(await endings()).toEqual(["interrupted", "completed"]);
+    } finally {
+      rmSync(stubBin, { recursive: true, force: true });
+    }
+  }, 60000);
+
   test("abort ends the turn interrupted; the SIGTERM'd sentinel does NOT end it again", async () => {
     const editor = await createStartedEditor("");
     e(editor, "(require-module fikra/backend-claude)");

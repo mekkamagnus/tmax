@@ -263,9 +263,10 @@ regex, no nested string-escape quoting."
     ;; CURRENT for its thread. The abort path clears the slot and a
     ;; replacement turn refills it before the killed process's exit
     ;; lands; that stale exit used to clear the REPLACEMENT's slot and
-    ;; end its turn. (No recorded process — a seam that routes only the
-    ;; pid — keeps the old behavior.)
-    (if (and current (not (= pid current)))
+    ;; end its turn. r154e (gate round 4): STRICT — with no process
+    ;; recorded the exit is stale too (accepted again once the
+    ;; replacement completed, it appended a second ending).
+    (if (not (and current (= pid current)))
       'superseded
       ;; …and an exit for a turn that already ENDED (the abort path ended
       ;; it interrupted) is not a second ending: it used to append a

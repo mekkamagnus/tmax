@@ -1996,6 +1996,35 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       ]);
     });
 
+    // r154e (codex gate round 4): a turn the user REVERTED is not
+    // history either. Replay hides the tombstoned range (target,
+    // revert-point]; the model was still told about it.
+    tt("a REVERTED turn is not history (the model never learns what the user undid)", async () => {
+      const ed = await armed();
+      writeLog(ed, [
+        { kind: "text-delta", speaker: "user", text: "QUESTION-1" },
+        { kind: "turn-start", turn: 1 },
+        { kind: "text-delta", speaker: "assistant", text: "ANSWER-1" },
+        { kind: "turn-end", turn: 1, status: "completed" },
+        { kind: "text-delta", speaker: "user", text: "QUESTION-2" },
+        { kind: "turn-start", turn: 2 },
+        { kind: "text-delta", speaker: "assistant", text: "ANSWER-2" },
+        { kind: "turn-end", turn: 2, status: "completed" },
+        // The user reverts to turn 1's checkpoint, undoing turn 2.
+        { kind: "checkpoint-reverted", target: "refs/fikra/main/1", "revert-point": "refs/fikra/main/2", "paths-reverted": 1, "paths-aborted": 0 },
+        { kind: "text-delta", speaker: "user", text: "QUESTION-3" },
+        { kind: "turn-start", turn: 3 },
+        { kind: "text-delta", speaker: "assistant", text: "ANSWER-3" },
+        { kind: "turn-end", turn: 3, status: "completed" },
+      ]);
+      expect(history(ed)).toEqual([
+        { role: "user", content: "QUESTION-1" },
+        { role: "assistant", content: "ANSWER-1" },
+        { role: "user", content: "QUESTION-3" },
+        { role: "assistant", content: "ANSWER-3" },
+      ]);
+    });
+
     // r154c (codex gate P0): the completion's OWN write failing must not
     // lose the response. The text is HELD per thread and written out —
     // in front of the user's next line — at the next send.

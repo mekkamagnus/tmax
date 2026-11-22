@@ -1551,14 +1551,19 @@ with its post-exit capture.")
 ;; before its turn started would otherwise merge into the next question
 ;; (codex gate round 3: history showed "abandonednew" as the question).
 (defun fikra-ollama-completed-events (events)
-  (fikra-ollama-completed-scan events nil (list) (list) nil))
+  ;; r154e (codex gate round 4): a turn the user REVERTED is not history
+  ;; either. Replay hides the tombstoned range (target, revert-point];
+  ;; the model was still told about it — for as long as the thread lives,
+  ;; now that history is durable.
+  (fikra-ollama-completed-scan events nil (list) (list) nil
+    (fikra/event/fikra-event-tombstone-ranges events)))
 
 ;; Groups open at a question and close at their OWN turn-end; only closed
-;; ones survive. CUR is the open group newest-first; GROUPS the closed
-;; ones; TURN-N the number of the group's turn-start (nil until seen).
-;; (List accumulators seed as (list) — this dialect's cons refuses a nil
-;; tail.)
-(defun fikra-ollama-completed-scan (rest open-p cur groups turn-n)
+;; ones survive, and none that lie in a reverted range. CUR is the open
+;; group newest-first; GROUPS the closed ones; TURN-N the number of the
+;; group's turn-start (nil until seen). (List accumulators seed as
+;; (list) — this dialect's cons refuses a nil tail.)
+(defun fikra-ollama-completed-scan (rest open-p cur groups turn-n ranges)
   (if (null rest)
     (apply 'append (reverse groups))
     (let ((e (car rest)))
@@ -1568,22 +1573,36 @@ with its post-exit capture.")
                 (string= (fikra/event/fikra-event-get-str e "speaker") "user"))
             ;; A question opens the next turn; a group still open here
             ;; never ended.
-            (fikra-ollama-completed-scan (cdr rest) t (list e) groups nil))
+            (fikra-ollama-completed-scan (cdr rest) t (list e) groups nil ranges))
           ((and open-p (string= k "turn-start"))
             (fikra-ollama-completed-scan (cdr rest) open-p (cons e cur) groups
-              (fikra-ollama-turn-number e)))
+              (fikra-ollama-turn-number e) ranges))
           ((and open-p (string= k "turn-end"))
-            (if (fikra-ollama-stale-ending-p turn-n e)
+            (cond
               ;; An ending of an EARLIER turn (the replay's stale-ending
               ;; class) must not close THIS group — it used to leave the
               ;; question in history and drop its answer (codex gate r3).
-              (fikra-ollama-completed-scan (cdr rest) open-p cur groups turn-n)
-              (fikra-ollama-completed-scan (cdr rest) nil (list)
-                (cons (reverse (cons e cur)) groups) nil)))
+              ((fikra-ollama-stale-ending-p turn-n e)
+                (fikra-ollama-completed-scan (cdr rest) open-p cur groups turn-n ranges))
+              ;; Reverted: the whole turn goes, as it does on screen.
+              ((fikra-ollama-reverted-p turn-n ranges)
+                (fikra-ollama-completed-scan (cdr rest) nil (list) groups nil ranges))
+              (t
+                (fikra-ollama-completed-scan (cdr rest) nil (list)
+                  (cons (reverse (cons e cur)) groups) nil ranges))))
           (open-p
-            (fikra-ollama-completed-scan (cdr rest) open-p (cons e cur) groups turn-n))
+            (fikra-ollama-completed-scan (cdr rest) open-p (cons e cur) groups turn-n ranges))
           (t
-            (fikra-ollama-completed-scan (cdr rest) open-p cur groups turn-n)))))))
+            (fikra-ollama-completed-scan (cdr rest) open-p cur groups turn-n ranges)))))))
+
+;; Whether a completed turn lies in a REVERTED range — replay's own rule
+;; (checkpoint-reverted {target revert-point} hides (target, revert-point]).
+;; Named limit: a turn-start with no usable turn id ("?") cannot be
+;; placed in a range and stays (no production writer emits one).
+(defun fikra-ollama-reverted-p (turn-n ranges)
+  (and (stringp turn-n)
+       (not (string= turn-n "?"))
+       (fikra/event/fikra-event-in-range-p (string-to-number turn-n) ranges)))
 
 ;; A turn's number from its turn-start/turn-end ("?" when unparseable).
 (defun fikra-ollama-turn-number (e)
