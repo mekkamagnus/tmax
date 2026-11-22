@@ -1035,14 +1035,16 @@ with its post-exit capture.")
                       (number-to-string (fikra/thread/fikra-thread-turn-count))
                       "/" (number-to-string fikra-ollama-round)))
          (prior (hashmap-get fikra-ollama-tool-exchanges key)))
-    (keymap-mutable-set! fikra-ollama-tool-exchanges key
-      (concat (if prior prior "") fragment))
-    ;; r143: the durable append (best-effort — an unwritable log never
-    ;; breaks the turn; the map is the in-flight source of truth).
-    (condition-case nil
-      (append-file (fikra-ollama-exchanges-file)
-        (concat (hex-encode key) " " (hex-encode fragment) (hex-decode "0a")))
-      (error () nil))))
+    (let ((full (concat (if prior prior "") fragment)))
+      (keymap-mutable-set! fikra-ollama-tool-exchanges key full)
+      ;; r143b: the durable append writes the FULL accumulated value (a
+      ;; snapshot per line); reload takes the LAST line per key — the
+      ;; incremental-lines + concatenate model DOUBLE-LOADED overlapping
+      ;; content (the rejection rode twice).
+      (condition-case nil
+        (append-file (fikra-ollama-exchanges-file)
+          (concat (hex-encode key) " " (hex-encode full) (hex-decode "0a")))
+        (error () nil)))))
 
 ;; r143: accessors for the durability regression.
 (defun fikra-ollama-exchanges-file-get ()
@@ -1074,9 +1076,9 @@ with its post-exit capture.")
             (let* ((k (hex-decode (substring line 0 sp)))
                    (frag (hex-decode (substring line (+ sp 1) (length line))))
                    (have (hashmap-get fikra-ollama-tool-exchanges k)))
-              (if (not have)
-                (keymap-mutable-set! fikra-ollama-tool-exchanges k frag)
-                nil))))
+              ;; r143b: LAST snapshot wins (each line is the full
+              ;; accumulated value at write time).
+              (keymap-mutable-set! fikra-ollama-tool-exchanges k frag))))
         (error () nil))
       (fikra-ollama-load-exchange-lines (cdr lines)))))
 
