@@ -57,7 +57,7 @@ describe("#328 — block cursor under wrap + wide characters", () => {
     // Row 1 carries the block cursor at VISUAL cell 4 (the char
     // BEFORE it — visual cells 0..3 = 界界).
     const { blockIndex, blockWidth } = blockCursorAt(rows[1]!);
-    expect(blockIndex).toBeGreaterThanOrEqual(0); // the block is on row 1
+    expect(blockIndex).toBe(4); // the EXACT paint cell (gate r2)
     expect(blockWidth).toBe(2); // a full wide char cell
     // The block starts at visual cell 4: the stripped row 1 is
     // "界界界" (3 chars) with the block over the LAST one — its
@@ -114,6 +114,7 @@ describe("#328 — block cursor under wrap + wide characters", () => {
     const r2 = renderBufferLines(st2, 12, 24);
     const b2 = blockCursorAt(r2[1]!);
     expect(b2.blockIndex).toBe(2);
+    expect(getWrappedCursorRow(st2, 24, 12)).toBe(1);
     expect(getWrappedCursorColumn(st2, 12)).toBe(2);
   });
 
