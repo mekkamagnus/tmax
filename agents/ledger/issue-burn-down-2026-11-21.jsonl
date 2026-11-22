@@ -160,3 +160,4 @@
 {"ts":"2026-11-23T03:47:00Z","event":"valve-launch","issue":291,"round":4,"head":"ecd193b","task":"bwozj8tfk"}
 {"ts":"2026-11-23T04:20:00Z","event":"valve-round","issue":291,"round":4,"grade":"9/10","disposition":"THRESHOLD MET — land; one TOP_FIX (flaky sentinel-drive test) applied as 5662888 before landing"}
 {"ts":"2026-11-23T04:25:00Z","event":"landed","issue":291,"head":"18a2712","rebase":"22 commits onto 8d92e73-origin/main, re-verified (37/37, 62/62, typecheck full)","close":"receipts + gate history r1-r5 + valve history 7/7/7/9 + follow-ups (diff --cc, #331, ledger hygiene)"}
+{"ts":"2026-11-23T05:30:00Z","event":"unit-start","issue":292,"title":"Stagehand T1: stash popup — list/apply/pop/drop","head":"8ca17ed","base":"6ea9ed2","tests":"15/15 x3 stash; family 99/99; typecheck trio clean","gate":"wf_49fd8f12-8d6 launched (r1, #291-lessons focus list baked in)"}
