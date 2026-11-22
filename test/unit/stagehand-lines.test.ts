@@ -117,6 +117,25 @@ describe("#331 — partial-patch construction (round-trips vs REAL git)", () => 
     expect(git("show", ":new.txt")).toBe("A2\nA3"); // git() trims
   });
 
+  test("LEADING dropped '-' converts to context in place (the old start never moves)", () => {
+    // A hunk whose body BEGINS with deletions (change at the top of
+    // the context window): dropping the FIRST '-' converts it to
+    // context AT its old position — the @@ old start stays put.
+    writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\n");
+    commit("base");
+    // Changes at the very top (lines 1-2) and lower (line 8): the
+    // first hunk starts with '-' lines.
+    writeFileSync(join(process.cwd(), "f.txt"), "A\nB\nc\nd\ne\nf\ng\nH\ni\nj\nk\nl\nm\n");
+    openDiff("f.txt");
+    // ONE hunk (the clusters merged): body "-a","-b","+A","+B",
+    // " c".." g","-h","+H"," i".." k". Select ONLY body k=1,3 (the
+    // b→B pair); the leading "-a" converts IN PLACE.
+    const patch = applyPartial("nil t nil t nil nil nil nil nil nil nil nil nil nil");
+    expect(patch).toBeTruthy();
+    expect(patch).toMatch(/@@ -1,11 \+1,11 @@/); // old start UNMOVED
+    expect(git("show", ":f.txt")).toBe("a\nB\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm"); // only b→B
+  });
+
   test("WHOLE-HUNK equivalence: all-flags output applies the identical index", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "a\nb\nc\nd\ne\nf\ng\n");
     commit("base");
@@ -191,7 +210,7 @@ describe("#331 — the view-line flag mapping", () => {
   });
 });
 
-/** The literal "\ No newline" prefix (reader-safe via Buffer). */
+/** The literal no-newline marker line (plain TS — no reader involved). */
 function hexBs(): string {
   return "\\ No newline";
 }
