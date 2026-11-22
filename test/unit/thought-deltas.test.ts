@@ -310,10 +310,7 @@ describe("#320 — replay parity + the stream shapes", () => {
 });
 
 describe("#327 — per-segment identity (the events-walk)", () => {
-  // NOTE: the collision discriminator is HELD OUT (still failing —
-  // both segments expand together; the feed's block numbering after
-  // a tool call is the suspect; the ledger carries the state).
-  test.skip("SAME-FIRST-LINE segments toggle INDEPENDENTLY (the collision case)", () => {
+  test("SAME-FIRST-LINE segments toggle INDEPENDENTLY (the collision case)", () => {
     e(editor, "(fikra/thread/fikra-thread-open)");
     e(editor, emit(delta(0, "same first\n" + "a".repeat(180) + "\nx\ny")));
     e(editor, toolCall("tool-one"));

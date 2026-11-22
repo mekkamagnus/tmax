@@ -5,7 +5,7 @@
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
           fikra-event-get-str
-          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles fikra-thought-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
+          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
@@ -552,7 +552,11 @@ bumps the revision the TUI poll consumes."
           (apply 'concat
             (mapcar (lambda (e) (concat (json-encode e) "\n")) events)))
         (if (not (or (fikra-event-batch-has-tombstone-p events)
-                     (fikra-event-batch-has-kind-p events "thought-collapse")))
+                     (fikra-event-batch-has-kind-p events "thought-collapse")
+                     ;; #327: thought batches REBUILD (the live fold
+                     ;; renders id-less fragments — toggle keys would
+                     ;; diverge from the merge keys).
+                     (fikra-event-batch-has-kind-p events "thought-delta")))
           (let ((text (fikra-event-render-batch events)))
             (if (> (length text) 0)
               ;; Round-28 STREAMING FIX (probe-verified: the daemon has ONE
@@ -603,7 +607,10 @@ bumps the revision the TUI poll consumes."
             ;; correctly defers to its next view).
             (if (or (fikra-event-batch-has-tombstone-p events)
                     (fikra-event-batch-has-end-p events)
-                    (fikra-event-batch-has-kind-p events "thought-collapse"))
+                    (fikra-event-batch-has-kind-p events "thought-collapse")
+                    ;; #327: thought batches REBUILD too (the live fold
+                    ;; renders id-less fragments — toggle keys diverge).
+                    (fikra-event-batch-has-kind-p events "thought-delta"))
               (fikra-event-rebuild-fikra-buffer))))
         t))))
 
@@ -632,7 +639,11 @@ text-deltas inside the batch join into the same line."
       ;; writable keeps it writable).
       (if (or (fikra-event-batch-has-tombstone-p events)
               (fikra-event-batch-has-final-p events)
-              (fikra-event-batch-has-kind-p events "thought-collapse"))
+              (fikra-event-batch-has-kind-p events "thought-collapse")
+              ;; #327: thought batches REBUILD (the live fold renders
+              ;; id-less fragments — toggle keys would diverge from
+              ;; the merge keys).
+              (fikra-event-batch-has-kind-p events "thought-delta"))
         (progn
           ;; Thread the run state even on rebuild batches (the discarded
           ;; text is fine — the rebuild replaces the buffer — but the
@@ -688,7 +699,7 @@ what the render emits."
   (setq fikra-thought-line-ids (hashmap))
   (let* ((events (fikra-event-parse-lines (fikra-event-read-log-lines)))
          (deduped (fikra-event-dedupe-markers events))
-         (merged (fikra-thought-merge deduped (list) nil "")))
+         (merged (fikra-thought-merge deduped (list) nil "" nil)))
     (fikra-thought-events-walk merged 0)))
 
 (defun fikra-thought-events-walk (events line)
@@ -706,8 +717,12 @@ what the render emits."
                       (fikra-event-get-str e "text"))))
           (fikra-thought-assign-lines line n key)
           (fikra-thought-events-walk (cdr events) (+ line n)))
-        ;; Any other event: count its rendered lines.
-        (let ((n (max 1 (length (string-split text "\n")))))
+        ;; Any other event: count its rendered lines — an EMPTY
+        ;; render (the turn-0 header) occupies ZERO lines (the walk
+        ;; must match the fold exactly).
+        (let ((n (if (> (length text) 0)
+                   (length (string-split text "\n"))
+                   0)))
           (fikra-thought-events-walk (cdr events) (+ line n)))))))
 
 (defun fikra-thought-assign-lines (line n key)
@@ -854,9 +869,12 @@ default, inverted by a live TAB toggle — keyed per segment (#327)."
 ;; thought-delta runs collapse into ONE thought event (text = the joined
 ;; fragments — collapse applies at render); thought-collapse markers drop
 ;; (the merge IS their effect); thought-status passes through.
-(defun fikra-thought-merge (events out run-block run-text)
+(defun fikra-thought-merge (events out run-block run-text run-id)
+  ;; #327: RUN-ID threads the whole run (the FIRST delta's key) and
+  ;; stamps EVERY flush — a run ended by a NON-thought event used to
+  ;; flush id-less (the collision root cause).
   (if (null events)
-    (reverse (fikra-thought-merge-flush run-block run-text out nil))
+    (reverse (fikra-thought-merge-flush run-block run-text out run-id))
     (let* ((e (car events))
            (kind (fikra-event-get-str e "kind")))
       (cond
@@ -864,16 +882,17 @@ default, inverted by a live TAB toggle — keyed per segment (#327)."
           (let ((blk (fikra-event-get-str e "block")))
             (if (and run-block (string= blk run-block))
               (fikra-thought-merge (cdr events) out run-block
-                (concat run-text (fikra-event-get-str e "text")))
+                (concat run-text (fikra-event-get-str e "text")) run-id)
               (fikra-thought-merge (cdr events)
-                (fikra-thought-merge-flush run-block run-text out nil)
-                blk (fikra-event-get-str e "text")))))
+                (fikra-thought-merge-flush run-block run-text out run-id)
+                blk (fikra-event-get-str e "text")
+                (fikra-thought-run-key e blk)))))
         ((string= kind "thought-collapse")
-          (fikra-thought-merge (cdr events) out run-block run-text))
+          (fikra-thought-merge (cdr events) out run-block run-text run-id))
         (t
           (fikra-thought-merge (cdr events)
-            (cons e (fikra-thought-merge-flush run-block run-text out nil))
-            nil ""))))))
+            (cons e (fikra-thought-merge-flush run-block run-text out run-id))
+            nil "" nil))))))
 
 (defun fikra-thought-run-key (e blk)
   (let ((id (fikra-event-get-str e "id")))
@@ -1239,7 +1258,7 @@ default, inverted by a live TAB toggle — keyed per segment (#327)."
         ;; edit row. Merge each checkpoint-ready into the tool-call it
         ;; follows (when one does); otherwise the standalone row stands.
         (let ((merged (fikra-event-inline-ckpt-merge deduped (list) nil)))
-          (fikra-event-render-skip (fikra-thought-merge merged (list) nil "")
+          (fikra-event-render-skip (fikra-thought-merge merged (list) nil "" nil)
             (fikra-event-tombstone-ranges events) 0 "" nil))))))
 
 ;; JSONL lines -> parsed events (unparseable lines skipped).
