@@ -189,3 +189,20 @@ describe("#296 — gate r2 fixes", () => {
     expect(f.join("\n")).not.toContain("48;2;38;79;120");
   });
 });
+
+describe("#296 — valve r2 fixes", () => {
+  test("edit + RESTORE with NO intervening publish does not revive (the sticky prune)", async () => {
+    const { captureFrame } = await import("../../src/render/capture-frame.ts");
+    setText("test", "hello\nworld\n");
+    e(editor, '(span-make "test" 0 0 0 5 "region")');
+    const f1 = captureFrame(editor.getEditorState() as never, 40, 8);
+    expect(f1.join("\n")).toContain("48;2;38;79;120");
+    // Edit (a same-shape substitution — state changes fire, the
+    // prune runs), then RESTORE the exact original text. No
+    // span-make in between.
+    setText("test", "HELLO\nworld\n");
+    setText("test", "hello\nworld\n");
+    const f2 = captureFrame(editor.getEditorState() as never, 40, 8);
+    expect(f2.join("\n")).not.toContain("48;2;38;79;120");
+  });
+});

@@ -133,7 +133,12 @@ matches the disk."
     (if (numberp (nth 2 res)) (nth 2 res) 1)))
 
 (defun stagehand-blame-root-of ()
-  (or (stagehand/status/stagehand-status-root) "."))
+  ;; valve r2: the status root may be UNSET or from ANOTHER repository —
+  ;; detect from the file / client launch dir (the #286 resolution),
+  ;; never the daemon process cwd.
+  (or (stagehand/status/stagehand-status-root)
+      (stagehand/status/stagehand-detect-root)
+      "."))
 
 (defun stagehand-blame-buffer-matches-disk (path)
   ;; Gate r1: ANY open buffer holding the file must match the disk (a
@@ -161,7 +166,10 @@ matches the disk."
     (progn
       (buffer-switch (car bufs))
       (let ((fname (or (buffer-filename) "")))
-        (if (string= fname path)
+        ;; valve r2: NORMALIZE both sides against the root — an
+        ;; absolute buffer filename and a repo-relative row path can
+        ;; name the same file.
+        (if (stagehand-blame-same-file fname path)
           (stagehand-blame-disk-step (cdr bufs) path
             (and ok
               (string= (buffer-text)
@@ -169,6 +177,11 @@ matches the disk."
                       (stagehand-blame-abs path))
                     ""))))
           (stagehand-blame-disk-step (cdr bufs) path ok))))))
+
+(defun stagehand-blame-same-file (fname path)
+  (and (> (length fname) 0)
+    (string= (stagehand-blame-abs fname)
+      (stagehand-blame-abs path))))
 
 (defun stagehand-blame-abs (path)
   ;; Resolve against the recorded root (read-file-content uses the
@@ -191,6 +204,8 @@ rows refuse in the preflight)."
   "Blame PATH against HEAD (the M-x entry + the status `b` row key)."
   (setq stagehand-blame-path path)
   (setq stagehand-blame-root (stagehand-blame-root-of))
+  ;; The show view (RET) resolves against OUR root (valve r2).
+  (stagehand/log/stagehand-log-root-set stagehand-blame-root)
   (let ((refusal (stagehand-blame-preflight path)))
     (if refusal
       (editor-set-status (concat "Stagehand: " refusal " — commit first"))

@@ -273,3 +273,28 @@ function setText2(text: string): void {
   if (first.length > 0) e(editor, `(buffer-delete-range 0 0 0 ${first.length})`);
   e(editor, `(buffer-append ${JSON.stringify(text)})`);
 }
+
+describe("#296 — valve r2 fixes (blame)", () => {
+  test("blame WITHOUT a status open: the root resolves and RET-show works (the launch dir)", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("c1");
+    // NO stagehand-status call — the root must come from the launch
+    // dir detection, and the show view from BLAME's root.
+    blame("f.txt");
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*Stagehand-Blame*");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/blame/stagehand-blame-show)");
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*Stagehand-Show*");
+    expect(strip(bufferText(editor))).toContain("c1");
+  });
+
+  test("NORMALIZED preflight: an ABSOLUTE buffer filename vs a RELATIVE blame path still refuses", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("c1");
+    e(editor, `(find-file "${join(process.cwd(), "f.txt")}")`); // ABSOLUTE
+    e(editor, '(buffer-insert "X")'); // diverges
+    e(editor, '(buffer-switch "*scratch*")');
+    blame("f.txt"); // RELATIVE path — same file
+    expect(st(editor)).toContain("commit first");
+  });
+});

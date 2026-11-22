@@ -70,10 +70,38 @@ const TO_EOL = 1_000_000;
 export function createSpanOps(
   write: (msg: Msg) => void,
   probeShape: (bufferName: string) => BufferShape | undefined,
+  subscribe?: (fn: () => void) => () => void,
 ): Map<string, TLispFunctionImpl> {
   let nextId = 1;
   const records = new Map<number, SpanRecord>();
   const api = new Map<string, TLispFunctionImpl>();
+
+  /** #296 valve r2: the STICKY drop — prune on the first state
+   * change after any edit (the render-side skip alone let records
+   * revive when the text returned to the old shape with no
+   * intervening publish). Cost-gated: nothing to do when no spans
+   * are registered. */
+  if (subscribe) {
+    subscribe(() => {
+      if (records.size === 0) return;
+      const touched = new Set<string>();
+      for (const r of [...records.values()]) {
+        if (touched.has(r.buffer)) continue;
+        touched.add(r.buffer);
+        const live = probeShape(r.buffer);
+        // Prune EVERY record of a buffer whose identity moved; the
+        // publish below clears the published grid too.
+        const stale = !live || [...records.values()].some((o) =>
+          o.buffer === r.buffer && (live.token !== o.token || live.checksum !== o.checksum));
+        if (stale) {
+          for (const o of [...records.values()]) {
+            if (o.buffer === r.buffer) records.delete(o.id);
+          }
+          write({ type: "SetBufferSpans", buffer: r.buffer, spans: undefined, shape: undefined });
+        }
+      }
+    });
+  }
 
   /** Rebuild + publish the merged grid for one buffer. Precedence:
    * the LATEST-REGISTERED span wins per character cell (SPEC-289) —

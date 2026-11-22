@@ -550,6 +550,8 @@ export class Editor {
       getBufferModified: () => editor.getCurrentBufferModified(),
       setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
       killBuffer: (name: string) => editor.killBuffer(name),
+      // #296: the span registry's sticky-invalidation prune hook.
+      onStateChangeSubscribe: (fn: () => void) => editor.onStateChange(fn),
       renameBuffer: (newName: string) => editor.renameBuffer(newName),
       buryBuffer: (name: string) => editor.buryBuffer(name),
       // SPEC-105 (#172): persist filename in bufferMetadata so the T-Lisp

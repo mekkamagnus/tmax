@@ -1,5 +1,5 @@
 (defmodule stagehand/status
-  (export stagehand-status stagehand-status-buffer-name
+  (export stagehand-status stagehand-status-buffer-name stagehand-detect-root
           stagehand-status-refresh stagehand-status-parse
           stagehand-status-sections stagehand-status-fold-toggle
           stagehand-status-next stagehand-status-prev

@@ -1,5 +1,5 @@
 (defmodule stagehand/log
-  (export stagehand-log-open stagehand-log-rerun stagehand-show-commit
+  (export stagehand-log-open stagehand-log-rerun stagehand-show-commit stagehand-log-root-set
           stagehand-log-next stagehand-log-prev
           stagehand-log-quit stagehand-log-show
           stagehand-log-checkout stagehand-log-checkout-accept
@@ -54,7 +54,12 @@ consistent (codex r1).")
 the RECORDED pid — the generation guard drops unknown pids).")
 (defvar stagehand-log-partial ""
   "The trailing incomplete chunk awaiting its newline.")
-(defvar stagehand-log-root nil
+(defvar stagehand-log-root nil "The repo root the log/show views resolve against.")
+
+(defun stagehand-log-root-set (root)
+  "Set the root (blame threads its own before RET-show — the status
+root may be unset or from another repository; valve r2)."
+  (setq stagehand-log-root root)
   "The root this log ran in (stream + checkout target it).")
 (defvar stagehand-show-idx 0
   "The current show position in stagehand-log-shas.")

@@ -83,6 +83,10 @@ export interface EditorAPIContext {
    * mutate a duplicated bridge property directly.
    */
   applyUpdate: (msg: Msg) => void;
+  /** #296: subscribe to post-commit state changes (the span registry's
+   *  sticky invalidation prunes on the first notification after an edit).
+   *  Optional — unit fixtures may omit it. Returns an unsubscribe. */
+  onStateChangeSubscribe?: (fn: () => void) => () => void;
 
   /**
    * Side-effectful current-buffer switch. The editor-side body preserves

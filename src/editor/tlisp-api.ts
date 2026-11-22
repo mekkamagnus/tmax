@@ -547,7 +547,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           }
           return { lineCount, checksum, token: buf };
         };
-        return createSpanOps(write, probeShape);
+        return createSpanOps(write, probeShape, ctx.onStateChangeSubscribe);
       },
     },
 
