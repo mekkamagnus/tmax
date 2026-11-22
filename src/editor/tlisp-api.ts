@@ -541,10 +541,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           // allocations).
           const textR = buf.getText({ start: { line: 0, column: 0 }, end: { line: Math.max(0, lineCount - 1), column: 1 << 30 } });
           const text = "right" in textR && typeof textR.right === "string" ? textR.right : "";
-          let checksum = 0;
-          for (let i = 0; i < text.length; i++) {
-            checksum = (checksum * 31 + text.charCodeAt(i)) | 0;
-          }
+          // Bun.hash: wyhash 64-bit (valve r3: the 32-bit rolling
+          // fold collided — 'Aa' and 'BB' hash identically).
+          const checksum = Number(Bun.hash(text));
           return { lineCount, checksum, token: buf };
         };
         return createSpanOps(write, probeShape, ctx.onStateChangeSubscribe);

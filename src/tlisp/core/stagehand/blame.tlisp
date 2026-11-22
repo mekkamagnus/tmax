@@ -133,11 +133,11 @@ matches the disk."
     (if (numberp (nth 2 res)) (nth 2 res) 1)))
 
 (defun stagehand-blame-root-of ()
-  ;; valve r2: the status root may be UNSET or from ANOTHER repository —
-  ;; detect from the file / client launch dir (the #286 resolution),
-  ;; never the daemon process cwd.
-  (or (stagehand/status/stagehand-status-root)
-      (stagehand/status/stagehand-detect-root)
+  ;; valve r3: DETECT first (the file / client launch dir — the #286
+  ;; resolution); a previously opened status buffer's root may belong
+  ;; to ANOTHER repository and must not win.
+  (or (stagehand/status/stagehand-detect-root)
+      (stagehand/status/stagehand-status-root)
       "."))
 
 (defun stagehand-blame-buffer-matches-disk (path)
@@ -323,6 +323,10 @@ after an edit; the distinction is gone — one always-correct path)."
         (setq kmap (editor/keymaps/keymap-init "stagehand-blame"))
         (editor/keymaps/keymap-set-key kmap "n" "(stagehand/blame/stagehand-blame-next)")
         (editor/keymaps/keymap-set-key kmap "p" "(stagehand/blame/stagehand-blame-prev)")
+        (editor/keymaps/keymap-set-key kmap "j" "(stagehand/blame/stagehand-blame-next)")
+        (editor/keymaps/keymap-set-key kmap "k" "(stagehand/blame/stagehand-blame-prev)")
+        (editor/keymaps/keymap-set-key kmap "Down" "(stagehand/blame/stagehand-blame-next)")
+        (editor/keymaps/keymap-set-key kmap "Up" "(stagehand/blame/stagehand-blame-prev)")
         (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/blame/stagehand-blame-show)")
         (editor/keymaps/keymap-set-key kmap "g" "(stagehand/blame/stagehand-blame-refresh)")
         (editor/keymaps/keymap-set-key kmap "q" "(stagehand/blame/stagehand-blame-quit)")

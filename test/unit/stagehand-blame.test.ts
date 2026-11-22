@@ -298,3 +298,20 @@ describe("#296 — valve r2 fixes (blame)", () => {
     expect(st(editor)).toContain("commit first");
   });
 });
+
+describe("#296 — valve r3 fixes (blame)", () => {
+  test("ORDINARY movement (j) updates the echo attribution", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "one\ntwo\nthree\n");
+    commit("c1");
+    writeFileSync(join(process.cwd(), "f.txt"), "one\ntwo\nTHREE\n");
+    commit("c2");
+    blame("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/blame/stagehand-blame-next)");
+    expect(String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value)).toContain("c1");
+    // j — ordinary movement — moves AND echoes.
+    e(editor, "(stagehand/blame/stagehand-blame-next)");
+    e(editor, "(stagehand/blame/stagehand-blame-next)");
+    expect(String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value)).toContain("c2");
+  });
+});

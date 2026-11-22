@@ -206,3 +206,14 @@ describe("#296 — valve r2 fixes", () => {
     expect(f2.join("\n")).not.toContain("48;2;38;79;120");
   });
 });
+
+describe("#296 — valve r3 fixes", () => {
+  test("the checksum does NOT collide ('Aa' vs 'BB' — distinct text invalidates)", async () => {
+    const { captureFrame } = await import("../../src/render/capture-frame.ts");
+    setText("test", "Aa\n");
+    e(editor, '(span-make "test" 0 0 0 2 "region")');
+    setText("test", "BB\n"); // the 32-bit rolling fold collided here
+    const f = captureFrame(editor.getEditorState() as never, 40, 8);
+    expect(f.join("\n")).not.toContain("48;2;38;79;120");
+  });
+});
