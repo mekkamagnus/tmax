@@ -205,11 +205,12 @@ describe("#214 claude normalization (recorded stream-json fixtures)", () => {
     const stubBin = mkdtempSync(join(tmpdir(), "fikra-claude-stub-"));
     // A harmless stand-in for the CLI: it answers the probes, then idles.
     writeFileSync(join(stubBin, "claude"), "#!/bin/sh\ncase \"$1\" in --version|--help|-h) echo '0.0.0-stub'; exit 0;; esac\nexec sleep 30\n", { mode: 0o755 });
-    const savedPath = process.env.PATH;
-    process.env.PATH = `${stubBin}:${savedPath}`;
     try {
       const editor = await createStartedEditor("");
       e(editor, "(require-module fikra/backend-claude)");
+      // By absolute path: a PATH change after the runtime started does
+      // not reach every spawn path (it spawned the real CLI elsewhere).
+      e(editor, `(fikra/backend-claude/fikra-backend-claude-set-cli ${JSON.stringify(join(stubBin, "claude"))})`);
       e(editor, "(require-module fikra/adapter)");
       e(editor, "(require-module fikra/chat)");
       e(editor, "(require-module fikra/thread)");
@@ -236,7 +237,6 @@ describe("#214 claude normalization (recorded stream-json fixtures)", () => {
       await new Promise((r) => setTimeout(r, 900));
       expect(await endings()).toEqual(["interrupted", "interrupted"]);
     } finally {
-      process.env.PATH = savedPath;
       rmSync(stubBin, { recursive: true, force: true });
     }
   }, 60000);

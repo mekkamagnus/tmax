@@ -1841,10 +1841,11 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     tt("a LONG thread sends only its most recent WHOLE turns (the history is budgeted)", async () => {
       const ed = await armed();
       const rows: unknown[] = [];
-      // 40 turns of 400 chars each (question + streamed answer).
+      // 40 turns of 400 chars each (question + streamed answer), in the
+      // production order (the question is logged before its turn-start).
       for (let t = 1; t <= 40; t++) {
-        rows.push({ kind: "turn-start", turn: t });
         rows.push({ kind: "text-delta", speaker: "user", text: `q${t} `.padEnd(200, "u") });
+        rows.push({ kind: "turn-start", turn: t });
         for (let d = 0; d < 20; d++) rows.push({ kind: "text-delta", speaker: "assistant", text: "0123456789" });
         rows.push({ kind: "turn-end", turn: t, status: "completed" });
       }
@@ -1864,7 +1865,7 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
 
     tt("a turn larger than the read window never leaves a half-open history", async () => {
       const ed = await armed();
-      const rows: unknown[] = [{ kind: "turn-start", turn: 1 }, { kind: "text-delta", speaker: "user", text: "q1" }];
+      const rows: unknown[] = [{ kind: "text-delta", speaker: "user", text: "q1" }, { kind: "turn-start", turn: 1 }];
       // One enormous turn (≈400KB of log): the window holds only its end.
       for (let d = 0; d < 6000; d++) rows.push({ kind: "text-delta", speaker: "assistant", text: "0123456789" });
       rows.push({ kind: "turn-end", turn: 1, status: "completed" });
@@ -1874,8 +1875,8 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       expect(history(ed)).toEqual([]);
       // A later small turn is whole inside the window — it IS the history.
       writeLog(ed, [...rows,
-        { kind: "turn-start", turn: 2 },
         { kind: "text-delta", speaker: "user", text: "second question" },
+        { kind: "turn-start", turn: 2 },
         { kind: "text-delta", speaker: "assistant", text: "short answer" },
         { kind: "turn-end", turn: 2, status: "completed" }]);
       expect(history(ed)).toEqual([
@@ -1947,6 +1948,51 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
         { role: "assistant", content: "ok" },
         { role: "user", content: "new" },
         { role: "assistant", content: "fine" },
+      ]);
+    });
+
+    // r154d (codex gate round 3): an ending that belongs to an EARLIER
+    // turn (the replay's stale-ending class) must not close the next
+    // turn's group — the question stayed in history and its answer went.
+    tt("a stale ending never costs the next turn its answer", async () => {
+      const ed = await armed();
+      writeLog(ed, [
+        { kind: "text-delta", speaker: "user", text: "QUESTION-1" },
+        { kind: "turn-start", turn: 1 },
+        { kind: "text-delta", speaker: "assistant", text: "ANSWER-1" },
+        { kind: "turn-end", turn: 1, status: "completed" },
+        { kind: "text-delta", speaker: "user", text: "QUESTION-2" },
+        { kind: "turn-start", turn: 2 },
+        // A LATE ending for turn 1 (a held flush, a straggler).
+        { kind: "turn-end", turn: 1, status: "completed" },
+        { kind: "text-delta", speaker: "assistant", text: "ANSWER-2" },
+        { kind: "turn-end", turn: 2, status: "completed" },
+      ]);
+      expect(history(ed)).toEqual([
+        { role: "user", content: "QUESTION-1" },
+        { role: "assistant", content: "ANSWER-1" },
+        { role: "user", content: "QUESTION-2" },
+        { role: "assistant", content: "ANSWER-2" },
+      ]);
+    });
+
+    // r154d (codex gate round 3): a question abandoned BEFORE its turn
+    // started (a crash in that interval) must never merge into the next
+    // question — the merge used to run first and history showed
+    // "abandonednew" as the question.
+    tt("a question abandoned before its turn started never joins the next question", async () => {
+      const ed = await armed();
+      writeLog(ed, [
+        { kind: "text-delta", speaker: "user", text: "abandoned" },
+        // …and nothing else: the daemon died before the turn began.
+        { kind: "text-delta", speaker: "user", text: "new" },
+        { kind: "turn-start", turn: 1 },
+        { kind: "text-delta", speaker: "assistant", text: "answer" },
+        { kind: "turn-end", turn: 1, status: "completed" },
+      ]);
+      expect(history(ed)).toEqual([
+        { role: "user", content: "new" },
+        { role: "assistant", content: "answer" },
       ]);
     });
 

@@ -3,7 +3,7 @@
           fikra-backend-codex-start-turn fikra-backend-codex-abort
           fikra-backend-codex-normalize fikra-backend-codex-args
           fikra-backend-codex-line-events fikra-backend-codex-filter
-          fikra-backend-codex-sentinel
+          fikra-backend-codex-sentinel fikra-backend-codex-set-cli
           fikra-backend-codex-adopt-pid fikra-backend-codex-reset-accumulator
           fikra-codex-json-sanitize)
 
@@ -169,6 +169,17 @@ regex, no nested string-escape quoting."
     found))
 
 ;; ── turn lifecycle (the per-thread pattern) ──────────────────────────
+;; r154c: the executable this backend spawns. Tests point it at a
+;; stand-in by ABSOLUTE PATH — mutating PATH after the runtime started
+;; does not reach every spawn path (the codex gate saw the same
+;; lifecycle test spawn the real CLI in one shell and the stand-in in
+;; another).
+(defvar fikra-codex-cli "codex"
+  "The codex executable (an absolute path works).")
+
+(defun fikra-backend-codex-set-cli (path)
+  (setq fikra-codex-cli path))
+
 (defun fikra-backend-codex-start-turn (message)
   "Spawn one codex turn: process-per-turn, resume the thread session."
   (let ((sid (fikra/thread/fikra-thread-session-id))
@@ -177,7 +188,7 @@ regex, no nested string-escape quoting."
     (fikra/thread/fikra-thread-turn-begin)
     (let ((args (fikra-backend-codex-args message sid)))
       (let ((pid (make-process
-                   :command (cons "codex" args)
+                   :command (cons fikra-codex-cli args)
                    :cwd (fikra/thread/fikra-thread-working-dir)
                    :filter "fikra-backend-codex-filter"
                    :sentinel "fikra-backend-codex-sentinel")))

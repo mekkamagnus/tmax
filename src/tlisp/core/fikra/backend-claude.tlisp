@@ -3,7 +3,7 @@
           fikra-backend-claude-start-turn fikra-backend-claude-abort
           fikra-backend-claude-normalize fikra-backend-claude-args
           fikra-backend-claude-line-events fikra-backend-claude-filter
-          fikra-backend-claude-sentinel
+          fikra-backend-claude-sentinel fikra-backend-claude-set-cli
           fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process fikra-backend-claude-adopt-pid
           fikra-backend-claude-reset-accumulator fikra-afield
           fikra-claude-approvals-probe fikra-claude-write-mcp-config
@@ -579,6 +579,17 @@ recursion over the accumulator with a terminal check."
       (fikra-find-nl s (+ i 1) len))))
 
 ;; ── process lifecycle ───────────────────────────────────────────────
+;; r154c: the executable this backend spawns. Tests point it at a
+;; stand-in by ABSOLUTE PATH — mutating PATH after the runtime started
+;; does not reach every spawn path (the codex gate saw the same
+;; lifecycle test spawn the real CLI in one shell and the stand-in in
+;; another).
+(defvar fikra-claude-cli "claude"
+  "The claude executable (an absolute path works).")
+
+(defun fikra-backend-claude-set-cli (path)
+  (setq fikra-claude-cli path))
+
 (defun fikra-backend-claude-start-turn (message)
   "Spawn one turn: process-per-turn, resume the thread's session, stream
 JSONL → FAEP. The sentinel is the authoritative turn end (#213).
@@ -599,7 +610,7 @@ scope names THIS turn) and BEFORE the spawn (args reference the path)."
     (fikra-claude-write-mcp-config)
     (let ((args (fikra-backend-claude-args message sid)))
       (let ((pid (make-process
-                   :command (cons "claude" args)
+                   :command (cons fikra-claude-cli args)
                    :cwd (fikra/thread/fikra-thread-working-dir) ; #221: worktree-aware
                    :filter "fikra-backend-claude-filter"
                    :sentinel "fikra-backend-claude-sentinel")))

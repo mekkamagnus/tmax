@@ -1479,8 +1479,8 @@ with its post-exit capture.")
   ;; (14181 chars of history against the 6000 budget on the first prompt
   ;; after a restart).
   (fikra-ollama-load-exchanges)
-  (let* ((merged (fikra-ollama-completed-events
-                   (fikra-ollama-merge-deltas
+  (let* ((merged (fikra-ollama-merge-deltas
+                   (fikra-ollama-completed-events
                      (fikra/event/fikra-event-events-of
                        (fikra/thread/fikra-thread-current) fikra-ollama-history-window))))
          (cutoff (+ (fikra-ollama-last-turn-end merged 0 -1) 1))
@@ -1547,13 +1547,18 @@ with its post-exit capture.")
 ;; so a crashed turn between two completed ones leaked into the prompt.
 ;; (The in-flight turn is such an open group too: its question is logged
 ;; before its turn-start, before this build runs.)
-(defun fikra-ollama-completed-events (merged)
-  (fikra-ollama-completed-scan merged nil (list) (list)))
+;; Runs on the RAW events, BEFORE the delta merge: a question abandoned
+;; before its turn started would otherwise merge into the next question
+;; (codex gate round 3: history showed "abandonednew" as the question).
+(defun fikra-ollama-completed-events (events)
+  (fikra-ollama-completed-scan events nil (list) (list) nil))
 
-;; Groups open at a question and close at its turn-end; only closed ones
-;; survive. CUR is the open group newest-first; GROUPS the closed ones.
-;; (Both seed as (list) — this dialect's cons refuses a nil tail.)
-(defun fikra-ollama-completed-scan (rest open-p cur groups)
+;; Groups open at a question and close at their OWN turn-end; only closed
+;; ones survive. CUR is the open group newest-first; GROUPS the closed
+;; ones; TURN-N the number of the group's turn-start (nil until seen).
+;; (List accumulators seed as (list) — this dialect's cons refuses a nil
+;; tail.)
+(defun fikra-ollama-completed-scan (rest open-p cur groups turn-n)
   (if (null rest)
     (apply 'append (reverse groups))
     (let ((e (car rest)))
@@ -1563,14 +1568,41 @@ with its post-exit capture.")
                 (string= (fikra/event/fikra-event-get-str e "speaker") "user"))
             ;; A question opens the next turn; a group still open here
             ;; never ended.
-            (fikra-ollama-completed-scan (cdr rest) t (list e) groups))
+            (fikra-ollama-completed-scan (cdr rest) t (list e) groups nil))
+          ((and open-p (string= k "turn-start"))
+            (fikra-ollama-completed-scan (cdr rest) open-p (cons e cur) groups
+              (fikra-ollama-turn-number e)))
           ((and open-p (string= k "turn-end"))
-            (fikra-ollama-completed-scan (cdr rest) nil (list)
-              (cons (reverse (cons e cur)) groups)))
+            (if (fikra-ollama-stale-ending-p turn-n e)
+              ;; An ending of an EARLIER turn (the replay's stale-ending
+              ;; class) must not close THIS group — it used to leave the
+              ;; question in history and drop its answer (codex gate r3).
+              (fikra-ollama-completed-scan (cdr rest) open-p cur groups turn-n)
+              (fikra-ollama-completed-scan (cdr rest) nil (list)
+                (cons (reverse (cons e cur)) groups) nil)))
           (open-p
-            (fikra-ollama-completed-scan (cdr rest) open-p (cons e cur) groups))
+            (fikra-ollama-completed-scan (cdr rest) open-p (cons e cur) groups turn-n))
           (t
-            (fikra-ollama-completed-scan (cdr rest) open-p cur groups)))))))
+            (fikra-ollama-completed-scan (cdr rest) open-p cur groups turn-n)))))))
+
+;; A turn's number from its turn-start/turn-end ("?" when unparseable).
+(defun fikra-ollama-turn-number (e)
+  (let ((v (fikra/event/fikra-event-get e "turn")))
+    (cond
+      ((numberp v) (number-to-string v))
+      ((stringp v) v)
+      (t "?"))))
+
+;; Whether a turn-end can only belong to an EARLIER turn than the open
+;; group's: the group's turn-start has not been seen (a turn logs it
+;; before anything of it can end), or both numbers are known and differ.
+(defun fikra-ollama-stale-ending-p (turn-n e)
+  (if turn-n
+    (let ((en (fikra-ollama-turn-number e)))
+      (and (not (string= turn-n "?"))
+           (not (string= en "?"))
+           (not (string= en turn-n))))
+    t))
 
 (defvar fikra-ollama-history-budget 6000
   "Characters of recent history kept for the model (whole turns).")

@@ -230,17 +230,19 @@ describe("#224 backend registry + switcher", () => {
 });
 
 // r154c (codex gate; the claude twin lives in fikra-backend-claude.test.ts):
-// the process lifecycle under interruption. A stand-in `codex` on PATH
-// (it idles) lets the REAL start-turn/abort/sentinel path run.
+// the process lifecycle under interruption. A stand-in `codex` (it idles),
+// wired in by absolute path, lets the REAL start-turn/abort/sentinel path
+// run without the real CLI.
 describe("#224 process lifecycle — stale exits", () => {
   test("an interrupt ends the turn ONCE, and a killed process's late exit never ends its replacement", async () => {
     const stubBin = mkdtempSync(join(tmpdir(), "fikra-codex-stub-"));
     writeFileSync(join(stubBin, "codex"), "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
-    const savedPath = process.env.PATH;
-    process.env.PATH = `${stubBin}:${savedPath}`;
     try {
       const editor = await createStartedEditor("");
       e(editor, "(require-module fikra/backend-codex)");
+      // By absolute path: a PATH change after the runtime started does
+      // not reach every spawn path (it spawned the real CLI elsewhere).
+      e(editor, `(fikra/backend-codex/fikra-backend-codex-set-cli ${JSON.stringify(join(stubBin, "codex"))})`);
       e(editor, "(require-module fikra/adapter)");
       e(editor, "(require-module fikra/chat)");
       e(editor, "(require-module fikra/thread)");
@@ -276,7 +278,6 @@ describe("#224 process lifecycle — stale exits", () => {
       await new Promise((r) => setTimeout(r, 900));
       expect(await endings()).toEqual(["interrupted", "interrupted", "interrupted"]);
     } finally {
-      process.env.PATH = savedPath;
       rmSync(stubBin, { recursive: true, force: true });
     }
   }, 60000);
