@@ -66,6 +66,15 @@ The adapter drives everything after this (turn-begin, stream, turn-end)."
       (editor-set-status "Fikra: no backend — SPC a b to select")
       nil)
     (progn
+      ;; r154: a turn still running (or parked at the gate) in THIS thread
+      ;; is interrupted first — the new message REPLACES it. Before the
+      ;; user's line, so the interrupted turn's marker closes above it.
+      ;; (Every backend's turn-begin refuses running → running: a send
+      ;; during a run used to throw, after the user's line was already in
+      ;; the transcript.) Another thread's turn is not this send's to end.
+      (if (or (string= (fikra/thread/fikra-thread-status) "running")
+              (string= (fikra/thread/fikra-thread-status) "confirming"))
+        (fikra-turn-interrupt))
       ;; The user's message is part of the transcript — tagged with the
       ;; speaker so the renderer prefixes "You: " (the old baked-in prefix
       ;; doubled up as "AI: You: …" — codex UI verification, structure 3/10).

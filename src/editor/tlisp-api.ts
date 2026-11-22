@@ -1978,6 +1978,13 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         // nextProcessId; now each editor's http IDs are independent).
         let nextRequestId = 1;
         const ops = new Map<string, TLispFunctionImpl>();
+        // r154: the IN-FLIGHT requests' abort controllers (removed when the
+        // request settles). `(http-cancel id)` aborts one: the fetch
+        // rejects, the reader loop stops, the completion arrives with
+        // status 0. Without it an interrupted turn's stream ran to the end
+        // server-side — and ollama runs ONE generation per model, so the
+        // replacement turn queued behind the abandoned one.
+        const inFlight = new Map<number, AbortController>();
 
         ops.set('http-request', (args: TLispValue[]): Either<AppError, TLispValue> => {
           if (args.length < 1) return Either.left(createValidationError('FormatError', 'http-request requires at least 1 argument: url'));
@@ -2010,6 +2017,8 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           }
 
           const requestId = nextRequestId++;
+          const controller = new AbortController();
+          inFlight.set(requestId, controller);
 
           (async () => {
             try {
@@ -2018,7 +2027,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // hit it LIVE: the fetch threw, the completion arrived
               // status 0, and the ollama turn errored with NO tool row.
               // 15 min covers a full tool round-trip on small models.
-              const response = await fetch(url, { method, body, headers, timeout: 900_000 });
+              const response = await fetch(url, { method, body, headers, timeout: 900_000, signal: controller.signal });
               const status = response.status;
               const responseHeaders: Record<string, string> = {};
               response.headers.forEach((v, k) => { responseHeaders[k] = v; });
@@ -2047,13 +2056,35 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               }
             } catch (e) {
               if (ctx.evalTlisp) {
-                const hexE = Buffer.from(e instanceof Error ? e.message : String(e), 'utf8').toString('hex');
+                // r154: the error's NAME rides along — a cancelled request
+                // reports "AbortError: …", a dead server "TypeError:
+                // ECONNREFUSED: …" (the bare message told nothing about a
+                // whole class of failures).
+                const hexE = Buffer.from(e instanceof Error ? `${e.name}: ${e.message}` : String(e), 'utf8').toString('hex');
                 ctx.evalTlisp(`(fikra-http-complete ${requestId} 0 "${hexE}")`);
               }
+            } finally {
+              inFlight.delete(requestId);
             }
           })();
 
           return Either.right(createNumber(requestId));
+        });
+
+        /**
+         * Abort an in-flight http-request by id. Resolves t when a request
+         * was aborted, nil when the id is unknown or already settled (a
+         * settled request's completion already ran — nothing to cancel).
+         */
+        ops.set('http-cancel', (args: TLispValue[]): Either<AppError, TLispValue> => {
+          if (args.length < 1) return Either.left(createValidationError('FormatError', 'http-cancel requires 1 argument: request-id'));
+          const raw = args[0]!.value;
+          const id = typeof raw === 'number' ? raw : Number(String(raw));
+          if (!Number.isInteger(id)) return Either.left(createValidationError('TypeError', 'request-id must be an integer'));
+          const controller = inFlight.get(id);
+          if (!controller) return Either.right(createNil());
+          controller.abort();
+          return Either.right(createBoolean(true));
         });
 
         return ops;

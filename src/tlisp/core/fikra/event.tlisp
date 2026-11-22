@@ -3,6 +3,7 @@
           fikra-event-set-refresh-hook
           fikra-event-turn-tools
           fikra-event-emit-batch fikra-event-replay fikra-event-events
+          fikra-event-events-of
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
           fikra-event-get-str
           fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles-get fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
@@ -72,9 +73,15 @@
         (error () nil))
       nil)))
 
-(defvar fikra-text-open ""
-  "The open RUN state: "" | \"text\" | \"thought:<block>\" (adjacent
-deltas join into one line; #320 threads thought runs per block).")
+;; The open RUN state: "" | "text" | "thought:<block>" (adjacent deltas
+;; join into one line; #320 threads thought runs per block).
+;; r154 (codex re-grade): the state is PER THREAD. It used to be one
+;; global that every background batch threaded too — a switched-away
+;; thread's streamed delta left it "text", and the FOCUSED thread's next
+;; event glued onto its last line without its speaker label. The state
+;; belongs to the transcript it describes.
+(defvar fikra-text-open-by-thread (hashmap)
+  "thread-id → that thread's open RUN state (absent = closed).")
 
 ;; Per-FAEP-event refresh hook (#219 specced it; codex round 14: the
 ;; modeline's turn/tool segments only updated at open/send). A fn NAME
@@ -100,7 +107,8 @@ deltas join into one line; #320 threads thought runs per block).")
   "Point the FAEP log at PATH and reset in-memory state."
   (setq fikra-event-log path)
   (setq fikra-event-memory (list))
-  (setq fikra-text-open "")
+  ;; r154: the RUN state is per thread and survives the switch — a thread
+  ;; refocused mid-stream continues its open line (replay joins it too).
   path)
 
 (defun fikra-event-log-path ()
@@ -109,7 +117,7 @@ deltas join into one line; #320 threads thought runs per block).")
 (defun fikra-event-reset ()
   "Clear in-memory state (tests). Does not touch the log file."
   (setq fikra-event-memory (list))
-  (setq fikra-text-open "")
+  (setq fikra-text-open-by-thread (hashmap))
   t)
 
 ;; ── field accessors (alist of ("k" v)) ──────────────────────────────
@@ -561,7 +569,9 @@ bumps the revision the TUI poll consumes."
                      ;; renders id-less fragments — toggle keys would
                      ;; diverge from the merge keys).
                      (fikra-event-batch-has-kind-p events "thought-delta")))
-          (let ((text (fikra-event-render-batch events)))
+          ;; r154: the batch renders against ITS thread's run state (a
+          ;; background thread's deltas thread the focused one's before).
+          (let ((text (fikra-event-render-batch-for id events)))
             (if (> (length text) 0)
               ;; Round-28 STREAMING FIX (probe-verified: the daemon has ONE
               ;; editor; the filter's evalTlisp context reads buffer-current
@@ -593,7 +603,7 @@ bumps the revision the TUI poll consumes."
           ;; open-state made the next block's fragments fold against a
           ;; dead run: a stray blank line, live ≠ replay until the next
           ;; rebuild).
-          (condition-case nil (fikra-event-render-batch events) (error () nil)))
+          (condition-case nil (fikra-event-render-batch-for id events) (error () nil)))
         (fikra-event-run-hook)
         ;; Memory + in-memory log pointer stay FOCUS-scoped (replay reads
         ;; the log FILE, so the background thread's history is intact).
@@ -992,16 +1002,19 @@ id-less completed thoughts too).")
             (concat out (if (not (string= open "")) "\n" "") (fikra-event-render-line (car events)))
             ""))))))
 
-;; Batch renderer for emit (threads the global run state).
-(defun fikra-event-render-batch (events)
+;; Batch renderer for emit — for ONE thread's transcript: threads THAT
+;; thread's run state (the batch's LAST event decides what stays open: a
+;; text-delta leaves a text run open; a thought-delta leaves ITS block's
+;; run open — cross-batch growth; anything else closes).
+(defun fikra-event-render-batch-for (id events)
   (let ((text (fikra-event-render-fold events ""
-               (if (stringp fikra-text-open) fikra-text-open ""))))
-    ;; Keep the global run-state in step with the batch's LAST event: a
-    ;; text-delta leaves a text run open; a thought-delta leaves ITS
-    ;; block's run open (cross-batch growth); anything else closes.
-    (if (> (length events) 0)
+               (if (stringp id)
+                 (let ((open (hashmap-get fikra-text-open-by-thread id)))
+                   (if (stringp open) open ""))
+                 ""))))
+    (if (and (> (length events) 0) (stringp id))
       (let ((lk (fikra-event-get-str (last events) "kind")))
-        (setq fikra-text-open
+        (editor/keymaps/keymap-mutable-set! fikra-text-open-by-thread id
           (cond
             ((string= lk "text-delta") "text")
             ((string= lk "thought-delta")
@@ -1009,12 +1022,34 @@ id-less completed thoughts too).")
             (t "")))))
     text))
 
+(defun fikra-event-render-batch (events)
+  (fikra-event-render-batch-for (fikra/thread/fikra-thread-current) events))
+
 ;; Read the log, dropping a trailing partial line (crash tolerance: the
 ;; last write may have been interrupted mid-line).
 (defun fikra-event-read-log-lines ()
-  (let ((raw (if (file-exists-p fikra-event-log)
-               (read-file-content fikra-event-log)
-               "")))
+  (fikra-event-read-log-lines-of fikra-event-log))
+
+;; r154: WINDOW (characters) bounds a reader to the log's TAIL — for
+;; consumers of the recent past only (the conversation history): parsing
+;; a whole long-lived log cost ~55µs per event at every turn. The cut can
+;; land mid-line: everything up to the window's first newline is dropped
+;; here, a trailing partial line by the reader as before.
+(defun fikra-event-log-tail (raw window)
+  (if (or (not window) (<= (length raw) window))
+    raw
+    (let ((tail (substring raw (- (length raw) window) (length raw))))
+      (let ((cut (string-match (hex-decode "0a") tail)))
+        (if (and cut (numberp cut))
+          (substring tail (+ cut 1) (length tail))
+          tail)))))
+
+(defun fikra-event-read-log-lines-of (path &optional (window nil windowp))
+  (let ((raw (fikra-event-log-tail
+               (if (and (stringp path) (file-exists-p path))
+                 (read-file-content path)
+                 "")
+               (if windowp window nil))))
     (if (or (null raw) (string= raw ""))
       (list)
       (let ((lines (string-split raw "\n")))
@@ -1412,6 +1447,21 @@ id-less completed thoughts too).")
 (defun fikra-event-events ()
   "In-memory events, oldest-first."
   (reverse fikra-event-memory))
+
+;; r154: a thread's DURABLE events — its own JSONL log, oldest-first (the
+;; conversation-history source). The in-memory copy is FOCUS-scoped (a
+;; focus switch resets it; a background turn never enters it), so a
+;; conversation continued after a thread switch used to carry NO history.
+;; An unknown id or a missing log reads as no events. WINDOW (optional)
+;; reads only the last WINDOW characters of the log.
+(defun fikra-event-events-of (id &optional (window nil windowp))
+  (if (or (null id) (null (fikra/thread/fikra-thread-field-root-of id)))
+    (list)
+    (fikra-event-parse-lines
+      (fikra-event-read-log-lines-of
+        (concat (fikra/thread/fikra-thread-field-root-of id)
+                "/.tmax/fikra/threads/" id "/events.jsonl")
+        (if windowp window nil)))))
 
 (provide "fikra-event")
 )

@@ -47,9 +47,15 @@ completion source uses).")
   "The chat model. nil = resolve from /api/tags at first use.")
 (defvar fikra-ollama-bodies (hashmap)
   "request-id → the accumulated response body (hex-decoded chunks).")
-(defvar fikra-ollama-threads (hashmap)
-  "request-id → the THREAD the turn belongs to (a late reply must land
-on its own thread, never whatever is focused at land time).")
+(defvar fikra-ollama-requests (hashmap)
+  "r154 (codex re-grade): request-id → the IN-FLIGHT request's OWNERSHIP
+record {thread epoch emitted} — the thread the turn belongs to (a late
+reply must land on its own thread, never whatever is focused at land
+time); the turn generation it was fired under (a replaced or interrupted
+turn's stream is dead the MOMENT it is superseded — not at completion);
+and how much of the streamed content the transcript already took (the
+completion renders exactly the rest). An entry exists from fire to
+completion: the map IS the in-flight set.")
 (defvar fikra-ollama-messages ""
   "The turn's accumulated messages-array body (history + user, then each
 tool round's assistant tool_call + tool results — the loop's working
@@ -60,24 +66,25 @@ let).")
 ;; r153 — STREAMING (the mockup's active transcript): the chat request
 ;; asks ollama for NDJSON; the FILTER renders each content delta as it
 ;; arrives (adjacent text-deltas join — the transcript grows live); the
-;; completion ends the turn without re-rendering.
-(defvar fikra-ollama-stream-rendered nil
-  "r153: t when THIS request's content already rendered via deltas (the
-plain-content branch then skips the re-render).")
-(defun fikra-ollama-set-streaming (flag)
-  ;; r153b: the test seam (a cross-module setq on a defvar fails).
-  (setq fikra-ollama-streaming (if flag t nil)))
-
+;; completion ends the turn.
+;; r154 (codex re-grade) — the stream is OWNED: only a live request's
+;; deltas render, they render for the thread that fired the request, and
+;; exactly-once is ACCOUNTED (the completion renders the suffix the
+;; deltas did not deliver) instead of the r153 boolean that merely
+;; assumed every delta had landed.
 (defvar fikra-ollama-streaming t
   "t: stream:true on /api/chat (progressive rendering); nil: one-shot.")
 (defvar fikra-ollama-stream-bufs (hashmap)
   "r153: request-id → the partial (unterminated) NDJSON line buffer.")
 (defvar fikra-ollama-stream-content (hashmap)
-  "r153: request-id → the accumulated streamed content (the final
-message's text).")
+  "r153: request-id → the accumulated streamed content (the reply's
+full text — plain lines and tool lines alike).")
 (defvar fikra-ollama-stream-tools (hashmap)
-  "r153: request-id → the RAW NDJSON line carrying tool_calls (the
-arguments ride verbatim — re-encoding loses the exact shape).")
+  "r153/r154: request-id → the RAW NDJSON lines carrying tool_calls, in
+arrival order (EVERY one: ollama streams ONE call per line — a last-line
+wins stash dropped every call but the last of a multi-call round). The
+arguments ride verbatim; the completion merges the lines into one call
+list.")
 (defvar fikra-ollama-tool-exchanges (hashmap)
   "r137-r139 (codex): the tool exchanges keyed THREAD/TURN/ROUND — each
 completed round's tool_calls fragment + its results (the accompanying
@@ -150,6 +157,10 @@ not spin forever).")
   "The LATEST fired request (r110: a replacement turn's pending must not
 adopt the REPLACED request's reply — only the latest may land).")
 
+(defun fikra-ollama-set-streaming (flag)
+  ;; r153b: the test seam (a cross-module setq on a defvar fails).
+  (setq fikra-ollama-streaming (if flag t nil)))
+
 (defun fikra-backend-ollama-available-p ()
   "t when the local ollama answers /api/tags (a sync curl probe — the
 availability gate must be synchronous; the turn itself is async)."
@@ -209,6 +220,15 @@ availability gate must be synchronous; the turn itself is async)."
   return 'pending (the completion callback renders the reply and ends
   the turn). Model unknown → the tags request resolves it and its
   completion re-fires the chat for the still-pending message."
+  ;; r154: a turn still in flight — THIS thread's or another's — is
+  ;; superseded HONESTLY through the interrupt path (the interrupted
+  ;; turn-end marker on its own thread, the request cancelled, children
+  ;; killed, the park dropped) BEFORE this turn touches any state. A send
+  ;; during a run used to throw at turn-begin (running → running is an
+  ;; illegal transition) after the new turn had cleared the old one's
+  ;; state; a send from ANOTHER thread stranded the first one "running".
+  (if fikra-ollama-pending-message
+    (fikra-backend-ollama-abort))
   (setq fikra-ollama-pending-message message)
   (setq fikra-ollama-round 0)
   ;; r131: a new turn supersedes the previous one's in-flight async
@@ -217,6 +237,9 @@ availability gate must be synchronous; the turn itself is async)."
   ;; suppressed (epoch-drop hid the result row; the mutations ran on).
   (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
   (fikra-ollama-kill-children)
+  ;; r154: the replaced turn's in-flight request is CANCELLED (not just
+  ;; ignored — see fikra-ollama-cancel-requests).
+  (fikra-ollama-cancel-requests)
   ;; r131b: the turn's OWNING thread (the async spawn home truth).
   (setq fikra-ollama-turn-home (fikra/thread/fikra-thread-current))
   ;; r131c (codex r131b catch): a NEW turn orphans any pending park —
@@ -268,18 +291,61 @@ availability gate must be synchronous; the turn itself is async)."
                             :body body
                             :headers (list (list "Content-Type" "application/json"))
                             :filter "fikra/backend-ollama/fikra-backend-ollama-http-filter")))
-      ;; r109 (codex r108 P1#1): ownership stamps AT FIRE — a connection
-      ;; failure never delivers a body chunk, so filter-time stamping let
-      ;; the completion drop unowned and the turn hung running.
-      (editor/keymaps/keymap-mutable-set!
-        (editor/keymaps/keymap-named "fikra-http-owners")
-        (number-to-string id) "fikra/backend-ollama/fikra-backend-ollama-complete")
-      ;; The turn's THREAD identity (r109 P1#2): a late reply must land
-      ;; on ITS thread even if focus moved.
-      (editor/keymaps/keymap-mutable-set! fikra-ollama-threads
-        (number-to-string id) (fikra/thread/fikra-thread-current))
+      (fikra-ollama-stamp-request id)
       (setq fikra-ollama-latest-id id)
       id)))
+
+;; r109 (codex r108 P1#1): ownership stamps AT FIRE — a connection
+;; failure never delivers a body chunk, so filter-time stamping let the
+;; completion drop unowned and the turn hung running. The turn's THREAD
+;; identity (r109 P1#2): a late reply must land on ITS thread even if
+;; focus moved. r154: both ride the request's ownership record, with the
+;; turn generation and the delivered-so-far count. The real fire AND the
+;; test seed stamp through here.
+(defun fikra-ollama-stamp-request (id)
+  (editor/keymaps/keymap-mutable-set!
+    (editor/keymaps/keymap-named "fikra-http-owners")
+    (number-to-string id) "fikra/backend-ollama/fikra-backend-ollama-complete")
+  (let ((entry (hashmap)))
+    (editor/keymaps/keymap-mutable-set! entry "thread" (fikra/thread/fikra-thread-current))
+    (editor/keymaps/keymap-mutable-set! entry "epoch" fikra-ollama-epoch)
+    (editor/keymaps/keymap-mutable-set! entry "emitted" 0)
+    (editor/keymaps/keymap-mutable-set! fikra-ollama-requests (number-to-string id) entry))
+  id)
+
+;; r154: a request is LIVE iff it is the latest fired request AND its
+;; turn generation is current. Everything that renders from a stream —
+;; the filter's deltas AND the completion's reply — consults this. (The
+;; guard used to run at completion only: an interrupted turn's in-flight
+;; stream kept rendering into the REPLACEMENT turn's transcript.)
+(defun fikra-ollama-request-live-p (k)
+  (let ((entry (hashmap-get fikra-ollama-requests k)))
+    (if (not entry)
+      nil
+      (and (= (hashmap-get entry "epoch") fikra-ollama-epoch)
+           (string= k (fikra-ollama-latest-id-get))))))
+
+;; r154: every in-flight request dies with its turn (abort AND
+;; replacement). The liveness guard drops a dead stream's DELTAS — but
+;; the stream itself used to run on: the model kept generating (ollama
+;; runs ONE generation per model, so the replacement turn queued behind
+;; the abandoned one) and the socket stayed open to the end.
+(defun fikra-ollama-cancel-requests ()
+  (dolist (k (hashmap-keys fikra-ollama-requests))
+    (if (hashmap-get fikra-ollama-requests k)
+      (progn
+        (fikra-ollama-forget-request k)
+        (condition-case nil (http-cancel (string-to-number k)) (error () nil)))))
+  nil)
+
+;; Drop a request's transport + stream state (completion and cancel).
+;; A late completion for a forgotten id finds no entry and discards.
+(defun fikra-ollama-forget-request (k)
+  (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k nil)
+  (editor/keymaps/keymap-mutable-set! fikra-ollama-requests k nil)
+  (editor/keymaps/keymap-mutable-set! fikra-ollama-stream-bufs k nil)
+  (editor/keymaps/keymap-mutable-set! fikra-ollama-stream-content k nil)
+  (editor/keymaps/keymap-mutable-set! fikra-ollama-stream-tools k nil))
 
 ;; The thread's prior turns as messages-array entries (the event memory
 ;; in order; the memory is newest-first — reverse for array order). The
@@ -310,7 +376,7 @@ availability gate must be synchronous; the turn itself is async)."
 ;; own record), execute each call, append the tool results, RE-FIRE. The
 ;; arguments ride as a JSON STRING inside the reply's JSON — re-embed
 ;; verbatim (the accumulated messages keep the model's exact shape).
-(defun fikra-ollama-tool-round (msg tool-calls)
+(defun fikra-ollama-tool-round (msg tool-calls entry)
   (setq fikra-ollama-round (+ fikra-ollama-round 1))
   ;; r135 (codex r130 P2): the model's text BESIDE its tool calls is
   ;; kept — rendered before the ⚙ rows and carried in the reconstructed
@@ -318,11 +384,8 @@ availability gate must be synchronous; the turn itself is async)."
   (let ((text (let ((c (fikra-ollama-alist-get "content" msg)))
                 (if (and c (stringp c) (> (length c) 0)) c ""))))
     (setq fikra-ollama-round-text text)
-    (if (> (length text) 0)
-      (fikra/event/fikra-event-emit
-        (list (list "kind" "text-delta")
-              (list "speaker" "assistant")
-              (list "text" text))))
+    ;; r154: only the part the stream's deltas have NOT rendered yet.
+    (fikra-ollama-render-rest text entry)
     (setq fikra-ollama-messages
       (concat fikra-ollama-messages
               "{\"role\":\"assistant\",\"content\":" (fikra-ollama-json-string text)
@@ -1398,14 +1461,165 @@ with its post-exit capture.")
       (fikra-ollama-load-exchange-lines (cdr lines)))))
 
 (defun fikra-ollama-history-messages ()
-  (let* ((events (fikra/event/fikra-event-events))
-         (cutoff (+ (fikra-ollama-last-turn-end events 0 -1) 1)))
+  ;; r154 (codex re-grade): the source is the thread's DURABLE log, not
+  ;; the in-memory copy — that one is FOCUS-scoped (a focus switch resets
+  ;; it; a background turn never enters it), so a conversation continued
+  ;; after a thread switch carried NO history. Adjacent streamed deltas
+  ;; merge into one message BEFORE the cut is located (the cut indexes
+  ;; the list the scan walks).
+  (let* ((merged (fikra-ollama-merge-deltas
+                   (fikra/event/fikra-event-events-of
+                     (fikra/thread/fikra-thread-current) fikra-ollama-history-window)))
+         (cutoff (+ (fikra-ollama-last-turn-end merged 0 -1) 1))
+         ;; r154: the most recent WHOLE turns within the budget.
+         (start (fikra-ollama-history-start merged cutoff)))
     ;; r143: durable reload FIRST (a restart rebuilt the map empty; the
     ;; file is the durable record).
     (fikra-ollama-load-exchanges)
     ;; r139: rounds flush one-by-one as the turn's narrations arrive
     ;; (narration1, tools1, narration2, tools2, final reply).
-    (fikra-ollama-history-scan events 0 cutoff "" nil nil 1)))
+    (fikra-ollama-history-scan merged start cutoff "" nil nil 1)))
+
+;; r154 (codex re-grade): ADJACENT same-speaker text-deltas are ONE
+;; message. Streaming delivers a reply token by token — every delta used
+;; to serialize as its own assistant message ("hello" + " world" went to
+;; the model as two), reshaping its own prior turns. A run ends at a
+;; speaker change, a tool event or a turn boundary; markers (checkpoints,
+;; file changes, permission requests…) ride through without breaking it.
+;; Only conversational events survive the merge (the scan reads no other).
+(defun fikra-ollama-merge-deltas (events)
+  (reverse (fikra-ollama-merge-scan events (list) "" "")))
+
+(defun fikra-ollama-merge-scan (events out speaker text)
+  (if (null events)
+    (fikra-ollama-merge-flush out speaker text)
+    (let* ((e (car events))
+           (k (fikra/event/fikra-event-get-str e "kind")))
+      (cond
+        ((string= k "text-delta")
+          (let ((sp (if (string= (fikra/event/fikra-event-get-str e "speaker") "user")
+                        "user" "assistant"))
+                (tx (fikra-ollama-event-text e)))
+            (cond
+              ((= (length tx) 0)
+                (fikra-ollama-merge-scan (cdr events) out speaker text))
+              ((string= sp speaker)
+                (fikra-ollama-merge-scan (cdr events) out speaker (concat text tx)))
+              (t
+                (fikra-ollama-merge-scan (cdr events)
+                  (fikra-ollama-merge-flush out speaker text) sp tx)))))
+        ((or (string= k "tool-call") (string= k "tool-result")
+             (string= k "permission-denied") (string= k "permission-allowed")
+             (string= k "turn-start") (string= k "turn-end"))
+          (fikra-ollama-merge-scan (cdr events)
+            (cons e (fikra-ollama-merge-flush out speaker text)) "" ""))
+        (t (fikra-ollama-merge-scan (cdr events) out speaker text))))))
+
+;; The open run as one text-delta event, consed onto OUT (newest-first).
+(defun fikra-ollama-merge-flush (out speaker text)
+  (if (> (length text) 0)
+    (cons (list (list "kind" "text-delta")
+                (list "speaker" speaker)
+                (list "text" text))
+          out)
+    out))
+
+;; An event's text ("" unless it is a string — a malformed field must
+;; never throw inside the history build, which runs inside start-turn).
+(defun fikra-ollama-event-text (e)
+  (let ((tx (fikra/event/fikra-event-get-str e "text")))
+    (if (stringp tx) tx "")))
+
+;; r154: the conversation history sent to the model is BOUNDED — the most
+;; recent WHOLE turns within this many characters (message text + tool
+;; exchanges; JSON framing excluded). Unbounded, a durable history grew
+;; with every turn: 100 turns cost seconds of editor-blocking string
+;; building at each send, for a prompt the 4096-token context cannot hold
+;; anyway (the server truncated it on its own terms). Cut at turn
+;; boundaries only — a history never opens on a tool result or a reply
+;; without its question; the newest turn rides whatever its size.
+(defvar fikra-ollama-history-budget 6000
+  "Characters of recent history kept for the model (whole turns).")
+
+;; Only the log's last WINDOW characters are read for it: parsing a
+;; whole long-lived log cost ~55µs per event plus ~200µs more per event
+;; in the T-Lisp scans — 3.8s at every send for a 100-turn thread with
+;; token-level streams. 8x the budget: plenty of whole turns to fill it.
+(defvar fikra-ollama-history-window 49152
+  "Characters of the thread log's TAIL read for the history.")
+
+;; The index where the budgeted history begins (a question; the cut when
+;; the log has none). No whole completed turn in the window (a single
+;; turn larger than the window) → no history: a history never opens on a
+;; reply without its question, never half a turn.
+(defun fikra-ollama-history-start (merged cutoff)
+  (fikra-ollama-budget-scan
+    (fikra-ollama-turn-costs merged 0 cutoff nil 0 0 nil (list))
+    0 nil cutoff))
+
+;; (start-index size) per COMPLETED turn, NEWEST first. A turn's group
+;; opens at its QUESTION — the user's message is logged BEFORE the
+;; turn-start line (the chat seam emits it, then the backend begins the
+;; turn) — and closes at its turn-end; a group that never ends (a crash
+;; mid-turn) is dropped. Its size is the message text, 300 per tool event
+;; (the rows its exchange carries) and its recorded exchange fragments.
+;; Opening on a question is also what keeps a WINDOWED read honest: a
+;; turn whose question fell outside the window never opens a group.
+;; Walks the list head-first with an index counter — `nth` per event made
+;; this quadratic in the log length.
+(defun fikra-ollama-turn-costs (rest i limit start text tools turn-n out)
+  (if (or (null rest) (>= i limit))
+    out
+    (let* ((e (car rest))
+           (k (fikra/event/fikra-event-get-str e "kind")))
+      (cond
+        ((string= k "turn-end")
+          (fikra-ollama-turn-costs (cdr rest) (+ i 1) limit nil 0 0 nil
+            (if start
+              (cons (list start (fikra-ollama-turn-size text tools turn-n)) out)
+              out)))
+        ((and (string= k "text-delta")
+              (string= (fikra/event/fikra-event-get-str e "speaker") "user"))
+          (fikra-ollama-turn-costs (cdr rest) (+ i 1) limit i
+            (length (fikra-ollama-event-text e)) 0 nil out))
+        ((and start (string= k "turn-start"))
+          (fikra-ollama-turn-costs (cdr rest) (+ i 1) limit start text tools
+            (let ((n (fikra/event/fikra-event-get e "turn")))
+              (if (numberp n) (number-to-string n) n))
+            out))
+        ((and start (string= k "text-delta"))
+          (fikra-ollama-turn-costs (cdr rest) (+ i 1) limit start
+            (+ text (length (fikra-ollama-event-text e))) tools turn-n out))
+        ((and start
+              (or (string= k "tool-call") (string= k "tool-result")
+                  (string= k "permission-denied") (string= k "permission-allowed")))
+          (fikra-ollama-turn-costs (cdr rest) (+ i 1) limit start text (+ tools 1) turn-n out))
+        (t
+          (fikra-ollama-turn-costs (cdr rest) (+ i 1) limit start text tools turn-n out))))))
+
+(defun fikra-ollama-turn-size (text tools turn-n)
+  (+ text (* 300 tools) (fikra-ollama-rounds-size turn-n 1 0)))
+
+;; The recorded exchange fragments' size for a turn (round by round).
+(defun fikra-ollama-rounds-size (turn-n round n)
+  (if (or (not turn-n) (> round fikra-ollama-max-rounds))
+    n
+    (let ((frag (condition-case nil (fikra-ollama-round-frag turn-n round) (error () nil))))
+      (fikra-ollama-rounds-size turn-n (+ round 1)
+        (+ n (if (stringp frag) (length frag) 0))))))
+
+;; Walk the turns NEWEST first: the newest completed turn always rides;
+;; older whole turns join while the budget holds. FALLBACK is where an
+;; empty history begins (the cut — nothing before it rides).
+(defun fikra-ollama-budget-scan (costs used kept fallback)
+  (if (null costs)
+    (if kept kept fallback)
+    (let ((start (car (car costs)))
+          (size (car (cdr (car costs)))))
+      (cond
+        ((null kept) (fikra-ollama-budget-scan (cdr costs) size start fallback))
+        ((> (+ used size) fikra-ollama-history-budget) kept)
+        (t (fikra-ollama-budget-scan (cdr costs) (+ used size) start fallback))))))
 
 ;; The index of the LAST turn-end (-1 when none — a first turn has no
 ;; history).
@@ -1489,49 +1703,15 @@ with its post-exit capture.")
     (let ((frag (fikra-ollama-round-frag turn-n round)))
       (+ (if frag 1 0) (fikra-ollama-rounds-count turn-n (+ round 1))))))
 
-;; JSON-string escaping (quotes + backslashes; runtime concat is
-;; reader-safe, the embedded chars must be JSON-escaped — hex-built
-;; backslash per the established idiom).
+;; A string as a JSON string literal. r154: the BUILTIN encoder — a
+;; string round-trips through it (quotes, backslashes, every control
+;; character, non-ASCII: verified against the r135 cases). The
+;; hand-written per-character scanner it replaces cost ~50µs PER CHARACTER
+;; in T-Lisp: a 55KB conversation history took 2.7s to build at EVERY turn
+;; start, and with the history durable now (below) long threads reached
+;; that as a matter of course.
 (defun fikra-ollama-json-string (s)
-  (fikra-ollama-escape-scan s 0 ""))
-
-(defun fikra-ollama-escape-scan (s i acc)
-  (if (>= i (length s))
-    (concat "\"" acc "\"")
-    (let ((c (substring s i (+ i 1)))
-          (bs (hex-decode "5c")))
-      (fikra-ollama-escape-scan s (+ i 1)
-        (cond
-          ((string= c "\"") (concat acc bs (hex-decode "22")))
-          ((string= c bs) (concat acc bs bs))
-          ;; r135b (codex catch + a latent bug): the control characters
-          ;; are HEX-BUILT — the file literal "\n" is backslash-n (the
-          ;; reader leaves escapes intact), which NEVER matched a real
-          ;; newline: multi-line content rode raw into the JSON. Tab
-          ;; and CR join (raw control chars make the request invalid).
-          ((string= c (hex-decode "0a")) (concat acc bs "n"))
-          ((string= c (hex-decode "09")) (concat acc bs "t"))
-          ((string= c (hex-decode "0d")) (concat acc bs "r"))
-          ;; r135c (codex catch): the remaining plausible control bytes.
-          ((string= c (hex-decode "08")) (concat acc bs "b"))
-          ((string= c (hex-decode "0c")) (concat acc bs "f"))
-          ((string= c (hex-decode "1b")) (concat acc bs "u001b"))
-          ;; r135d (codex catch): ANY remaining control character
-          ;; escapes as backslash-u00XX (JSON forbids raw U+0000-001F).
-          ((< (char-code c) 32)
-            (concat acc bs "u00" (fikra-ollama-hex2 (char-code c))))
-          (t (concat acc c)))))))
-
-;; Two lowercase hex digits (the control-char range fits a byte).
-;; r135e (codex r135d catch): INTEGER division — T-Lisp / is
-;; fractional; the low nibble was lost (U+0001 escaped as \u0000).
-(defun fikra-ollama-hex2 (n)
-  (let ((hi (floor (/ n 16))))
-    (concat (fikra-ollama-hex-nibble hi)
-            (fikra-ollama-hex-nibble (- n (* 16 hi))))))
-
-(defun fikra-ollama-hex-nibble (k)
-  (substring "0123456789abcdef" k (+ k 1)))
+  (json-encode s))
 
 ;; The http filter: stamp ownership + accumulate the body. A TAGS request
 ;; is recognizable by its marker entry ("tags-<id>"); a chat request by a
@@ -1544,93 +1724,279 @@ with its post-exit capture.")
     (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k
       (concat (hashmap-get fikra-ollama-bodies k) (hex-decode chunk-hex)))
     ;; r153: STREAM — render every complete NDJSON line's content delta.
-    (if fikra-ollama-streaming
-      (fikra-ollama-stream-lines k
-        (concat (or (hashmap-get fikra-ollama-stream-bufs k) "") (hex-decode chunk-hex))))
+    ;; r154: only a LIVE request's stream renders (the guard lived at
+    ;; completion alone — a replaced turn's in-flight stream rendered
+    ;; straight into its successor's transcript).
+    (if (and fikra-ollama-streaming (fikra-ollama-request-live-p k))
+      (fikra-ollama-stream-pump k (hex-decode chunk-hex) nil))
     t))
 
-;; Consume complete lines from BUF (the tail stays in the buffer map);
-;; each line: content delta → render + accumulate; a tool_calls line →
-;; keep the RAW line (verbatim arguments).
-(defun fikra-ollama-stream-lines (k buf)
-  (let ((nl (string-match (hex-decode "0a") buf)))
-    (if (and nl (numberp nl) (> nl 0))
-      (progn
-        (fikra-ollama-stream-line k (substring buf 0 nl))
-        (fikra-ollama-stream-lines k (substring buf (+ nl 1) (length buf))))
-      ;; No complete line: stash the tail.
-      (keymap-mutable-set! fikra-ollama-stream-bufs k buf))))
+;; r154: consume the buffer + CHUNK's COMPLETE lines and stash the
+;; unterminated tail; FINAL (the completion) also takes that tail — a
+;; server may close without the last newline, and the final content line
+;; used to be dropped. Blank lines are skipped (a LEADING newline used to
+;; stall the scan: the offset had to be > 0, so nothing after it was ever
+;; consumed). The chunk's content deltas render as ONE batch.
+(defun fikra-ollama-stream-pump (k chunk final)
+  (let ((deltas (fikra-ollama-stream-scan k
+                   (concat (or (hashmap-get fikra-ollama-stream-bufs k) "") chunk)
+                   final (list))))
+    (if (> (length deltas) 0)
+      (fikra-ollama-deliver k deltas)
+      nil)))
 
-(defun fikra-ollama-stream-line (k line)
-  (if (> (length (string-trim line)) 0)
-    (progn
-      ;; r153b (codex): classify by the PARSED shape — a raw substring
-      ;; match on "tool_calls" misfiled ordinary text mentioning the
-      ;; field. A tool_calls line rides RAW and its content is NOT
-      ;; emitted here (the tool round renders the narration ONCE).
-      (condition-case nil
-        (let* ((obj (json-read-from-string line))
-               (m (fikra-ollama-alist-get "message" obj))
-               (tc (if m (fikra-ollama-alist-get "tool_calls" m) nil))
-               (c (if m (fikra-ollama-alist-get "content" m) nil)))
-          (if (and tc (listp tc) (> (length tc) 0))
-            (keymap-mutable-set! fikra-ollama-stream-tools k line)
-            (if (and c (stringp c) (> (length c) 0))
-              (progn
-                (keymap-mutable-set! fikra-ollama-stream-content k
-                  (concat (or (hashmap-get fikra-ollama-stream-content k) "") c))
-                (fikra/event/fikra-event-emit
-                  (list (list "kind" "text-delta")
-                        (list "speaker" "assistant")
-                        (list "text" c))))
-              nil)))
-        (error () nil)))
-    nil))
+(defun fikra-ollama-stream-scan (k buf final acc)
+  (let ((nl (string-match (hex-decode "0a") buf)))
+    (if (and nl (numberp nl))
+      (fikra-ollama-stream-scan k (substring buf (+ nl 1) (length buf)) final
+        (fikra-ollama-stream-take k (substring buf 0 nl) acc))
+      (if (and final (> (length (string-trim buf)) 0))
+        (progn
+          (editor/keymaps/keymap-mutable-set! fikra-ollama-stream-bufs k nil)
+          (fikra-ollama-stream-take k buf acc))
+        (progn
+          (editor/keymaps/keymap-mutable-set! fikra-ollama-stream-bufs k buf)
+          acc)))))
+
+;; One NDJSON line → its content delta (if any) joins ACC; a tool_calls
+;; line is kept RAW (verbatim arguments). Classified by the PARSED shape
+;; (r153b: a raw substring match on "tool_calls" misfiled ordinary text
+;; mentioning the field). An unparseable line changes nothing.
+(defun fikra-ollama-stream-take (k line acc)
+  (condition-case nil
+    (let* ((m (fikra-ollama-alist-get "message" (json-read-from-string line)))
+           (tc (if m (fikra-ollama-alist-get "tool_calls" m) nil))
+           (c (if m (fikra-ollama-alist-get "content" m) nil))
+           (text (if (and c (stringp c)) c "")))
+      (progn
+        ;; r154: EVERY tool line is kept (see fikra-ollama-stream-tools).
+        (if (and tc (listp tc) (> (length tc) 0))
+          (editor/keymaps/keymap-mutable-set! fikra-ollama-stream-tools k
+            (append (or (hashmap-get fikra-ollama-stream-tools k) (list)) (list line)))
+          nil)
+        (if (> (length text) 0)
+          (progn
+            (editor/keymaps/keymap-mutable-set! fikra-ollama-stream-content k
+              (concat (or (hashmap-get fikra-ollama-stream-content k) "") text))
+            (append acc (list text)))
+          acc)))
+    (error () acc)))
+
+;; Render a chunk's deltas for the thread that OWNS the request — the
+;; thread-routed emitter. r154: the focused-thread emitter put a
+;; switched-away turn's text into whatever the user was looking at, and
+;; the completion then settled the real thread with no reply. Only a
+;; batch the transcript TOOK counts as delivered (`emitted`).
+(defun fikra-ollama-deliver (k deltas)
+  (let* ((entry (hashmap-get fikra-ollama-requests k))
+         (thread (if entry (hashmap-get entry "thread") nil))
+         (landed (condition-case nil
+                     (and thread
+                          (fikra/event/fikra-event-emit-batch-for thread
+                            (mapcar (lambda (d)
+                                      (list (list "kind" "text-delta")
+                                            (list "speaker" "assistant")
+                                            (list "text" d)))
+                              deltas)))
+                     (error () nil))))
+    (if (and landed entry)
+      (editor/keymaps/keymap-mutable-set! entry "emitted"
+        (+ (hashmap-get entry "emitted") (fikra-ollama-deltas-length deltas 0))))
+    landed))
+
+(defun fikra-ollama-deltas-length (deltas n)
+  (if (null deltas)
+    n
+    (fikra-ollama-deltas-length (cdr deltas) (+ n (length (car deltas))))))
+
+;; r154: render exactly the content the stream has NOT delivered (the
+;; ownership record's `emitted` count) — exactly-once by ACCOUNTING. The
+;; r153 boolean assumed every delta had rendered; one the transcript
+;; failed to take was lost for good.
+(defun fikra-ollama-render-rest (content entry)
+  (let ((shown (if (and entry (numberp (hashmap-get entry "emitted")))
+                   (hashmap-get entry "emitted")
+                   0)))
+    (if (> (length content) shown)
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "text-delta")
+              (list "speaker" "assistant")
+              (list "text" (substring content shown (length content))))))))
+
+;; r153: the completion's reply body, built from the stream — the tool
+;; lines merged into ONE call list beside the full streamed content, else
+;; the content alone. r154: the tool lines are MERGED (the r153 stash kept
+;; only the last line — ollama streams one call per line, so a two-call
+;; round lost its first call, live).
+(defun fikra-ollama-stream-body (k raw)
+  (let ((tools (hashmap-get fikra-ollama-stream-tools k))
+        (content (hashmap-get fikra-ollama-stream-content k)))
+    (cond
+      ((and tools (> (length tools) 0))
+        (concat "{\"message\":{\"role\":\"assistant\",\"content\":"
+                (fikra-ollama-json-string (if (stringp content) content ""))
+                ",\"tool_calls\":["
+                (fikra-ollama-calls-json
+                  (condition-case nil (fikra-ollama-merge-tool-lines tools (list)) (error () (list)))
+                  0 "")
+                "]}}"))
+      ((and content (stringp content) (> (length content) 0))
+        (concat "{\"message\":{\"role\":\"assistant\",\"content\":"
+                (fikra-ollama-json-string content) "}}"))
+      (t raw))))
+
+;; The tool lines → one call list (the shape json-read gives a
+;; tool_calls array). Ground truth (ollama 0.12.3, captured live): ONE
+;; call per line, a single-element array, every call after the first
+;; stamped with its index INSIDE `function`; arguments are complete
+;; objects. Incremental servers stream a call's argument JSON in pieces
+;; under the same index (OpenAI-style: index on the call, a string).
+;; Contract: an indexed entry merges into its slot; an index-less entry
+;; of a multi-call line merges by position; an index-less single-call
+;; line NAMES a new call, or continues the last one when nameless.
+(defun fikra-ollama-merge-tool-lines (lines slots)
+  (if (null lines)
+    ;; The slots are already in call order (appends put the newest last).
+    (fikra-ollama-slots-to-calls slots)
+    (fikra-ollama-merge-tool-lines (cdr lines)
+      (fikra-ollama-merge-line-calls (fikra-ollama-line-tool-calls (car lines)) 0 slots))))
+
+(defun fikra-ollama-slots-to-calls (slots)
+  (if (null slots)
+    (list)
+    (append (list (fikra-ollama-slot-call (car slots)))
+            (fikra-ollama-slots-to-calls (cdr slots)))))
+
+;; A raw line's tool_calls array (nil when the line does not parse).
+(defun fikra-ollama-line-tool-calls (line)
+  (condition-case nil
+    (let ((m (fikra-ollama-alist-get "message" (json-read-from-string line))))
+      (if m (fikra-ollama-alist-get "tool_calls" m) nil))
+    (error () nil)))
+
+(defun fikra-ollama-merge-line-calls (calls p slots)
+  (if (or (not (listp calls)) (null calls) (>= p (length calls)))
+    slots
+    (fikra-ollama-merge-line-calls calls (+ p 1)
+      (fikra-ollama-merge-call (nth p calls) calls p slots))))
+
+;; Slots are (name arguments) pairs, newest last.
+(defun fikra-ollama-merge-call (entry siblings p slots)
+  (condition-case nil
+    (let* ((fn (fikra-ollama-alist-get "function" entry))
+           (name (if fn (fikra-ollama-alist-get "name" fn) nil))
+           (args (if fn (fikra-ollama-alist-get "arguments" fn) nil))
+           (n (length slots))
+           (idx (fikra-ollama-call-index entry fn siblings p))
+           (named (and (stringp name) (> (length name) 0)))
+           (slot (cond
+                   ((numberp idx) idx)
+                   (named n)
+                   (t (- n 1)))))
+      (cond
+        ((or (< slot 0) (>= slot n))
+          (append slots (list (list (if named name "") args))))
+        (t (fikra-ollama-merge-slot-at slots slot name args 0))))
+    (error () slots)))
+
+;; The entry's slot: its own index, else its function's index, else the
+;; position inside a multi-call array (nil for an index-less single call).
+(defun fikra-ollama-call-index (entry fn siblings p)
+  (let ((own (fikra-ollama-alist-get "index" entry))
+        (inner (if fn (fikra-ollama-alist-get "index" fn) nil)))
+    (cond
+      ((numberp own) own)
+      ((numberp inner) inner)
+      ((> (length siblings) 1) p)
+      (t nil))))
+
+(defun fikra-ollama-merge-slot-at (slots i name args j)
+  (if (null slots)
+    (list)
+    (append (list (if (= i j)
+                      (fikra-ollama-slot-merge (car slots) name args)
+                      (car slots)))
+            (fikra-ollama-merge-slot-at (cdr slots) i name args (+ j 1)))))
+
+;; A fragment joins its call: a carried name replaces, arguments merge.
+(defun fikra-ollama-slot-merge (slot name args)
+  (list (if (and (stringp name) (> (length name) 0)) name (car slot))
+        (fikra-ollama-merge-args (car (cdr slot)) args)))
+
+(defun fikra-ollama-slot-call (slot)
+  (list (list "function"
+              (append (list (list "name" (if (car slot) (car slot) "")))
+                      (if (car (cdr slot))
+                        (list (list "arguments" (car (cdr slot))))
+                        (list))))))
+
+;; Arguments merge: string fragments CONCATENATE (an incremental server
+;; streams a call's argument JSON in pieces); object fragments UNION
+;; (the newer fragment's keys win); an empty side yields to the other.
+(defun fikra-ollama-merge-args (old new)
+  (cond
+    ((fikra-ollama-args-empty-p new) old)
+    ((fikra-ollama-args-empty-p old) new)
+    ((and (stringp old) (stringp new)) (concat old new))
+    ((and (listp old) (listp new)) (fikra-ollama-alist-union old new))
+    (t new)))
+
+(defun fikra-ollama-args-empty-p (a)
+  (or (null a)
+      (and (stringp a) (= (length a) 0))
+      (and (not (stringp a)) (listp a) (= (length a) 0))))
+
+;; alist UNION: NEW's keys win; garbage pairs pass through untouched.
+(defun fikra-ollama-alist-union (old new)
+  (if (null new)
+    old
+    (fikra-ollama-alist-union (fikra-ollama-alist-put old (car new)) (cdr new))))
+
+(defun fikra-ollama-alist-put (alist pair)
+  (if (or (not (listp pair)) (not (= (length pair) 2)) (not (stringp (car pair))))
+    alist
+    (append (fikra-ollama-alist-without alist (car pair)) (list pair))))
+
+(defun fikra-ollama-alist-without (alist key)
+  (if (null alist)
+    (list)
+    (let ((e (car alist)))
+      (append (if (and (listp e) (= (length e) 2) (stringp (car e)) (string= (car e) key))
+                (list)
+                (list e))
+              (fikra-ollama-alist-without (cdr alist) key)))))
 
 ;; The completion handler (ownership-routed): a tags reply adopts the
 ;; model and re-fires; a chat reply renders the assistant turn + ENDS it.
 (defun fikra-backend-ollama-complete (id status data-hex)
   (let* ((k (number-to-string id))
-         (thread-id (hashmap-get fikra-ollama-threads k))
-         (body (hashmap-get fikra-ollama-bodies k)))
-    (editor/keymaps/keymap-mutable-set! fikra-ollama-bodies k nil)
-    (editor/keymaps/keymap-mutable-set! fikra-ollama-threads k nil)
-    ;; r153: STREAMING — the reply's body is the streamed content (a
-    ;; tool_calls line rides raw; the turn-end then skips re-rendering).
-    (if (and fikra-ollama-streaming (= status 200))
-      (let ((tools-line (hashmap-get fikra-ollama-stream-tools k))
-            (content (hashmap-get fikra-ollama-stream-content k)))
-        (cond
-          (tools-line (progn
-            (setq body tools-line)
-            (setq fikra-ollama-stream-rendered nil)))
-          ;; Streamed content: synthesize; already rendered.
-          ((and content (> (length content) 0)) (progn
-            (setq body
-              (concat "{\"message\":{\"role\":\"assistant\",\"content\":"
-                      (fikra-ollama-json-string content) "}}"))
-            (setq fikra-ollama-stream-rendered t)))
-          ;; NOTHING streamed (a non-NDJSON body — the synthetic-test and
-          ;; one-shot-server shapes): the raw accumulated body IS the reply.
-          (t (setq fikra-ollama-stream-rendered nil))))
-      (setq fikra-ollama-stream-rendered nil))
-    (keymap-mutable-set! fikra-ollama-stream-bufs k nil)
-    (keymap-mutable-set! fikra-ollama-stream-content k nil)
-    (keymap-mutable-set! fikra-ollama-stream-tools k nil)
-    ;; r109-r110: only the LATEST fired request may land; a gone turn
-    ;; discards. r111 (codex r110 P2): a SWITCHED-AWAY thread no longer
+         (entry (hashmap-get fikra-ollama-requests k))
+         (thread-id (if entry (hashmap-get entry "thread") nil))
+         ;; r109-r110: only the LATEST fired request may land; a gone
+         ;; turn discards. r154: "gone" is the ownership record's verdict
+         ;; — no entry, or a superseded turn generation.
+         (live (and entry thread-id fikra-ollama-pending-message
+                    (fikra-ollama-request-live-p k)))
+         ;; r153: STREAMING — the reply's body is built from the stream.
+         ;; r154: a live request's final UNTERMINATED line joins it
+         ;; first (guarded — a throw here would skip the cleanup below
+         ;; and strand the turn). NOTHING streamed (a non-NDJSON body —
+         ;; the one-shot server shape): the raw accumulated body IS the
+         ;; reply.
+         (body (if (and live fikra-ollama-streaming (= status 200))
+                   (progn
+                     (condition-case nil (fikra-ollama-stream-pump k "" t) (error () nil))
+                     (fikra-ollama-stream-body k (hashmap-get fikra-ollama-bodies k)))
+                   (hashmap-get fikra-ollama-bodies k))))
+    (fikra-ollama-forget-request k)
+    (if (not live)
+      nil
+    ;; r111 (codex r110 P2): a SWITCHED-AWAY thread no longer
     ;; discards — the reply SETTLES ITS OWN THREAD via the bg-settle
     ;; pattern (focus the firing thread, work, restore).
-    (if (not (= id (if fikra-ollama-latest-id fikra-ollama-latest-id -1)))
-      nil
-    (if (not (and thread-id fikra-ollama-pending-message))
-      nil
-    ;; r136c (codex catch): the SAME-THREAD path gets the SAME recovery
-    ;; (a render throw with the log unwritable stranded the turn — the
-    ;; handler only lived on the switched branch).
     (if (string= thread-id (fikra/thread/fikra-thread-current))
       (condition-case nil
-        (fikra-ollama-handle-reply status body)
+        (fikra-ollama-handle-reply status body entry)
         (error (m)
           (condition-case nil
             (progn
@@ -1669,7 +2035,7 @@ with its post-exit capture.")
                 (error () nil))
               'focus-failed)
           (let ((r (condition-case nil
-                    (fikra-ollama-handle-reply status body)
+                    (fikra-ollama-handle-reply status body entry)
                     (error (m)
                       (condition-case nil
                         (progn
@@ -1683,11 +2049,12 @@ with its post-exit capture.")
               (condition-case nil
                 (fikra/thread/fikra-thread-focus prev)
                 (error () nil)))
-            r)))))))))
+            r))))))))
 
 ;; The reply handling, thread-local (runs with the FIRING thread
-;; focused; the guards already ran).
-(defun fikra-ollama-handle-reply (status body)
+;; focused; the guards already ran). ENTRY is the request's ownership
+;; record (its `emitted` count decides what still needs rendering).
+(defun fikra-ollama-handle-reply (status body entry)
   (if (not (= status 200))
       (progn
         ;; The turn dies honestly: an error turn-end, a visible status.
@@ -1706,31 +2073,22 @@ with its post-exit capture.")
              (tool-calls (if msg (fikra-ollama-alist-get "tool_calls" msg) nil)))
         (if (and tool-calls (listp tool-calls) (> (length tool-calls) 0)
                  (< fikra-ollama-round fikra-ollama-max-rounds))
-          (fikra-ollama-tool-round msg tool-calls)
+          (fikra-ollama-tool-round msg tool-calls entry)
           (progn
-        (setq fikra-ollama-pending-message nil)
-        ;; r153: under streaming the content already rendered delta by
-        ;; delta — re-emitting would DUPLICATE the reply.
-        ;; r153: the STREAMED turn already rendered — settle as completed.
-        (if (and content (stringp content) (> (length content) 0)
-                 fikra-ollama-stream-rendered)
-          (progn
-            (fikra/thread/fikra-thread-turn-end "completed")
-            (editor-set-status
-              (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
-          (if (and content (stringp content) (> (length content) 0))
-            (progn
-              (fikra/event/fikra-event-emit
-                (list (list "kind" "text-delta")
-                      (list "speaker" "assistant")
-                      (list "text" content)))
-              ;; The thread state machine settles the turn (emits turn-end).
-              (fikra/thread/fikra-thread-turn-end "completed")
-              (editor-set-status
-                (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
-            (progn
-              (fikra/thread/fikra-thread-turn-end "error")
-              (editor-set-status "Fikra-ollama: empty reply")))))))))
+            (setq fikra-ollama-pending-message nil)
+            (if (and content (stringp content) (> (length content) 0))
+              (progn
+                ;; r153/r154: under streaming the deltas already rendered
+                ;; — this renders exactly what they did NOT (a non-streamed
+                ;; reply: everything).
+                (fikra-ollama-render-rest content entry)
+                ;; The thread state machine settles the turn (emits turn-end).
+                (fikra/thread/fikra-thread-turn-end "completed")
+                (editor-set-status
+                  (concat "Fikra: ollama (" fikra-ollama-model ") turn completed")))
+              (progn
+                (fikra/thread/fikra-thread-turn-end "error")
+                (editor-set-status "Fikra-ollama: empty reply"))))))))
 
 ;; Model resolution: the tags body is small — the filter DID accumulate
 ;; nothing for tags (marker-shaped); resolve via one sync curl instead
@@ -2045,15 +2403,35 @@ with its post-exit capture.")
         (signal (string-to-number k) "SIGKILL")
         (error () nil)))))
 
+;; The interrupt entry (the adapter contract). r154: the in-flight turn
+;; is ended on ITS OWN thread — the turn's home, whatever is focused. It
+;; used to end whatever thread was FOCUSED: an interrupt pressed in
+;; another thread wrote a stray ending there and left the running one
+;; "running" forever.
 (defun fikra-backend-ollama-abort ()
-  ;; The async request cannot be cancelled (the http primitive has no
-  ;; abort) — but the turn state settles: a late reply for an aborted
-  ;; turn is guarded by pending-message.
+  (let* ((home (if fikra-ollama-turn-home
+                  fikra-ollama-turn-home
+                  (fikra/thread/fikra-thread-current)))
+         (prev (fikra/thread/fikra-thread-current))
+         (moved (not (string= home prev))))
+    (if moved
+      (condition-case nil (fikra/thread/fikra-thread-focus home) (error () nil)))
+    (let ((r (condition-case nil (fikra-ollama-abort-turn) (error () nil))))
+      ;; Throw-safe restore: a focus that failed leaves `moved` true but
+      ;; focusing prev is still the right repair.
+      (if moved
+        (condition-case nil (fikra/thread/fikra-thread-focus prev) (error () nil)))
+      r)))
+
+(defun fikra-ollama-abort-turn ()
   ;; r131 (codex r130 P1#3): the interrupt also INVALIDATES the turn's
   ;; async children — the epoch bump makes their sentinels drop, and
   ;; the children are KILLED (the model's command stops running).
   (setq fikra-ollama-epoch (+ fikra-ollama-epoch 1))
   (fikra-ollama-kill-children)
+  ;; r154: the in-flight request is cancelled too — its stream stops at
+  ;; the transport (a late reply is dead twice over: no entry, no epoch).
+  (fikra-ollama-cancel-requests)
   ;; r131c: the interrupted turn's pending park dies with it.
   (setq fikra-ollama-parked-call nil)
   (setq fikra-ollama-parked-rest nil)
@@ -2064,6 +2442,12 @@ with its post-exit capture.")
       (condition-case nil
         (signal (string-to-number k) "SIGKILL")
         (error () nil))))
+  ;; r154: a parked approval dies with the turn (the gate's pending
+  ;; MEDIATE settles as rejected — on the home thread, under this dance).
+  (condition-case nil
+    (progn (require-module fikra/approvals)
+           (fikra/approvals/fikra-approval-abort-pending))
+    (error () nil))
   (if fikra-ollama-pending-message
     (progn
       (setq fikra-ollama-pending-message nil)
@@ -2082,25 +2466,14 @@ with its post-exit capture.")
       ;; The fired turn's state (a real fire ran turn-begin; the error
       ;; turn-end is only a legal transition FROM running).
       (fikra/thread/fikra-thread-status-set "running")))
-  (editor/keymaps/keymap-mutable-set!
-    (editor/keymaps/keymap-named "fikra-http-owners")
-    (number-to-string id) "fikra/backend-ollama/fikra-backend-ollama-complete")
-  (editor/keymaps/keymap-mutable-set! fikra-ollama-threads
-    (number-to-string id) (fikra/thread/fikra-thread-current))
-  ;; The latest-request stamp the real fire carries (r110's guard reads
-  ;; it — the seed simulates the fire fully).
+  ;; The ownership record + the latest-request stamp the real fire
+  ;; carries (r110's guard reads it — the seed simulates the fire fully).
+  (fikra-ollama-stamp-request id)
   (setq fikra-ollama-latest-id id)
   id)
 
 (defun fikra-backend-ollama-seed-unused (id)
-  (editor/keymaps/keymap-mutable-set!
-    (editor/keymaps/keymap-named "fikra-http-owners")
-    (number-to-string id) "fikra/backend-ollama/fikra-backend-ollama-complete")
-  ;; The thread identity the real fire stamps (r109 guards read it).
-  (editor/keymaps/keymap-mutable-set! fikra-ollama-threads
-    (number-to-string id) (fikra/thread/fikra-thread-current))
-  ;; The latest-request stamp the real fire carries (r110's guard reads
-  ;; it — the seed simulates the fire fully).
+  (fikra-ollama-stamp-request id)
   (setq fikra-ollama-latest-id id)
   id)
 

@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, beforeAll, afterAll } from "bun:test";
+import { describe, expect, test, beforeEach, beforeAll, afterAll, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,6 +56,38 @@ async function until(ed: Editor, expr: string, marker: string, tries = 40): Prom
 
 const e = (ed: Editor, expr: string) => executeTlisp(ed, expr);
 
+// r154: poll a FILE for a marker (the stub's out-of-band evidence —
+// the socket-close record).
+async function untilFile(path: string, marker: string, tries = 60): Promise<string> {
+  let text = "";
+  for (let i = 0; i < tries; i++) {
+    try {
+      text = readFileSync(path, "utf8");
+    } catch {
+      text = "";
+    }
+    if (text.includes(marker)) return text;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return text;
+}
+
+// The LAST recorded /api/chat body carrying MARKER (this turn's own —
+// earlier tests' bodies ride the same file).
+async function lastBodyFor(marker: string): Promise<string> {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
+      const last = lines[lines.length - 1];
+      if (last && last.includes(marker)) return last;
+    } catch {
+      /* not yet */
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`no recorded request body carries "${marker}"`);
+}
+
 // r129: every test here polls (100ms cycles) and several run git
 // checkpoints through the allow path — under load the 5s default
 // budget false-fails them (codex's gate run hit exactly that). One
@@ -84,8 +116,27 @@ async function armed(): Promise<Editor> {
   // Pin a model (no live /api/tags resolution dependency).
   e(ed, '(fikra/backend-ollama/fikra-backend-ollama-set-model "test:fake")');
   e(ed, "(fikra/chat/fikra-refresh-lighter)");
+  armedEditors.push(ed);
   return ed;
 }
+
+// r154: Bun's fetch keeps at most 256 connections open PER ORIGIN — the
+// 257th request QUEUES and is never sent. The stub never answers, so
+// every test used to leave its real fires hanging for the rest of the
+// run: with 91 tests the tail's real requests (the recorded bodies, the
+// sentinel's re-fires) silently stopped reaching the server. Each test's
+// editor is retired with an ABORT, which cancels its in-flight requests
+// (and kills lingering async children).
+const armedEditors: Editor[] = [];
+afterEach(() => {
+  for (const ed of armedEditors.splice(0)) {
+    try {
+      e(ed, "(condition-case nil (fikra/backend-ollama/fikra-backend-ollama-abort) (error () nil))");
+    } catch {
+      /* the editor is retired regardless */
+    }
+  }
+});
 
 // r129: the stub ollama (see armed()). A SEPARATE PROCESS: the
 // availability probe is a SYNC shell-command curl — it blocks the
@@ -100,9 +151,18 @@ beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "fikra-stub-"));
   const script = join(dir, "stub.ts");
   writeFileSync(script, `
+const fs = require("node:fs");
 const body = JSON.stringify({ models: [{ name: "test:fake" }] });
+// r154: the sockets HOLD-PROBE holds open. Their CLOSE is the evidence
+// that an interrupted/replaced turn's request was CANCELLED at the
+// transport (nothing ends these on the server side).
+const held = new Set();
+const noteClose = (socket) => {
+  if (held.delete(socket)) fs.appendFileSync(process.argv[2] + ".closes", "HELD-CLOSED\\n");
+};
 const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
   data(socket, chunk) {
+    if (socket.readyState === "closed") { noteClose(socket); return; }
     if (chunk.toString().includes("GET /api/tags")) {
       socket.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: " + body.length + "\\r\\nConnection: close\\r\\n\\r\\n" + body);
       socket.end();
@@ -112,7 +172,15 @@ const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
     // with NDJSON deltas (r153: the progressive render needs real
     // chunks arriving over time).
     const text = chunk.toString();
-    require("node:fs").appendFileSync(process.argv[2], text.slice(text.indexOf("\\r\\n\\r\\n") + 4) + "\\n");
+    fs.appendFileSync(process.argv[2], text.slice(text.indexOf("\\r\\n\\r\\n") + 4) + "\\n");
+    if (text.includes('"stream":true') && text.includes("HOLD-PROBE")) {
+      // r154: one delta, then the stream stays OPEN until the client
+      // goes away.
+      socket.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/x-ndjson\\r\\n\\r\\n");
+      socket.write('{"message":{"role":"assistant","content":"HOLD-FIRST"}}\\n');
+      held.add(socket);
+      return;
+    }
     if (text.includes('"stream":true') && text.includes("STREAM-PROBE")) {
       const lines = [
         '{"message":{"role":"assistant","content":"Str"}}',
@@ -137,6 +205,10 @@ const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
       setTimeout(tick, 100);
     }
   },
+  // The close handlers cover Bun versions that still deliver them (the
+  // readyState probe in the data handler covers the rest).
+  close(socket) { noteClose(socket); },
+  error(socket) { noteClose(socket); },
 } });
 console.log(l.port);
 `);
@@ -262,13 +334,20 @@ describe("ollama chat lifecycle (r109 — codex r108 catches)", () => {
     e(ed, "(fikra/backend-ollama/fikra-backend-ollama-abort)");
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
     const before = String(e(ed, "(buffer-text)").value);
-    // The late reply arrives — it must DISCARD.
-    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "stale answer" } }));
+    // The late reply arrives — it must DISCARD. r154 (codex re-grade):
+    // NEWLINE-TERMINATED NDJSON — the real streaming shape. The
+    // unterminated single-line bodies every older test sends never
+    // reach the filter's delta path (they ride the completion's raw-body
+    // fallback), so this guard was never exercised against a stream.
+    const reply = hex(JSON.stringify({ message: { role: "assistant", content: "stale answer" } }) + "\n");
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 42 "${reply}")`);
+    // The delta alone (no completion yet) must already be invisible.
+    expect(String(e(ed, "(buffer-text)").value)).toBe(before);
     e(ed, `(fikra-http-complete 42 200 "${hex("{}")}")`);
     const after = String(e(ed, "(buffer-text)").value);
     expect(after).toBe(before);
     expect(after).not.toContain("stale answer");
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("interrupted");
   });
 
   tt("HISTORY rides the messages (the second turn sees the first exchange)", async () => {
@@ -299,18 +378,27 @@ describe("ollama replacement turns (r110 — codex r109 P1)", () => {
     e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 52 "live")');
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
     // Reply 1 arrives LATE — it must NOT render nor settle turn 2.
-    const stale = hex(JSON.stringify({ message: { role: "assistant", content: "STALE_ANSWER" } }));
+    // r154 (codex re-grade): NEWLINE-TERMINATED NDJSON (the real
+    // streaming shape — codex's probe put STALE_ANSWER into turn 2's
+    // transcript: the filter rendered every delta before any guard).
+    const stale = hex(JSON.stringify({ message: { role: "assistant", content: "STALE_ANSWER" } }) + "\n");
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 51 "${stale}")`);
+    // The DELTA alone (the stream still open, no completion) renders
+    // nothing.
+    expect(String(e(ed, "(buffer-text)").value)).not.toContain("STALE_ANSWER");
     e(ed, `(fikra-http-complete 51 200 "${hex("{}")}")`);
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
     const text = String(e(ed, "(buffer-text)").value);
     expect(text).not.toContain("STALE_ANSWER");
-    // Reply 2 lands normally.
-    const fresh = hex(JSON.stringify({ message: { role: "assistant", content: "fresh answer" } }));
+    // Reply 2 lands normally (streamed too).
+    const fresh = hex(JSON.stringify({ message: { role: "assistant", content: "fresh answer" } }) + "\n");
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 52 "${fresh}")`);
     e(ed, `(fikra-http-complete 52 200 "${hex("{}")}")`);
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
-    expect(String(e(ed, "(buffer-text)").value)).toContain("fresh answer");
+    const final = String(e(ed, "(buffer-text)").value);
+    expect(final).toContain("fresh answer");
+    expect(final.split("fresh answer").length - 1).toBe(1);
+    expect(final).not.toContain("STALE_ANSWER");
   });
 
   tt("history ORDER: first exchange before second; the in-flight message excluded", async () => {
@@ -1525,6 +1613,364 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(text.split("The tool_calls field is here.").length - 1).toBe(1);
   });
 
+  // r154 — STREAM OWNERSHIP (codex re-grade: the grade fell 5 → 4 on the
+  // r153 stream). The stream had no owner: the filter rendered every
+  // delta before any guard ran (an interrupted turn's reply landed in its
+  // REPLACEMENT's transcript), it rendered for whatever thread was
+  // FOCUSED (a switched-away turn's text went to the wrong transcript and
+  // its own thread settled with no reply), and the history serialized
+  // every delta as its own assistant message. Every reply below is
+  // NEWLINE-TERMINATED NDJSON — the shape ollama sends (one line per
+  // token; captured live from 0.12.3). The unterminated single-line
+  // bodies the older tests send never reach the filter's delta path (they
+  // ride the completion's raw-body fallback), which is how the r153 suite
+  // stayed green over all three.
+  describe("ollama stream OWNERSHIP (r154 — codex re-grade)", () => {
+    const ndjson = (os: unknown[]) => hex(os.map((o) => JSON.stringify(o) + "\n").join(""));
+    const feed = (ed: Editor, id: number, raw: string) =>
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${id} "${raw}")`);
+    const finish = (ed: Editor, id: number) =>
+      e(ed, `(fikra-http-complete ${id} 200 "${hex("{}")}")`);
+    const text = (ed: Editor) => strip(String(e(ed, "(buffer-text)").value));
+    const count = (s: string, needle: string) => s.split(needle).length - 1;
+    const idle = async (ed: Editor) => expect(await untilStatus(ed, "idle", 50)).toBe("idle");
+    // A thread's DURABLE transcript (its event log), whatever is focused.
+    const log = (ed: Editor, id: string) =>
+      String(e(ed, `(condition-case nil (read-file-content (concat (fikra/thread/fikra-thread-field-root-of "${id}") "/.tmax/fikra/threads/${id}/events.jsonl")) (error () ""))`).value);
+
+    tt("an INTERRUPT cancels the in-flight request — the server sees the socket close", async () => {
+      const ed = await armed();
+      rmSync(bodiesFile + ".closes", { force: true });
+      e(ed, '(fikra/chat/fikra-turn-send "HOLD-PROBE one")');
+      // A REAL request, really streaming: the stub holds it open after
+      // its first delta (nothing ends it server-side).
+      expect(strip(await until(ed, "(buffer-text)", "HOLD-FIRST", 150))).toContain("HOLD-FIRST");
+      e(ed, "(fikra/chat/fikra-turn-interrupt)");
+      expect(await untilStatus(ed, "interrupted", 50)).toBe("interrupted");
+      expect(await untilFile(bodiesFile + ".closes", "HELD-CLOSED")).toContain("HELD-CLOSED");
+      expect(count(text(ed), "HOLD-FIRST")).toBe(1);
+    });
+
+    tt("a REPLACED turn's request is cancelled too (the new turn never queues behind it)", async () => {
+      const ed = await armed();
+      rmSync(bodiesFile + ".closes", { force: true });
+      e(ed, '(fikra/chat/fikra-turn-send "HOLD-PROBE replaced")');
+      expect(strip(await until(ed, "(buffer-text)", "HOLD-FIRST", 150))).toContain("HOLD-FIRST");
+      // The user submits again while the first turn runs (no interrupt).
+      e(ed, '(fikra/chat/fikra-turn-send "the replacement")');
+      expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+      expect(await untilFile(bodiesFile + ".closes", "HELD-CLOSED")).toContain("HELD-CLOSED");
+      const t = text(ed);
+      expect(count(t, "HOLD-FIRST")).toBe(1);
+      // The replaced turn ended honestly BEFORE the new one began.
+      expect(t).toContain("interrupted");
+      expect(t.indexOf("interrupted")).toBeLessThan(t.indexOf("user › the replacement"));
+    });
+
+    tt("a send from ANOTHER thread supersedes the running turn — which ends on ITS OWN thread", async () => {
+      const ed = await armed();
+      e(ed, "(require-module fikra/threads)");
+      e(ed, '(fikra/chat/fikra-turn-send "main is busy")');
+      e(ed, '(fikra/thread/fikra-thread-switch "away")');
+      e(ed, '(fikra/chat/fikra-turn-send "from away")');
+      // main settled (it used to stay "running" forever — only its
+      // completion was discarded); away's turn is the live one.
+      expect(String(e(ed, '(fikra/thread/fikra-thread-status-of "main")').value)).toBe("interrupted");
+      expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+      expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
+      expect(log(ed, "main")).toContain("interrupted");
+      expect(log(ed, "away")).toContain("from away");
+      expect(log(ed, "away")).not.toContain("main is busy");
+    });
+
+    tt("focus moves MID-STREAM: the reply lands on the ORIGINATING thread — complete, once, nowhere else", async () => {
+      const ed = await armed();
+      e(ed, "(require-module fikra/threads)");
+      e(ed, '(fikra/chat/fikra-turn-send "question for main")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 72 "live")');
+      feed(ed, 72, ndjson([{ message: { role: "assistant", content: "hello" } }]));
+      expect(text(ed)).toContain("hello");
+      // The user switches away; the rest of the stream arrives unseen.
+      e(ed, '(fikra/thread/fikra-thread-focus "away")');
+      feed(ed, 72, ndjson([{ message: { role: "assistant", content: " world" } }]));
+      feed(ed, 72, ndjson([{ message: { role: "assistant", content: "" }, done: true }]));
+      finish(ed, 72);
+      // Focus was restored; the other thread never received the reply…
+      expect(String(e(ed, "(fikra/thread/fikra-thread-current)").value)).toBe("away");
+      expect(log(ed, "away")).not.toContain("hello");
+      expect(log(ed, "away")).not.toContain("world");
+      // …and the originating thread holds ALL of it, exactly once, settled.
+      expect(log(ed, "main")).toContain("hello");
+      expect(log(ed, "main")).toContain("world");
+      e(ed, '(fikra/thread/fikra-thread-focus "main")');
+      expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("idle");
+      e(ed, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+      const t = text(ed);
+      expect(count(t, "assistant › hello world")).toBe(1);
+      expect(count(t, "assistant ›")).toBe(1);
+      expect(t).toContain("completed");
+    });
+
+    tt("a background thread's open stream never leaks into the FOCUSED thread's render", async () => {
+      const ed = await armed();
+      e(ed, "(require-module fikra/threads)");
+      e(ed, '(fikra/chat/fikra-turn-send "streaming in main")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 73 "live")');
+      feed(ed, 73, ndjson([{ message: { role: "assistant", content: "main is" } }]));
+      // The user views ANOTHER thread while main keeps streaming.
+      e(ed, '(fikra/thread/fikra-thread-switch "away")');
+      feed(ed, 73, ndjson([{ message: { role: "assistant", content: " still streaming" } }]));
+      expect(String(e(ed, "(buffer-current)").value)).toBe("*Fikra-away*");
+      expect(text(ed)).not.toContain("still streaming");
+      // away's OWN event renders with its speaker label on its own line —
+      // main's open text run must not glue it onto the previous line.
+      e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "speaker" "user") (list "text" "away says hi")))');
+      const t = text(ed);
+      expect(t).toContain("user › away says hi");
+      expect(t).not.toContain("main is");
+      // …and main's line joined across the switch (one run of its own).
+      feed(ed, 73, ndjson([{ message: { role: "assistant", content: "" }, done: true }]));
+      finish(ed, 73);
+      expect(log(ed, "main")).toContain("main is");
+      expect(log(ed, "main")).toContain(" still streaming");
+      expect(String(e(ed, '(fikra/thread/fikra-thread-status-of "main")').value)).toBe("idle");
+    });
+
+    tt("LEAVING and RETURNING mid-stream keeps the reply ONE line (no duplicate speaker labels)", async () => {
+      const ed = await armed();
+      e(ed, "(require-module fikra/threads)");
+      e(ed, '(fikra/chat/fikra-turn-send "streamed across switches")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 74 "live")');
+      feed(ed, 74, ndjson([{ message: { role: "assistant", content: "hel" } }]));
+      e(ed, '(fikra/thread/fikra-thread-focus "away")');
+      feed(ed, 74, ndjson([{ message: { role: "assistant", content: "lo" } }]));
+      e(ed, '(fikra/thread/fikra-thread-focus "main")');
+      feed(ed, 74, ndjson([{ message: { role: "assistant", content: " world" } }]));
+      finish(ed, 74);
+      await idle(ed);
+      expect(count(text(ed), "assistant › hello world")).toBe(1);
+      expect(count(text(ed), "assistant ›")).toBe(1);
+      // Live render = replay (the transcript rebuilds to the same reply).
+      e(ed, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+      expect(count(text(ed), "assistant › hello world")).toBe(1);
+    });
+
+    tt("streamed deltas are ONE assistant message in the next request's history", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "first: the history check")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 777 "live")');
+      feed(ed, 777, ndjson([
+        { message: { role: "assistant", content: "hello" } },
+        { message: { role: "assistant", content: " world" } },
+        { message: { role: "assistant", content: "" }, done: true },
+      ]));
+      finish(ed, 777);
+      await idle(ed);
+      const h = String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value);
+      expect(h).toContain('"role":"assistant","content":"hello world"');
+      expect(count(h, '"role":"assistant"')).toBe(1);
+      // The REAL wire: the next turn's request body.
+      e(ed, '(fikra/chat/fikra-turn-send "second: the follow-up")');
+      const msgs = (JSON.parse(await lastBodyFor("second: the follow-up")) as {
+        messages: { role: string; content: string }[];
+      }).messages;
+      expect(msgs.filter((m) => m.role === "assistant")).toEqual([{ role: "assistant", content: "hello world" }]);
+      expect(msgs.map((m) => m.role)).toEqual(["system", "user", "assistant", "user"]);
+    });
+
+    tt("HISTORY survives a thread switch (the thread's durable log is the source)", async () => {
+      const ed = await armed();
+      e(ed, "(require-module fikra/threads)");
+      e(ed, '(fikra/chat/fikra-turn-send "remember the word pineapple")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 43 "live")');
+      feed(ed, 43, ndjson([{ message: { role: "assistant", content: "noted" } }]));
+      finish(ed, 43);
+      await idle(ed);
+      // Away and back: the in-memory event copy resets on every focus
+      // change — the history used to vanish with it.
+      e(ed, '(fikra/thread/fikra-thread-focus "away")');
+      e(ed, '(fikra/thread/fikra-thread-focus "main")');
+      const h = String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value);
+      expect(h).toContain('"role":"user","content":"remember the word pineapple"');
+      expect(h).toContain('"role":"assistant","content":"noted"');
+    });
+
+    // r154: durable history GROWS — and an unbounded one stalled the
+    // editor at every send (measured: 2.7s at 100 turns) for a prompt the
+    // 4096-token context cannot hold. Synthetic long-lived threads below
+    // (main's log overwritten directly).
+    const writeLog = (ed: Editor, rows: unknown[]) => {
+      const path = String(e(ed, "(fikra/thread/fikra-thread-log-path)").value);
+      writeFileSync(path, rows.map((r) => JSON.stringify(r) + "\n").join(""));
+    };
+    const history = (ed: Editor) =>
+      JSON.parse("[" + String(e(ed, "(fikra/backend-ollama/fikra-ollama-history-messages)").value).replace(/,$/, "") + "]") as {
+        role: string;
+        content: string;
+      }[];
+
+    tt("a LONG thread sends only its most recent WHOLE turns (the history is budgeted)", async () => {
+      const ed = await armed();
+      const rows: unknown[] = [];
+      // 40 turns of 400 chars each (question + streamed answer).
+      for (let t = 1; t <= 40; t++) {
+        rows.push({ kind: "turn-start", turn: t });
+        rows.push({ kind: "text-delta", speaker: "user", text: `q${t} `.padEnd(200, "u") });
+        for (let d = 0; d < 20; d++) rows.push({ kind: "text-delta", speaker: "assistant", text: "0123456789" });
+        rows.push({ kind: "turn-end", turn: t, status: "completed" });
+      }
+      writeLog(ed, rows);
+      const msgs = history(ed);
+      const size = msgs.reduce((n, m) => n + m.content.length, 0);
+      // Bounded — and it still FILLS the budget with whole turns.
+      expect(size).toBeLessThanOrEqual(6000);
+      expect(size).toBeGreaterThan(4000);
+      // Whole turns, newest first: opens on a question, closes on its answer.
+      expect(msgs[0]?.role).toBe("user");
+      expect(Number(msgs[0]?.content.slice(1, msgs[0]?.content.indexOf(" ")))).toBeGreaterThan(20);
+      expect(msgs[msgs.length - 1]).toEqual({ role: "assistant", content: "0123456789".repeat(20) });
+      // …every question immediately followed by its answer.
+      expect(msgs.map((m) => m.role).join(",")).toBe(msgs.map((_, i) => (i % 2 === 0 ? "user" : "assistant")).join(","));
+    });
+
+    tt("a turn larger than the read window never leaves a half-open history", async () => {
+      const ed = await armed();
+      const rows: unknown[] = [{ kind: "turn-start", turn: 1 }, { kind: "text-delta", speaker: "user", text: "q1" }];
+      // One enormous turn (≈400KB of log): the window holds only its end.
+      for (let d = 0; d < 6000; d++) rows.push({ kind: "text-delta", speaker: "assistant", text: "0123456789" });
+      rows.push({ kind: "turn-end", turn: 1, status: "completed" });
+      writeLog(ed, rows);
+      // No WHOLE completed turn is visible → NO history (never a reply
+      // without its question, never half a turn).
+      expect(history(ed)).toEqual([]);
+      // A later small turn is whole inside the window — it IS the history.
+      writeLog(ed, [...rows,
+        { kind: "turn-start", turn: 2 },
+        { kind: "text-delta", speaker: "user", text: "second question" },
+        { kind: "text-delta", speaker: "assistant", text: "short answer" },
+        { kind: "turn-end", turn: 2, status: "completed" }]);
+      expect(history(ed)).toEqual([
+        { role: "user", content: "second question" },
+        { role: "assistant", content: "short answer" },
+      ]);
+    });
+
+    tt("a BLANK line in the stream never stalls it", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "blank lines")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 78 "live")');
+      // A leading blank line, then the delta, then another blank.
+      feed(ed, 78, hex("\n") + ndjson([{ message: { role: "assistant", content: "after-blank" } }]) + hex("\n"));
+      expect(text(ed)).toContain("after-blank");
+      feed(ed, 78, ndjson([{ message: { role: "assistant", content: " and-more" } }]));
+      finish(ed, 78);
+      await idle(ed);
+      expect(count(text(ed), "assistant › after-blank and-more")).toBe(1);
+    });
+
+    tt("a final UNTERMINATED line is part of the reply (not discarded)", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "unterminated tail")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 79 "live")');
+      // One complete line, then a last line with NO trailing newline.
+      feed(ed, 79, ndjson([{ message: { role: "assistant", content: "complete line," } }]) +
+        hex(JSON.stringify({ message: { role: "assistant", content: " then the tail" } })));
+      expect(text(ed)).toContain("complete line,");
+      expect(text(ed)).not.toContain("then the tail");
+      finish(ed, 79);
+      await idle(ed);
+      expect(count(text(ed), "assistant › complete line, then the tail")).toBe(1);
+    });
+
+    tt("a line split across chunks renders once", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "split chunks")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 801 "live")');
+      const whole = JSON.stringify({ message: { role: "assistant", content: "split-safe" } }) + "\n";
+      const cut = Math.floor(whole.length / 2);
+      feed(ed, 801, hex(whole.slice(0, cut)));
+      expect(text(ed)).not.toContain("split-sa");
+      feed(ed, 801, hex(whole.slice(cut)));
+      finish(ed, 801);
+      await idle(ed);
+      expect(count(text(ed), "assistant › split-safe")).toBe(1);
+    });
+
+    tt("tool calls streamed ONE PER LINE all reach the round (ollama 0.12's live shape)", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "run two commands")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 80 "live")');
+      // Captured live from ollama 0.12.3 + qwen3:8b asked for two tool
+      // calls: the narration streams as content; EACH call is its own
+      // line carrying a single-element tool_calls array; every call
+      // after the first is stamped with its index inside `function`; the
+      // last line is the done marker with empty content.
+      feed(ed, 80, ndjson([
+        { message: { role: "assistant", content: "Running both." } },
+        { message: { role: "assistant", content: "", tool_calls: [
+          { function: { name: "bash", arguments: { command: "echo FIRST-CALL" } } }] } },
+        { message: { role: "assistant", content: "", tool_calls: [
+          { function: { index: 1, name: "bash", arguments: { command: "echo SECOND-CALL" } } }] } },
+        { message: { role: "assistant", content: "" }, done: true, done_reason: "stop" },
+      ]));
+      finish(ed, 80);
+      const mid = strip(await until(ed, "(buffer-text)", "SECOND-CALL", 120));
+      // BOTH calls ran (a last-line-wins stash dropped the first).
+      expect(mid).toContain("FIRST-CALL");
+      expect(count(mid, "⚙ bash")).toBe(2);
+      // The narration rendered exactly once, before the rows.
+      expect(count(mid, "Running both.")).toBe(1);
+      expect(mid.indexOf("Running both.")).toBeLessThan(mid.indexOf("FIRST-CALL"));
+      // The model's own record carries BOTH calls and its narration.
+      const acc = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+      const assistant = acc.slice(acc.indexOf('"role":"assistant"'), acc.indexOf('"role":"tool"'));
+      expect(count(assistant, '"name":"bash"')).toBe(2);
+      expect(assistant).toContain('"content":"Running both."');
+      await settleRefireFrom(ed, "80", "both done");
+      await idle(ed);
+      expect(count(text(ed), "Running both.")).toBe(1);
+    });
+
+    tt("an INCREMENTAL tool call (index + argument-string pieces) merges into ONE call", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "fragmented call")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 81 "live")');
+      feed(ed, 81, ndjson([
+        { message: { role: "assistant", content: "", tool_calls: [
+          { index: 0, function: { name: "bash", arguments: "" } }] } },
+        { message: { role: "assistant", content: "", tool_calls: [
+          { index: 0, function: { arguments: '{"comm' } }] } },
+        { message: { role: "assistant", content: "", tool_calls: [
+          { index: 0, function: { arguments: 'and":"echo FRAG-MERGE"}' } }] } },
+        { message: { role: "assistant", content: "" }, done: true },
+      ]));
+      finish(ed, 81);
+      const mid = strip(await until(ed, "(buffer-text)", "FRAG-MERGE", 120));
+      expect(count(mid, "⚙ bash")).toBe(1);
+      expect(mid).toContain("FRAG-MERGE");
+      await settleRefireFrom(ed, "81", "merged");
+      await idle(ed);
+    });
+
+    tt("index-less argument fragments continue the LAST call (the object-fragment shape)", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "object fragments")');
+      e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 82 "live")');
+      feed(ed, 82, ndjson([
+        { message: { role: "assistant", content: "", tool_calls: [
+          { function: { name: "bash", arguments: { command: "echo LEG" } } }] } },
+        { message: { role: "assistant", content: "", tool_calls: [
+          { function: { arguments: { command: "echo LEGACY-MERGE" } } }] } },
+        { message: { role: "assistant", content: "" }, done: true },
+      ]));
+      finish(ed, 82);
+      const mid = strip(await until(ed, "(buffer-text)", "LEGACY-MERGE", 120));
+      expect(count(mid, "⚙ bash")).toBe(1);
+      await settleRefireFrom(ed, "82", "merged");
+      await idle(ed);
+    });
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
@@ -2107,5 +2553,20 @@ describe("ollama allow-await ordering (r132 — codex r130 P1#2)", () => {
     expect(await untilStatus(ed, "idle", 60)).toBe("idle");
     expect(String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value)).not.toContain("async");
     rmSync(release, { force: true });
+  });
+});
+
+// r154: the suite's own plumbing, guarded. Bun's fetch keeps at most 256
+// connections open per origin and QUEUES the 257st forever; with the stub
+// never answering, a run that leaks one request per test goes deaf in its
+// tail (bodies stop being recorded; sentinel re-fires never reach the
+// server). The afterEach abort retires each editor's requests — this
+// LAST test proves the stub still hears the suite after everything else.
+describe("ollama suite plumbing (r154)", () => {
+  tt("the stub still receives requests at the END of the suite", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "tail plumbing check")');
+    const body = JSON.parse(await lastBodyFor("tail plumbing check")) as { model?: string };
+    expect(body.model).toBe("test:fake");
   });
 });

@@ -173,6 +173,35 @@ describe("http-request", () => {
   });
 });
 
+// ── http-cancel (r154) ─────────────────────────────────────────────────
+// The primitive's CONTRACT. The end-to-end proof — an interrupted turn's
+// request really closes its socket — lives with the ollama backend
+// (fikra-backend-ollama.test.ts, "the server sees the socket close").
+
+describe("http-cancel", () => {
+  test("rejects a missing request id", () => {
+    const api = createEditorAPI(createState());
+    const cancel = expectDefined(api.get("http-cancel"));
+
+    expect(Either.isLeft(cancel([]))).toBe(true);
+  });
+
+  test("rejects a non-numeric request id", () => {
+    const api = createEditorAPI(createState());
+    const cancel = expectDefined(api.get("http-cancel"));
+
+    expect(Either.isLeft(cancel([createString("not-an-id")]))).toBe(true);
+  });
+
+  test("an unknown or already-settled id is a no-op (nil)", () => {
+    const api = createEditorAPI(createState());
+    const cancel = expectDefined(api.get("http-cancel"));
+
+    const result = expectRight(cancel([createNumber(999_999)]));
+    expect(result.type).toBe("nil");
+  });
+});
+
 // ── buffer-set-read-only ──────────────────────────────────────────────
 
 describe("buffer-set-read-only", () => {
