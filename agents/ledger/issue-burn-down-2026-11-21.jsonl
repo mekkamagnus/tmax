@@ -178,3 +178,5 @@
 {"ts":"2026-11-24T12:00:00Z","event":"gate-round","issue":332,"round":2,"workflow":"wf_a5c35b6e-d0d","verdict":"PASS","note":"r1 findings genuinely fixed; the hygiene notes (docstring/SPEC/vacuous-test) applied; ADR-0316 written"}
 {"ts":"2026-11-24T12:10:00Z","event":"adr","issue":332,"adr":"docs/adrs/ADR-0316-binary-info-manuals.md","commit":"e53897ef"}
 {"ts":"2026-11-24T12:12:00Z","event":"valve-launch","issue":332,"round":1,"task":"bcy1ybwks","note":"incident: git add -A swept the user's daily/ noise files into a commit — caught + rewritten within the cycle (the house rule held)"}
+{"ts":"2026-11-24T13:30:00Z","event":"valve-round","issue":332,"round":1,"grade":"8/10","top_fixes":["no automated binary-repro test (asset deletion passes units)","no proof the resolver avoids host probes"],"disposition":"both landed: the integration test rebuilds + repros under an isolated socket; the instrumented test spies node:fs (zero probes from the virtual root)"}
+{"ts":"2026-11-24T13:35:00Z","event":"valve-launch","issue":332,"round":2,"task":"brrpajmqa"}
