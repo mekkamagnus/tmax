@@ -99,17 +99,26 @@ describe("#310 — scope resolution (FRESH, cache-bypassed)", () => {
     expect(dn("a/b.txt")).toBe("a");
   });
 
-  test("outside a project: 'here' falls back to the start path; 'project' refuses", () => {
+  test("outside a project: 'here' falls back to the RESOLVED cwd (absolute); 'project' refuses", () => {
     const dir = mkdtempSync(join(tmpdir(), "i310-out-"));
     dirs.push(dir);
     process.chdir(dir);
     const here = String(e(editor, '(editor/commands/grep-scope/grep-scope-resolve "here")').value);
-    expect(here.length).toBeGreaterThan(0); // the start path itself
+    // ABSOLUTE (valve r4: the literal '.' fallback let a cwd change
+    // between prompt and submit redirect the search).
+    expect(here.startsWith("/")).toBe(true);
+    // macOS /var → /private/var symlink resolution: compare resolved.
+    expect(require("node:path").resolve(here).replace("/private/", "/")).toBe(require("node:path").resolve(dir).replace("/private/", "/"));
     const proj = e(editor, '(editor/commands/grep-scope/grep-scope-resolve "project")');
     expect(["nil", "null"].includes(String(proj.value))).toBe(true);
     // The named refusal status.
     e(editor, "(editor/commands/grep-scope/grep-scope-project)");
     expect(st(editor)).toContain("not in a project");
+    // The 'here' prompt shows the RESOLVED scope.
+    e(editor, "(editor/commands/grep-scope/grep-scope-here)");
+    const mb = (editor.getState() as unknown as { minibufferView?: { prompt?: string } }).minibufferView;
+    expect(mb?.prompt ?? "").toContain(here); // the RESOLVED scope in the label
+    e(editor, '(editor/commands/grep-scope/grep-scope-accept "")');
   });
 });
 

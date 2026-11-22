@@ -43,13 +43,27 @@ Absolute → the leading segments; relative → same, '.' when bare."
       (setq joined (concat joined "/" sg)))
     (if (= (length joined) 0) "." joined)))
 
+(defun grep-scope-chomp-nl (s)
+  (if (and (stringp s) (> (length s) 0)
+           (string= (substring s (- (length s) 1) (length s)) "\n"))
+    (substring s 0 (- (length s) 1))
+    s))
+
+(defun grep-scope-absolute-cwd ()
+  "The RESOLVED working directory (valve r4: the no-file fallback
+was the LITERAL '.' — the prompt showed it, and a cwd change
+between prompt and submit would redirect the search; pwd(1)
+resolves once, at prompt-open time)."
+  (grep-scope-chomp-nl
+    (nth 0 (shell-exec-argv (list "pwd") "."))))
+
 (defun grep-scope-start-path ()
   "The detection start: the current buffer's file DIR; no file →
-process.cwd() (the TS primitive resolves '.' against it)."
+the RESOLVED cwd (absolute — the prompt pins the actual scope)."
   (let ((fn (buffer-filename)))
     (if (and (stringp fn) (> (length fn) 0))
       (grep-scope-dirname fn)
-      ".")))
+      (grep-scope-absolute-cwd))))
 
 (defun grep-scope-resolve (binding)
   "FRESH root detection for BINDING ('here | 'project). Returns the
