@@ -41,6 +41,8 @@ interface SpanRecord {
   endLine: number;
   endCol: number;
   style: HighlightSpan["style"];
+  /** The buffer object at registration (kill+recreate detection). */
+  token: unknown;
 }
 
 /** The buffer shape a merged grid was built against (the lazy
@@ -48,8 +50,13 @@ interface SpanRecord {
  * mismatch). */
 export interface BufferShape {
   lineCount: number;
-  firstLineLength: number;
-  lastLineLength: number;
+  /** A cheap whole-text checksum (gate r1: shape-only identity let
+   * same-length substitutions escape — SPEC-289 says text CHANGE
+   * invalidates). */
+  checksum: number;
+  /** The buffer OBJECT (identity): a killed-and-recreated buffer is
+   * a different token — its stale records drop (gate r1). */
+  token: unknown;
 }
 
 /** Span-end sentinel for "to end of line" (clamped at render — the
@@ -65,8 +72,17 @@ export function createSpanOps(
   const api = new Map<string, TLispFunctionImpl>();
 
   /** Rebuild + publish the merged grid for one buffer (registration
-   * order; later-registered spans render later → win per cell). */
+   * order; later-registered spans render later → win per cell).
+   * Records whose buffer is GONE (or replaced — token mismatch)
+   * drop first (gate r1: the kill-cleanup contract). */
   const publish = (buffer: string): void => {
+    const shapes = new Map<string, ReturnType<typeof probeShape>>();
+    for (const r of [...records.values()]) {
+      if (!shapes.has(r.buffer)) shapes.set(r.buffer, probeShape(r.buffer));
+      const live = shapes.get(r.buffer);
+      const recToken = r.token;
+      if (!live || live.token !== recToken) records.delete(r.id);
+    }
     const perLine = new Map<number, HighlightSpan[]>();
     let maxLine = -1;
     for (const r of records.values()) {
@@ -117,6 +133,13 @@ export function createSpanOps(
     }
     const sl = slArg!.value as number, sc = scArg!.value as number;
     const el = elArg!.value as number, ec = ecArg!.value as number;
+    if (sl < 0 || sc < 0 || el < 0 || ec < 0) {
+      return Either.left(createValidationError(
+        "ConstraintViolation",
+        "span-make: negative coordinates are invalid",
+        "range", `[${sl},${sc})..[${el},${ec})`, "non-negative",
+      ));
+    }
     if (el < sl || (el === sl && ec <= sc)) {
       return Either.left(createValidationError(
         "ConstraintViolation",
@@ -124,8 +147,16 @@ export function createSpanOps(
         "range", `[${sl},${sc})..[${el},${ec})`, "end > start",
       ));
     }
+    const shapeNow = probeShape(bufArg.value as string);
+    if (!shapeNow) {
+      return Either.left(createValidationError(
+        "ConstraintViolation",
+        `span-make: no such buffer '${String(bufArg.value)}'`,
+        "buffer-name", bufArg.value, "an existing buffer",
+      ));
+    }
     const id = nextId++;
-    records.set(id, { id, buffer: bufArg.value as string, startLine: sl, startCol: sc, endLine: el, endCol: ec, style: { ...face } });
+    records.set(id, { id, buffer: bufArg.value as string, startLine: sl, startCol: sc, endLine: el, endCol: ec, style: { ...face }, token: shapeNow.token });
     publish(bufArg.value as string);
     return Either.right(createNumber(id));
   });

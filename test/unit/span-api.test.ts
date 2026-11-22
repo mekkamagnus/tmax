@@ -124,3 +124,40 @@ describe("#296 — span API (SPEC-289, the API half)", () => {
     expect(gridOf(editor, "*tmp296*")).toBeUndefined();
   });
 });
+
+describe("#296 — gate r1 fixes (the API half)", () => {
+  test("a SAME-SHAPE edit invalidates (the whole-text checksum)", async () => {
+    const { captureFrame } = await import("../../src/render/capture-frame.ts");
+    setText("test", "hello\nworld\n");
+    e(editor, '(span-make "test" 0 0 0 5 "region")');
+    const f1 = captureFrame(editor.getEditorState() as never, 40, 8);
+    expect(f1.join("\n")).toContain("48;2;38;79;120");
+    // SAME-LENGTH substitution (the shape-only identity missed this).
+    setText("test", "HELLO\nworld\n");
+    const f2 = captureFrame(editor.getEditorState() as never, 40, 8);
+    expect(f2.join("\n")).not.toContain("48;2;38;79;120");
+  });
+
+  test("KILL+RECREATE drops stale records (the buffer token)", () => {
+    e(editor, '(buffer-create "*tok*")');
+    e(editor, '(buffer-switch "*tok*")');
+    setText("test", "x\n");
+    e(editor, '(span-make "*tok*" 0 0 0 1 "dim")');
+    e(editor, '(buffer-kill "*tok*")');
+    e(editor, '(buffer-create "*tok*")'); // recreated: a NEW object
+    e(editor, '(buffer-switch "*tok*")');
+    setText("test", "x\n");
+    // A fresh span re-publishes — the STALE record (old token) must
+    // NOT merge back in.
+    e(editor, '(span-make "*tok*" 0 0 0 1 "highlight")');
+    const entry = (editor as unknown as { model: { bufferSpans?: Map<string, { spans: { style: { bg?: string } }[][] }> } }).model.bufferSpans?.get("*tok*");
+    expect(entry?.spans.length).toBe(1); // ONE span — not two
+    expect(entry?.spans[0]?.[0]?.style?.bg).toBe("#665c26"); // the NEW one
+  });
+
+  test("span-make REFUSES a nonexistent buffer and negative coordinates", () => {
+    expect(() => e(editor, '(span-make "*nope*" 0 0 0 1 "region")')).toThrow(/no such buffer/);
+    e(editor, '(buffer-set-read-only nil)');
+    expect(() => e(editor, '(span-make "test" -1 0 0 1 "region")')).toThrow(/negative/);
+  });
+});

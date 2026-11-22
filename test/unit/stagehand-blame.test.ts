@@ -149,3 +149,42 @@ describe("#296 — blame mode (SPEC-289, the blame half)", () => {
     expect(String(e(editor, "(stagehand/blame/stagehand-blame-attribution-get)").value)).toContain("c2");
   });
 });
+
+describe("#296 — gate r1 fixes", () => {
+  test("the SHOW view from blame: n/p report 'no log to walk'; q closes without a log", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("c1");
+    blame("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/blame/stagehand-blame-show)");
+    expect(String(e(editor, "(buffer-name)").value)).toBe("*Stagehand-Show*");
+    e(editor, "(stagehand/log/stagehand-show-next)");
+    expect(st(editor)).toContain("no log to walk");
+    e(editor, "(stagehand/log/stagehand-show-prev)");
+    expect(st(editor)).toContain("no log to walk");
+    // q closes the show buffer; no switch to a nonexistent log.
+    e(editor, "(stagehand/log/stagehand-show-quit)");
+    expect(String(e(editor, "(buffer-name)").value)).not.toBe("*Stagehand-Show*");
+  });
+
+  test("PREFLIGHT scans NON-current buffers: a divergent buffer away from point refuses", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("c1");
+    e(editor, '(find-file "f.txt")');
+    e(editor, '(buffer-insert "X")'); // the buffer now diverges (unsaved)
+    e(editor, '(buffer-switch "*scratch*")'); // switch AWAY
+    blame("f.txt");
+    expect(st(editor)).toContain("commit first");
+  });
+
+  test("the STABLE-HEAD branch of g re-applies the tint", async () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "one\n");
+    commit("c1");
+    blame("f.txt");
+    e(editor, "(stagehand/blame/stagehand-blame-refresh)");
+    expect(st(editor)).toContain("re-applied");
+    const { captureFrame } = await import("../../src/render/capture-frame.ts");
+    const frame = captureFrame(editor.getEditorState() as never, 40, 8);
+    expect(frame.join("\n")).toContain("48;2;58;50;38"); // the tint lives
+  });
+});

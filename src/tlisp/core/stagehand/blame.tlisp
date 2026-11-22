@@ -118,12 +118,23 @@ matches the disk."
   (or (stagehand/status/stagehand-status-root) "."))
 
 (defun stagehand-blame-buffer-matches-disk (path)
-  ;; The check applies when the CURRENT buffer holds this file; a file
-  ;; with no open buffer is trivially consistent.
-  (if (not (string= (or (buffer-filename) "") path))
+  ;; Gate r1: ANY open buffer holding the file must match the disk (a
+  ;; divergent NON-current buffer escapes the old current-only check).
+  ;; The scan switches + restores (the in-place pattern).
+  (stagehand-blame-disk-scan (buffer-list) path))
+
+(defun stagehand-blame-disk-scan (bufs path)
+  (if (null bufs)
     t
-    (string= (buffer-text)
-      (or (read-file-content path) ""))))
+    (let ((cb (buffer-current)))
+      (buffer-switch (car bufs))
+      (let ((fname (or (buffer-filename) ""))
+            (text (buffer-text)))
+        (if (not (string= cb (car bufs)))
+          (buffer-switch cb))
+        (if (string= fname path)
+          (string= text (or (read-file-content path) ""))
+          (stagehand-blame-disk-scan (cdr bufs) path))))))
 
 ;; ── the blame popup ─────────────────────────────────────────────────
 (defun stagehand-blame-row ()
@@ -182,9 +193,13 @@ rows refuse in the preflight)."
       (stagehand-blame-echo))))
 
 (defun stagehand-blame-emit (rows i)
+  ;; No trailing newline on the LAST row (gate r1: the blank line let
+  ;; n walk past the attribution rows).
   (if (< i (length rows))
     (progn
-      (buffer-append (concat (nth 4 (nth i rows)) "\n"))
+      (buffer-append
+        (concat (nth 4 (nth i rows))
+          (if (< (+ i 1) (length rows)) "\n" "")))
       (stagehand-blame-emit rows (+ i 1)))))
 
 (defun stagehand-blame-clear ()
@@ -214,8 +229,8 @@ rows refuse in the preflight)."
   (editor-set-status (concat "Blame: " (stagehand-blame-attribution-get))))
 
 (defun stagehand-blame-next ()
-  "n — next line (echo updates)."
-  (if (< (+ (cursor-line) 1) (buffer-line-count))
+  "n — next line (echo updates; clamps to the last source line)."
+  (if (< (+ (cursor-line) 1) (length stagehand-blame-rows))
     (progn (cursor-move (+ (cursor-line) 1) 0) (stagehand-blame-echo))))
 
 (defun stagehand-blame-prev ()

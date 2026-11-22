@@ -216,14 +216,17 @@ function bufferSpanLayer(
     r && typeof r === "object" && "right" in (r as Record<string, unknown>) && typeof (r as { right?: unknown }).right === "string"
       ? ((r as { right: string }).right).length
       : 0;
-  const firstR = buf.getLine(0);
-  const lastR = lineCount > 0 ? buf.getLine(lineCount - 1) : firstR;
+  let checksum = 0;
+  for (let i = 0; i < lineCount; i++) {
+    checksum = (checksum * 31 + lenOf(buf.getLine(i))) | 0;
+  }
   if (
     lineCount !== entry.shape.lineCount ||
-    lenOf(firstR) !== entry.shape.firstLineLength ||
-    lenOf(lastR) !== entry.shape.lastLineLength
+    checksum !== entry.shape.checksum ||
+    buf !== entry.shape.token
   ) {
     return undefined;
   }
   return entry.spans;
 }
+

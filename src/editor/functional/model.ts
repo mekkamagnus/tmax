@@ -119,7 +119,7 @@ export interface EditorModel {
   /** #231: transient vim-goggles flash spans (inverse style, TTL-cleared). */
   readonly flashSpans?: readonly (readonly HighlightSpan[])[];
   /** #296: persistent per-buffer span grids (lazily shape-validated). */
-  readonly bufferSpans?: Map<string, { spans: HighlightSpan[][]; shape: { lineCount: number; firstLineLength: number; lastLineLength: number } }>;
+  readonly bufferSpans?: Map<string, { spans: HighlightSpan[][]; shape: { lineCount: number; checksum: number; token: unknown } }>;
   /** RFC-029 §8.8: the dim inline completion (single line). */
   readonly ghostText?: string;
   /** §8.8 r39: the cursor origin the ghost was computed for. */
@@ -250,7 +250,7 @@ export function modelToEditorState(model: EditorModel): EditorState {
     highlightSpans: model.highlightSpans ? model.highlightSpans.map(spans => [...spans]) : undefined,
     flashSpans: model.flashSpans ? model.flashSpans.map(spans => [...spans]) : undefined,
     bufferSpans: model.bufferSpans
-      ? new Map([...model.bufferSpans.entries()].map(([k, v]) => [k, { spans: v.spans.map((s) => [...s]), shape: { ...v.shape } }]))
+      ? new Map([...model.bufferSpans.entries()].map(([k, v]) => [k, { spans: v.spans.map((s) => [...s]), shape: { lineCount: v.shape.lineCount, checksum: v.shape.checksum, token: v.shape.token } }]))
       : undefined,
     ghostText: model.ghostText,
     ghostAnchor: model.ghostAnchor,

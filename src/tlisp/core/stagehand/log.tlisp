@@ -371,22 +371,31 @@ log context — idx nil means n/p report no log to walk)."
 
 (defun stagehand-show-next ()
   "n — the next commit DOWN the log list (newest-first: down is
-OLDER; clamps at the oldest = the list's end)."
-  (if (< stagehand-show-idx (- (length stagehand-log-shas) 1))
-    (stagehand-show-at (+ stagehand-show-idx 1))
-    (editor-set-status "Stagehand: oldest commit")))
+OLDER; clamps at the oldest = the list's end). No log context
+(blame's RET) → there is nothing to walk (gate r1: the nil idx
+guard)."
+  (if (null stagehand-show-idx)
+    (editor-set-status "Stagehand: no log to walk")
+    (if (< stagehand-show-idx (- (length stagehand-log-shas) 1))
+      (stagehand-show-at (+ stagehand-show-idx 1))
+      (editor-set-status "Stagehand: oldest commit"))))
 
 (defun stagehand-show-prev ()
   "p — back UP the list (NEWER; clamps at the newest = idx 0)."
-  (if (> stagehand-show-idx 0)
-    (stagehand-show-at (- stagehand-show-idx 1))
-    (editor-set-status "Stagehand: newest commit")))
+  (if (null stagehand-show-idx)
+    (editor-set-status "Stagehand: no log to walk")
+    (if (> stagehand-show-idx 0)
+      (stagehand-show-at (- stagehand-show-idx 1))
+      (editor-set-status "Stagehand: newest commit"))))
 
 (defun stagehand-show-quit ()
-  "q — back to the LOG buffer (kill FIRST — buffer-kill rebinds
-current to its survivor — then the explicit switch wins)."
+  "q — back to the LOG buffer when one exists (kill FIRST —
+buffer-kill rebinds current to its survivor — then the explicit
+switch wins); from blame's RET there is no log — the show buffer
+just closes (gate r1)."
   (buffer-kill (stagehand-show-buffer-name))
-  (buffer-switch (stagehand-log-buffer-name)))
+  (if (member (stagehand-log-buffer-name) (buffer-list))
+    (buffer-switch (stagehand-log-buffer-name))))
 
 ;; ── checkout (the only mutation) ────────────────────────────────────
 (defun stagehand-log-checkout ()

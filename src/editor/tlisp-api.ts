@@ -538,11 +538,15 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               ? ((r as { right: string }).right).length
               : 0;
           if (lineCount < 0) return undefined;
-          return {
-            lineCount,
-            firstLineLength: lenOf(buf.getLine(0)),
-            lastLineLength: lenOf(buf.getLine(lineCount - 1)),
-          };
+          // The whole-text checksum (gate r1): same-shape substitutions
+          // must invalidate too. One pass over the text — the render
+          // walks it many times anyway.
+          let checksum = 0;
+          for (let i = 0; i < lineCount; i++) {
+            const len = lenOf(buf.getLine(i));
+            checksum = (checksum * 31 + len) | 0;
+          }
+          return { lineCount, checksum, token: buf };
         };
         return createSpanOps(write, probeShape);
       },
