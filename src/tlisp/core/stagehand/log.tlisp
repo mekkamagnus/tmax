@@ -477,28 +477,65 @@ y/n confirm (#287's lesson: a bare Enter cancels)."
          (code (nth 2 res)))
     (if (and (numberp code) (= code 0))
       (progn
-        ;; Success: the STATUS view refreshes (the Conflicted section
-        ;; would appear on conflicts); the log stays (the issue).
+        ;; Success: the STATUS data refreshes, then the VIEW returns
+        ;; to the log (gate r1: status-render's ensure-buffer switch
+        ;; yanked the user out — the log stays per the spec).
         (stagehand/status/stagehand-status)
+        (buffer-switch "*Stagehand-Log*")
         (editor-set-status
           (concat (if (string= op "cherry-pick") "cherry-picked " "reverted ") sha)))
       (stagehand-pick-conflict-route op sha res))))
 
+(defun stagehand-pick-unmerged-p (root)
+  "STRUCTURAL conflict detection (gate r1: message-text matching
+misroutes BOTH ways — git 2.49 emits 'CONFLICT (content):' on
+STDOUT, which the old stderr-only scan never saw; and the empty
+pick's 'possibly due to conflict resolution' stderr HIJACKED the
+named-failure case over a clean porcelain). The porcelain's
+unmerged entries (DD/AU/UD/UA/DU/AA/UU) are the truth."
+  (let ((out (car (shell-exec-argv
+                    (list "git" "status" "--porcelain")
+                    root))))
+    (stagehand-pick-unmerged-scan (string-split (concat out "\n") "\n"))))
+
+(defun stagehand-pick-unmerged-scan (lines)
+  (if (null lines)
+    nil
+    (let ((st (substring (concat (car lines) "  ") 0 2)))
+      (if (or (string= st "DD") (string= st "AU") (string= st "UD")
+              (string= st "UA") (string= st "DU") (string= st "AA")
+              (string= st "UU"))
+        t
+        (stagehand-pick-unmerged-scan (cdr lines))))))
+
 (defun stagehand-pick-conflict-route (op sha res)
-  ;; Route conflicts to the Conflicted section (#286's buffer) with
-  ;; the manual resolution advice. The key-driven continuation/abort
-  ;; flow rides #295's framework (blocked) — the documented v1
-  ;; ceiling; `git <op> --abort` is the named escape hatch.
-  (let ((out (concat (nth 1 res) "")))
-    (if (or (string-contains-p "CONFLICT" out)
-            (string-contains-p "conflict" out))
-      (progn
-        (stagehand/status/stagehand-status)
-        (editor-set-status
-          (concat "Stagehand: " op " conflict — resolve in the Conflicted section, then continue; abort: git " op " --abort")))
+  ;; Conflicts (STRUCTURALLY detected) route to the Conflicted
+  ;; section (#286's buffer) with the manual resolution advice; the
+  ;; key-driven continuation/abort flow rides #295's framework
+  ;; (blocked) — the documented v1 ceiling. Anything else non-zero is
+  ;; the NAMED failure (first diagnostic line, stdout OR stderr).
+  (if (stagehand-pick-unmerged-p stagehand-log-root)
+    (progn
+      (stagehand/status/stagehand-status)
       (editor-set-status
-        (concat "Stagehand: " op " failed (" (number-to-string (nth 2 res)) ") "
-          (car (string-split (concat (nth 1 res) "\n") "\n")))))))
+        (concat "Stagehand: " op " conflict — resolve in the Conflicted section, then continue; abort: git " op " --abort")))
+    (editor-set-status
+      (concat "Stagehand: " op " failed ("
+        (if (numberp (nth 2 res)) (number-to-string (nth 2 res)) "?") ") "
+        (stagehand-pick-first-line (nth 0 res) (nth 1 res))))))
+
+(defun stagehand-pick-first-line (stdout stderr)
+  "The first non-empty diagnostic line, STDOUT first (git 2.49 emits
+CONFLICT/advice on stdout) then stderr."
+  (stagehand-pick-first-line-scan
+    (string-split (concat stdout "\n" stderr) "\n")))
+
+(defun stagehand-pick-first-line-scan (lines)
+  (if (null lines)
+    "(no diagnostics)"
+    (if (> (length (car lines)) 0)
+      (car lines)
+      (stagehand-pick-first-line-scan (cdr lines)))))
 
 (defun stagehand-refs-at (sha)
   (let ((out (car (shell-exec-argv

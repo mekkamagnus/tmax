@@ -85,9 +85,13 @@ describe("#330 — cherry-pick + revert (the log view)", () => {
     e(editor, "(stagehand/log/stagehand-log-cherry-pick)");
     e(editor, '(stagehand/log/stagehand-log-pick-accept "y")');
     const st = String(e(editor, "(editor-status)").value);
-    // An empty pick: git exits non-zero WITHOUT conflicts — the
-    // named failure path (never the conflict route).
-    expect(st).toContain("Stagehand: cherry-pick");
+    // An empty pick: git exits non-zero WITHOUT conflicts (a clean
+    // porcelain) — the NAMED-FAILURE branch, never the conflict
+    // route (gate r1: the 'possibly due to conflict resolution'
+    // stderr used to hijack this case).
+    expect(st).toContain("cherry-pick failed (");
+    expect(st).not.toContain("conflict —");
+    expect(git("status", "--porcelain")).toBe(""); // structurally clean
     expect(git("log", "-1", "--format=%s")).toContain("feature"); // HEAD still unmoved
   });
 
@@ -102,6 +106,9 @@ describe("#330 — cherry-pick + revert (the log view)", () => {
     e(editor, '(stagehand/log/stagehand-log-pick-accept "y")');
     expect(String(e(editor, "(editor-status)").value)).toContain("reverted");
     expect(readFileSync(join(process.cwd(), "a.txt"), "utf8")).toBe("base\n");
+    // The status DATA refreshed but the VIEW returned to the log
+    // (gate r1: the ensure-buffer switch used to yank the user out).
+    expect(String(e(editor, "(buffer-current)").value)).toContain("Stagehand-Log");
   });
 
   test("a CONFLICTING revert routes to the Conflicted section with the abort advice", async () => {
@@ -119,6 +126,8 @@ describe("#330 — cherry-pick + revert (the log view)", () => {
     expect(st).toContain("conflict");
     expect(st).toContain("--abort");
     expect(strip(bufferText(editor))).toContain("Conflicted");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("Stagehand"); // the status view
+    expect(String(e(editor, "(buffer-current)").value)).not.toContain("Stagehand-Log");
     expect(git("status", "--porcelain")).toContain("UU");
     execFileSync("git", ["revert", "--abort"], { cwd: process.cwd() });
   });
@@ -127,11 +136,16 @@ describe("#330 — cherry-pick + revert (the log view)", () => {
   test("a non-commit row refuses with the named status", async () => {
     writeFileSync("a.txt", "base\n"); commit("base");
     await openLog(1);
-    e(editor, "(cursor-move 0 0)"); // possibly an art/first row
-    const sha = String(e(editor, "(stagehand/log/stagehand-log-sha-at-line 0)").value);
-    if (sha === "null") {
-      e(editor, "(stagehand/log/stagehand-log-cherry-pick)");
-      expect(String(e(editor, "(editor-status)").value)).toContain("no commit");
+    // The BLANK trailing row below the log (deterministically
+    // non-commit — the gate found the old guard vacuous).
+    const lines = strip(bufferText(editor)).split("\n");
+    let blank = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i]!.trim() === "" && String(e(editor, `(stagehand/log/stagehand-log-sha-at-line ${i})`).value) === "null") { blank = i; break; }
     }
+    expect(blank).toBeGreaterThanOrEqual(0);
+    e(editor, `(cursor-move ${blank} 0)`);
+    e(editor, "(stagehand/log/stagehand-log-cherry-pick)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("no commit on this row");
   });
 });
