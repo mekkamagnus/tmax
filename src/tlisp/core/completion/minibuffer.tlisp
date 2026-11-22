@@ -1,6 +1,10 @@
 (defmodule editor/completion/minibuffer
   (export minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-exact-selection-index-recursive minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key)
 
+(defvar minibuffer-on-input-hook nil
+  "The per-keystroke input callback (#311, SPEC-116 shape): set at
+prompt open, cleared on EVERY close; late callbacks drop silently.")
+
 ;; minibuffer.tlisp --- Serializable Lisp-owned minibuffer state machine
 
 (defvar minibuffer-histories (hashmap "command-history" (list)))
@@ -141,7 +145,14 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
 (defun minibuffer-refresh-after-input (session)
   (progn
     (minibuffer-state-set (hashmap-set session "scroll" 0))
-    (minibuffer-refresh)))
+    (minibuffer-refresh)
+    ;; #311: the per-keystroke hook — registered at prompt open,
+    ;; torn down on close; LATE callbacks (after teardown) drop
+    ;; silently (the guard).
+    (condition-case nil
+      (if minibuffer-on-input-hook
+        (funcall minibuffer-on-input-hook (hashmap-get session "input")))
+      (error () nil))))
 
 (defun minibuffer-insert-character (character)
   (let ((session (minibuffer-state-get)))
@@ -199,6 +210,9 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
 (defun minibuffer-close ()
   (let ((session (minibuffer-state-get)))
     (progn
+      ;; #311: EVERY close (accept, cancel, error) tears the input
+      ;; hook down — late callbacks drop.
+      (setq minibuffer-on-input-hook nil)
       (minibuffer-state-clear)
       (minibuffer-view-clear)
       (minibuffer-clear)

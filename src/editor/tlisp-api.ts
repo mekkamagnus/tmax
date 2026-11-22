@@ -48,6 +48,7 @@ import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps } from "./api/visual-ops.ts";
 import { createFlashOps } from "./api/flash-ops.ts";
 import { createGrepOps } from "./api/grep-ops.ts";
+import { createTimerOps } from "./api/timer-ops.ts";
 import { createGhostOps } from "./api/ghost-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
@@ -1671,6 +1672,12 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         createGrepOps(),
     },
 
+    // ── idle timers (#311: run-with-idle-timer / cancel-idle-timer) ───
+    {
+      name: "timer",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> =>
+        createTimerOps(ctx.evalTlisp, ctx.logProgram),
+    },
     // ── subprocess (make-process + process-write + signal) ──────────────
     {
       name: "subprocess",

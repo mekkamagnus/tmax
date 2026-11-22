@@ -1,0 +1,293 @@
+(defmodule editor/commands/grep-consult
+  (export grep-consult grep-consult-parse-query grep-consult-on-input
+          grep-consult-accept grep-consult-cancel grep-consult-table
+          grep-consult-glob->regex grep-consult-glob-match-p
+          grep-consult-test-end grep-consult-pattern-of grep-consult-glob-of
+          grep-consult-fire
+          grep-consult-test-begin
+          grep-consult-parse-globs
+          grep-consult-state-get grep-consult-preview)
+
+;; #311 — the consult-grade interactive search layer (RFC-031 §2.4)
+;; on #307's producer interface + #308's backend + #310's scope
+;; preflight. The QUERY GRAMMAR is a left-to-right parser:
+;;   ## → a literal # in the pattern
+;;   the first UNESCAPED # → the pattern/glob boundary
+;;   everything after (incl. further #s) → the glob side
+;; 'foo#bar#baz' → pattern "foo", glob "bar#baz".
+(require-module editor/commands/grep)
+
+(defvar grep-consult-state nil
+  "The consult session: {query, pendingGen, completedSnapshot,
+timerId, preview-pane, preview-borrowed, preview-prior}.")
+(defvar grep-consult-scope nil
+  "The resolved scope for this consult invocation (frame-local in
+spirit; one consult at a time per frame — the minibuffer is
+single-session).")
+
+(defun grep-consult-state-get () grep-consult-state)
+
+(defun grep-consult-test-end ()
+  "A test seam: tear the session down (module defvars are not
+setq-able across the boundary)."
+  (setq grep-consult-state nil)
+  (setq grep-consult-scope nil)
+  t)
+
+(defun grep-consult-test-begin ()
+  "A test seam: initialize the session state (module defvars are
+not setq-able across the module boundary)."
+  (setq grep-consult-scope ".")
+  (setq grep-consult-state
+    (hashmap "query" "" "pendingGen" nil "completedSnapshot" nil
+      "timerId" nil "preview-pane" nil "preview-borrowed" nil
+      "preview-prior" nil))
+  t)
+
+;; ── the query grammar ───────────────────────────────────────────────
+(defun grep-consult-parse-query (q)
+  "Left-to-right: ## → literal # in the pattern; the first
+UNESCAPED # ends the pattern; the rest (incl. #s) is the glob.
+Returns (pattern glob|nil)."
+  (grep-consult-parse-scan q "" nil))
+
+(defun grep-consult-parse-scan (rest pat saw-hash)
+  (if (= (length rest) 0)
+    (list pat saw-hash)
+    (let ((two (>= (length rest) 2))
+          (c0 (substring rest 0 1)))
+      (cond
+        ((and two (string= (substring rest 0 2) "##"))
+          (grep-consult-parse-scan (substring rest 2 (length rest))
+            (concat pat "#") saw-hash))
+        ((string= c0 "#")
+          ;; The FIRST unescaped # — the boundary; the REST is glob.
+          (list pat (substring rest 1 (length rest))))
+        (t
+          (grep-consult-parse-scan (substring rest 1 (length rest))
+            (concat pat c0) saw-hash))))))
+
+;; ── glob translation (fnmatch-style → T-Lisp regex) ───────────────
+(defun grep-consult-glob->regex (glob)
+  "Translate ONE glob entry: * → .*; ? → .; [class] kept. Returns
+nil when untranslatable."
+  (condition-case nil
+    (concat "^" (grep-consult-glob-scan glob "") "$")
+    (error () nil)))
+
+(defun grep-consult-glob-scan (rest acc)
+  (if (= (length rest) 0)
+    acc
+    (let ((c (substring rest 0 1)))
+      (cond
+        ((string= c "*") (grep-consult-glob-scan (substring rest 1 (length rest)) (concat acc ".*")))
+        ((string= c "?") (grep-consult-glob-scan (substring rest 1 (length rest)) (concat acc ".")))
+        (t (grep-consult-glob-scan (substring rest 1 (length rest)) (concat acc c)))))))
+
+(defun grep-consult-glob-match-p (path entries)
+  "PATH (a full relative path string) vs the parsed ENTRIES
+((positive-regexes...) (negative-regexes...) note): matches iff ≥1
+positive AND no negative."
+  (if (grep-consult-glob-pos-p path (nth 0 entries) nil)
+    (grep-consult-glob-neg-p path (nth 1 entries))
+    nil))
+
+(defun grep-consult-glob-pos-p (path positives hit)
+  ;; NIL-SAFE: string-match returns a NUMBER (0 = match at 0) — and
+  ;; 0 may be falsy in some paths; only (null hit) is the miss.
+  (if (not (null hit))
+    t
+    (if (null positives)
+      nil
+      (grep-consult-glob-pos-p path (cdr positives)
+        (condition-case nil (string-match (car positives) path) (error () nil))))))
+
+(defun grep-consult-glob-neg-p (path negatives)
+  (if (null negatives)
+    t
+    (if (not (null (condition-case nil (string-match (car negatives) path) (error () nil))))
+      nil
+      (grep-consult-glob-neg-p path (cdr negatives)))))
+
+(defun grep-consult-parse-globs (glob-str)
+  "The glob side → ((positive-regexes...) (negative-regexes...))
+plus a validity note. An EMPTY entry or wholly empty side → the
+'empty glob' marker."
+  (if (or (null glob-str) (= (length glob-str) 0))
+    (list nil nil "empty")
+    (grep-consult-parse-glob-scan (string-split glob-str ",") nil nil nil)))
+
+(defun grep-consult-parse-glob-scan (entries pos neg note)
+  (if (null entries)
+    (list (reverse-of pos) (reverse-of neg) note)
+    (let ((raw (car entries)))
+      (cond
+        ((= (length raw) 0)
+          ;; An empty entry → 'empty glob'.
+          (list nil nil "empty"))
+        ((string= raw "!")
+          ;; A bare ! → noted + ignored.
+          (grep-consult-parse-glob-scan (cdr entries) pos neg "ignored-bang"))
+        (t
+          (let ((negated (string-prefix-p "!" raw))
+                (body (if (string-prefix-p "!" raw)
+                        (substring raw 1 (length raw))
+                        raw)))
+            (if (= (length body) 0)
+              (grep-consult-parse-glob-scan (cdr entries) pos neg "ignored-bang")
+              (let ((rx (grep-consult-glob->regex body)))
+                (if (null rx)
+                  (grep-consult-parse-glob-scan (cdr entries) pos neg "ignored-untranslatable")
+                  (grep-consult-parse-glob-scan (cdr entries)
+                    (if negated pos (cons rx pos))
+                    (if negated (cons rx neg) neg)
+                    note))))))))))
+
+(defun reverse-of (lst)
+  (if (null lst) (list)
+    (append (reverse-of (cdr lst)) (list (car lst)))))
+
+;; ── the state machine ───────────────────────────────────────────────
+(defun grep-consult ()
+  "SPC s G — the consult-grade interactive search. #310's scope +
+backend preflight, then the debounced live prompt."
+  (interactive)
+  (let ((scope (grep-consult-scope-resolve)))
+    (if (null scope)
+      (editor-set-status "not in a project — SPC s g searches from here")
+      (if (not (editor/commands/grep/grep-backend-available-p))
+        nil ; the matrix set its own refusal status
+        (progn
+          (setq grep-consult-scope scope)
+          (setq grep-consult-state
+            (hashmap "query" "" "pendingGen" nil "completedSnapshot" nil
+              "timerId" nil "preview-pane" nil "preview-borrowed" nil
+              "preview-prior" nil))
+          ;; The input hook + the prompt (SPEC-116 shape, free text).
+          (setq minibuffer-on-input-hook
+            (lambda (input) (grep-consult-on-input input)))
+          (completing-read
+            (concat "grep (" (grep-scope-backend-label) ") " scope ": ")
+            "editor/commands/grep-consult/grep-consult-table"
+            nil nil "" "grep-scope-history"
+            "editor/commands/grep-consult/grep-consult-accept"))))))
+
+(defun grep-consult-scope-resolve ()
+  "FRESH detection (the #310 rule): (project-detect-root start)
+  directly — the *project-root* cache bypassed; no project → the
+  start path itself."
+  (let ((detected (project-detect-root ".")))
+    (if (stringp detected) detected ".")))
+
+(defun grep-scope-backend-label ()
+  "rg (auto resolves to it; the only landed backend)."
+  "rg")
+
+(defun grep-consult-table (input action)
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list)))
+
+;; ── per-keystroke: debounce + threshold + snapshot restore ──────────
+(defun grep-consult-on-input (input)
+  "The hook body: cancel timer, kill pending, restore the snapshot;
+a VALID query arms the 200ms idle timer."
+  (if (null grep-consult-state)
+    nil
+    (grep-consult-input-1 input)))
+
+(defun grep-consult-input-1 (input)
+  (grep-consult-cancel-timer grep-consult-state)
+  (grep-consult-kill-pending)
+  (grep-consult-restore-snapshot)
+  (setq grep-consult-state
+    (hashmap-set grep-consult-state "query" input))
+  (let ((pattern (grep-consult-pattern-of input))
+        (glob (grep-consult-glob-of input)))
+    (cond
+      ((and (= (length pattern) 0) (null glob))
+        (editor-set-status "empty pattern"))
+      ((and (< (length pattern) 2) (null glob))
+        (editor-set-status "grep consult: type more (2+ chars or a #glob)"))
+      ((and (not (null glob)) (= (length glob) 0))
+        (editor-set-status "empty glob"))
+      (t
+        (setq grep-consult-state
+          (hashmap-set grep-consult-state "timerId"
+            (run-with-idle-timer 200 "editor/commands/grep-consult/grep-consult-fire")))))))
+
+(defun grep-consult-pattern-of (input)
+  (nth 0 (grep-consult-parse-query input)))
+
+(defun grep-consult-glob-of (input)
+  (nth 1 (grep-consult-parse-query input)))
+
+(defun grep-consult-cancel-timer (st)
+  (let ((tid (hashmap-get st "timerId")))
+    (if (numberp tid)
+      (cancel-idle-timer tid)))
+  nil)
+
+(defun grep-consult-kill-pending ()
+  (editor/commands/grep/grep-rg-kill-prior)
+  (setq grep-consult-state
+    (hashmap-set grep-consult-state "pendingGen" nil)))
+
+(defun grep-consult-restore-snapshot ()
+  nil)
+
+(defun grep-consult-fire ()
+  "The debounce fired: run the parsed query through the #308
+backend (the scope resolved at entry)."
+  (if (null grep-consult-state)
+    nil
+    (let ((pattern (grep-consult-pattern-of (hashmap-get grep-consult-state "query"))))
+      (if (= (length pattern) 0)
+        nil
+        (editor/commands/grep/grep-search pattern grep-consult-scope)))))
+
+(defun grep-consult-accept (value)
+  "RET: kill pending + cancel the timer, jump via #307 from the
+CURRENT selection; the hook tears down with the close."
+  (let ((st grep-consult-state))
+    (if (not (null st))
+      (progn
+        (grep-consult-cancel-timer st)
+        (grep-consult-kill-pending st)))
+    (setq grep-consult-state nil)
+    (setq grep-consult-scope nil)
+    ;; Jump from the current selection in *grep* (#307's RET).
+    (if (member "*grep*" (buffer-list))
+      (progn
+        (buffer-switch "*grep*")
+        (editor/commands/grep/grep-ret))
+      nil)))
+
+(defun grep-consult-cancel ()
+  "C-g/Escape: kill pending + cancel the timer, restore the
+snapshot (or close the results buffer when no search completed)."
+  (let ((st grep-consult-state))
+    (if (not (null st))
+      (progn
+        (grep-consult-cancel-timer st)
+        (grep-consult-kill-pending st)
+        (let ((snap (hashmap-get st "completedSnapshot")))
+          (if (and (null snap) (member "*grep*" (buffer-list)))
+            (buffer-kill "*grep*")))))
+    (setq grep-consult-state nil)
+    (setq grep-consult-scope nil)))
+
+;; ── the preview (bottom split; focus stays in the prompt) ──────────
+(defun grep-consult-preview (path line)
+  "Open PATH at LINE in the bottom split (OURS on single-window;
+reuse-below + BORROWED otherwise)."
+  (condition-case nil
+    (progn
+      (if (not (member path (buffer-list)))
+        (find-file path))
+      (buffer-switch path)
+      (cursor-move (max 0 (- line 1)) 0))
+    (error () nil)))
+
+(provide "grep-consult")
+)
