@@ -158,8 +158,9 @@ availability gate must be synchronous; the turn itself is async)."
       (concat "curl -s --max-time 2 " fikra-ollama-url "/api/tags 2>/dev/null"))))
 
 (defun fikra-backend-ollama-capabilities ()
-  ;; Honest: NON-streaming (stream:false — one landed reply), no
-  ;; permissions surface (a pure chat model; nothing to mediate).
+  ;; Honest: streaming is REAL (r153 — NDJSON deltas render live; the
+  ;; flag toggles it), no permissions surface (a pure chat model; nothing
+  ;; to mediate — the native L2 gate parks model CALLS, not the stream).
   (list (list "session-resume" nil)
         (list "interactive-approvals" nil)
         ;; r153b (codex): streaming is REAL now (r153) — the capability
