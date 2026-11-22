@@ -5,7 +5,7 @@
           grep-current-gen-get grep-status-get
           grep-rg-replay-pending grep-rg-kill-prior grep-rg-stderr-filter
           grep-rg-run-files
-          grep-completion-hook-set!
+          grep-completion-hook-set! grep-completion-hook-get
           grep-buffer-content grep-restore-content
           grep-rg-executable-set! grep-rg-test-state!
           grep-ret grep-next grep-prev grep-rerun grep-quit)
@@ -141,6 +141,11 @@ render — the consult layer's completedSnapshot discipline.")
 (defun grep-completion-hook-set! (fn)
   (setq grep-completion-hook fn)
   fn)
+
+(defun grep-completion-hook-get ()
+  "The read seam (#311 gate r3): makes the every-close no-leak
+invariant assertable from T-Lisp."
+  grep-completion-hook)
 
 (defun grep-buffer-complete (gen status message)
   "Complete generation GEN: done | error | no-matches."
@@ -818,9 +823,11 @@ empty list would read stdin)."
       nil)
     (progn
       (grep-rg-kill-prior)
+      ;; gate r3: a REAL rerun — 'g' on *grep* re-runs the same
+      ;; file-list search (the nil lambda silently no-opped).
       (let ((gen (grep-buffer-register
                    (hashmap "backend" "rg" "pattern" pattern "scope" scope
-                     "rerun" (lambda () nil)))))
+                     "rerun" (lambda () (grep-rg-run-files pattern files scope))))))
         (setq grep-rg-gen gen)
         (setq grep-rg-partial "")
         (setq grep-rg-pending nil)

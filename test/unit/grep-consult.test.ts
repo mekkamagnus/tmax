@@ -336,6 +336,89 @@ describe("#311 — the on-input state machine", () => {
     expect(sawNote).toBe(true);
   });
 
+  test("CANCEL kill-branch against a REAL live pending process (gate r3): stalled rg, escape kills *grep*", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    // Enter with the REAL rg (the preflight probes it), THEN swap a
+    // stalling shim in so the fired search never completes.
+    e(editor, '(editor/commands/grep-consult/grep-consult)');
+    const shim = join(process.cwd(), "stalled-rg.sh");
+    writeFileSync(shim, "#!/bin/sh\nexec sleep 30\n");
+    execFileSync("chmod", ["+x", shim]);
+    e(editor, `(editor/commands/grep/grep-rg-executable-set! "${shim}")`);
+    for (const key of "consu") await editor.handleKey(key);
+    // The fire spawns the shim: *grep* holds the placeholder, the
+    // pending process lives, NO completion ever lands.
+    let searching = false;
+    for (let i = 0; i < 120; i++) {
+      const c = String(e(editor, "(editor/commands/grep/grep-buffer-content)").value);
+      if (c.includes("searching")) { searching = true; break; }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(searching).toBe(true);
+    expect(String(e(editor, '(member "*grep*" (buffer-list))').value)).not.toMatch(/^(nil|null|false)$/);
+    // Escape: the cancel contract runs against the REAL pending —
+    // process killed, and with NO completed search *grep* DIES.
+    await editor.handleKey("Escape");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    expect(["nil", "null"].includes(String(e(editor, "(editor/commands/grep-consult/grep-consult-state-get)").value))).toBe(true);
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
+    expect(String(e(editor, '(member "*grep*" (buffer-list))').value)).toMatch(/^(nil|null|false)$/);
+    // gate r3: the completion hook is UNSET on close (the read seam
+    // makes the no-leak invariant assertable).
+    expect(["nil", "null"].includes(String(e(editor, "(editor/commands/grep/grep-completion-hook-get)").value))).toBe(true);
+  });
+
+  test("RESTORE rule against a REAL live pending process (gate r3): the killed partial never stays on screen", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    // Complete a real search first (the snapshot source).
+    e(editor, '(editor/commands/grep-consult/grep-consult)');
+    for (const key of "consult") await editor.handleKey(key);
+    for (let i = 0; i < 240; i++) {
+      if (st(editor).includes("hits")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(st(editor)).toContain("2 hits");
+    const completed = String(e(editor, "(editor/commands/grep/grep-buffer-content)").value);
+    expect(completed).toContain("consult alpha");
+    // Swap the stalling shim; the next fire replaces the render with
+    // the placeholder and the pending process never completes.
+    const shim = join(process.cwd(), "stalled-rg.sh");
+    writeFileSync(shim, "#!/bin/sh\nexec sleep 30\n");
+    execFileSync("chmod", ["+x", shim]);
+    e(editor, `(editor/commands/grep/grep-rg-executable-set! "${shim}")`);
+    for (const key of "zx") await editor.handleKey(key);
+    let replaced = false;
+    for (let i = 0; i < 120; i++) {
+      const c = String(e(editor, "(editor/commands/grep/grep-buffer-content)").value);
+      if (c.includes("searching")) { replaced = true; break; }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(replaced).toBe(true);
+    // The next input KILLS the pending and restores the completed
+    // render synchronously — the partial never stays on screen.
+    await editor.handleKey("q");
+    expect(String(e(editor, "(editor/commands/grep/grep-buffer-content)").value)).toBe(completed);
+    await editor.handleKey("Escape");
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
+  });
+
+  test("NON-PROJECT refusal (gate r3): outside a git repo the entry refuses with the SPC s g hint", async () => {
+    // A plain dir with files but NO git repo.
+    const dir = mkdtempSync(join(tmpdir(), "i311np-"));
+    writeFileSync(join(dir, "loose.txt"), "consult gamma\n");
+    process.chdir(dir);
+    const ed2 = await createStartedEditor("");
+    ed2.setClientLaunchDir(dir);
+    e(ed2, "(require-module editor/commands/grep-consult)");
+    const r = e(ed2, '(condition-case nil (progn (editor/commands/grep-consult/grep-consult) "ok") (error (m) (concat "THREW:" m)))');
+    expect(String(r.value)).toContain("ok");
+    const mb = (ed2.getState() as unknown as { minibufferView?: { prompt?: string } }).minibufferView;
+    expect(mb ?? null).toBe(null); // refused — no prompt opened
+    expect(st(ed2)).toContain("not in a project");
+    // The refusal is honest: state stayed clean.
+    expect(["nil", "null"].includes(String(e(ed2, "(editor/commands/grep-consult/grep-consult-state-get)").value))).toBe(true);
+  });
+
   test("GLOB FILTERING applied: #*.lisp runs rg on the .lisp file ONLY (gate r1)", async () => {
     execFileSync("git", ["-C", process.cwd(), "add", "."]);
     e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');

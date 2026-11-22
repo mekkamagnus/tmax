@@ -208,10 +208,13 @@ backend preflight, then the debounced live prompt."
 
 (defun grep-consult-scope-resolve ()
   "FRESH detection (the #310 rule): (project-detect-root start)
-  directly — the *project-root* cache bypassed; no project → the
-  start path itself."
+  directly — the *project-root* cache bypassed. gate r3: NO '.'
+  FALLBACK — outside a project resolve returns nil and the entry
+  refuses with the SPC s g hint (the fallback made the refusal dead
+  code AND let non-repo glob queries report 'no files match' over
+  an empty git-ls-files enumeration)."
   (let ((detected (project-detect-root ".")))
-    (if (stringp detected) detected ".")))
+    (if (stringp detected) detected nil)))
 
 (defun grep-scope-backend-label ()
   "rg (auto resolves to it; the only landed backend)."
