@@ -521,59 +521,79 @@ CACHED-side partial construction's sign mirror."
               (t l))
         (stagehand-diff-swap-body (cdr lines))))))
 
-(defun stagehand-diff-slot-pair (body)
-  "Reorder each BALANCED replacement run (a maximal run of change
-lines with EQUAL '-' and '+' counts) into per-slot pairs: the i-th
-'-' with the i-th '+'. '-b -c +B +C' → '-B +b -C +c' — selecting
-c→C on the cached side then emits ' B' ctx, '-C', '+c' (the correct
-B,c result order; the raw stream yields c,B — valve r1's reproduced
-misordering). UNBALANCED runs (merges/splits) keep stream order —
-pairing is ambiguous there and the stream construction is the
-conservative reading."
+(defun stagehand-diff-slot-pair (body flags)
+  "Reorder each BALANCED replacement run (equal '-' and '+' counts)
+into per-slot pairs — the i-th '-' with the i-th '+' — carrying the
+selection FLAGS through the SAME permutation (valve r2: reordering
+lines without their flags made original-layout selections land on
+the wrong lines). '-b -c +B +C' → '-B +b -C +c'. UNBALANCED runs
+keep the stream order (pairing is ambiguous for merges/splits).
+Returns (reordered-body reordered-flags)."
   (if (null body)
-    (list)
-    (if (stagehand-diff-change-line-p (car body))
-      (let ((run (stagehand-diff-take-run body (list))))
-        (append (stagehand-diff-pair-run run)
-          (stagehand-diff-slot-pair (stagehand-diff-drop-n (length run) body))))
-      (cons (car body) (stagehand-diff-slot-pair (cdr body))))))
+    (list (list) (list))
+    (let ((n (stagehand-diff-run-len body 0)))
+      (if (= n 0)
+        (let ((rest (stagehand-diff-slot-pair (cdr body)
+                       (if (null flags) nil (cdr flags)))))
+          (list (cons (car body) (nth 0 rest))
+                (cons (if (null flags) t (car flags)) (nth 1 rest))))
+        (let* ((run-l (stagehand-diff-take-n body n))
+               (run-f (stagehand-diff-take-n flags n))
+               (paired (stagehand-diff-pair-run run-l run-f))
+               (rest (stagehand-diff-slot-pair
+                       (stagehand-diff-drop-n n body)
+                       (stagehand-diff-drop-n n flags))))
+          (list (append (nth 0 paired) (nth 0 rest))
+                (append (nth 1 paired) (nth 1 rest))))))))
+
+(defun stagehand-diff-run-len (body n)
+  "The length of the leading run of change lines (max sane 512)."
+  (if (or (>= n 512) (null body)
+          (not (stagehand-diff-change-line-p (car body))))
+    n
+    (stagehand-diff-run-len (cdr body) (+ n 1))))
+
+(defun stagehand-diff-change-line-p (line)
+  (or (string-prefix-p "-" line) (string-prefix-p "+" line)))
 
 (defun stagehand-diff-drop-n (n lst)
   (if (or (= n 0) (null lst))
     lst
     (stagehand-diff-drop-n (- n 1) (cdr lst))))
 
-(defun stagehand-diff-change-line-p (line)
-  (or (string-prefix-p "-" line) (string-prefix-p "+" line)))
+(defun stagehand-diff-take-n (lst n)
+  (if (or (= n 0) (null lst))
+    (list)
+    (cons (car lst) (stagehand-diff-take-n (cdr lst) (- n 1)))))
 
-(defun stagehand-diff-take-run (body acc)
-  (if (null body)
-    (reverse acc)
-    (if (stagehand-diff-change-line-p (car body))
-      (stagehand-diff-take-run (cdr body) (cons (car body) acc))
-      (reverse acc))))
+(defun stagehand-diff-pair-run (run-l run-f)
+  "Split the run's lines by sign; BALANCED → interleave (-1 +1 -2
++2 ...) with each line's flag carried; unbalanced → unchanged.
+Returns (lines flags)."
+  (let ((dels (stagehand-diff-partition-sign run-l run-f "-" (list) (list)))
+        (adds (stagehand-diff-partition-sign run-l run-f "+" (list) (list))))
+    (if (= (length (nth 0 dels)) (length (nth 0 adds)))
+      (stagehand-diff-interleave2 (nth 0 dels) (nth 1 dels)
+        (nth 0 adds) (nth 1 adds))
+      (list run-l run-f))))
 
-(defun stagehand-diff-pair-run (run)
-  ;; Split the run into its '-' lines and '+' lines; balanced →
-  ;; interleave (-1 +1 -2 +2 ...); unbalanced → run unchanged.
-  (let ((dels (stagehand-diff-filter-sign run "-"))
-        (adds (stagehand-diff-filter-sign run "+")))
-    (if (= (length dels) (length adds))
-      (stagehand-diff-interleave dels adds)
-      run)))
-
-(defun stagehand-diff-filter-sign (lines sign)
+(defun stagehand-diff-partition-sign (lines flags sign acc-l acc-f)
+  "The run's lines (and their flags) with the given sign."
   (if (null lines)
-    (list)
+    (list (reverse acc-l) (reverse acc-f))
     (if (string-prefix-p sign (car lines))
-      (cons (car lines) (stagehand-diff-filter-sign (cdr lines) sign))
-      (stagehand-diff-filter-sign (cdr lines) sign))))
+      (stagehand-diff-partition-sign (cdr lines) (cdr flags) sign
+        (cons (car lines) acc-l) (cons (if (null flags) t (car flags)) acc-f))
+      (stagehand-diff-partition-sign (cdr lines) (cdr flags) sign
+        acc-l acc-f))))
 
-(defun stagehand-diff-interleave (dels adds)
-  (if (null dels)
-    (list)
-    (append (list (car dels) (car adds))
-      (stagehand-diff-interleave (cdr dels) (cdr adds)))))
+(defun stagehand-diff-interleave2 (dl df al af)
+  "Interleave two (lines flags) streams → (lines flags)."
+  (if (null dl)
+    (list (list) (list))
+    (let ((rest (stagehand-diff-interleave2 (cdr dl) (cdr df) (cdr al) (cdr af))))
+      (list (append (list (car dl) (car al)) (nth 0 rest))
+            (append (list (car df) (car af)) (nth 1 rest))))))
 
 (defun stagehand-diff-partial-patch-cached (idx flags)
   "The CACHED-side (unstage) partial patch: the roles INVERT — the
@@ -591,10 +611,14 @@ the patch string, or nil with the refusal named."
         nil)
       (let* ((header (nth 0 split))
              (hunk (nth 1 split))
-             (spec (stagehand-diff-hunk-spec (car hunk))))
+             (spec (stagehand-diff-hunk-spec (car hunk)))
+             ;; Slot-pair with the FLAGS carried through the same
+             ;; permutation (valve r2: original-layout selections must
+             ;; land on the right lines after the reorder).
+             (paired (stagehand-diff-slot-pair
+                       (stagehand-diff-swap-body (cdr hunk)) flags)))
         (stagehand-diff-partial-scan
-          (stagehand-diff-slot-pair (stagehand-diff-swap-body (cdr hunk)))
-          flags (list) (list)
+          (nth 0 paired) (nth 1 paired) (list) (list)
           0 0
           0
           nil nil 0

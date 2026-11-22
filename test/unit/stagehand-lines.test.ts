@@ -147,7 +147,7 @@ describe("#331 — partial-patch construction (round-trips vs REAL git)", () => 
     openDiff("f.txt");
     // Swapped+slot-paired body: " a","-B","+b","-C","+c"," d"...
     // Select c→C = keep body k=3,4 ("-C","+c").
-    let patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil nil nil t t nil nil nil nil nil))").value);
+    let patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil nil t nil t nil nil nil nil nil))").value);
     expect(patch).toBeTruthy();
     execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
     expect(new TextDecoder().decode(execFileSync("git", ["show", ":f.txt"], { cwd: process.cwd() })))
@@ -156,7 +156,7 @@ describe("#331 — partial-patch construction (round-trips vs REAL git)", () => 
     execFileSync("git", ["restore", "--staged", "f.txt"], { cwd: process.cwd() });
     execFileSync("git", ["add", "f.txt"], { cwd: process.cwd() });
     // Select b→B = keep body k=1,2 ("-B","+b").
-    patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil t t nil nil nil nil nil nil nil))").value);
+    patch = String(e(editor, "(stagehand/diff/stagehand-diff-partial-patch-cached 0 (list nil t nil t nil nil nil nil nil nil))").value);
     expect(patch).toBeTruthy();
     execFileSync("git", ["apply", "--cached", "-"], { cwd: process.cwd(), input: patch + "\n" });
     expect(new TextDecoder().decode(execFileSync("git", ["show", ":f.txt"], { cwd: process.cwd() })))
