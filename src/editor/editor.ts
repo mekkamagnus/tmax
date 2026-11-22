@@ -121,9 +121,23 @@ import { createValidationError } from "../error/types.ts";
 export const TLISP_CORE_DIR = fs.existsSync(`${import.meta.dir}/../tlisp/core`)
   ? normalize(`${import.meta.dir}/../tlisp/core`)
   : `${import.meta.dir}/core`;
-export const DOCS_TMAX_DIR = fs.existsSync(`${import.meta.dir}/../../docs/tmax`)
-  ? normalize(`${import.meta.dir}/../../docs/tmax`)
-  : import.meta.dir;
+export const DOCS_TMAX_DIR = resolveDocsTmaxDir(import.meta.dir);
+
+/**
+ * #332: the docs corpus directory — the dev checkout walks
+ * `../../docs/tmax`; the COMPILED binary's `--asset` files embed at
+ * the BASENAME level of `/$bunfs/root` (ADR-0271: $bunfs never
+ * normalizes `..`), so the binary probes there explicitly instead of
+ * relying on the accidental `import.meta.dir` fallback. Exposed as a
+ * function for unit tests over both layouts.
+ */
+export function resolveDocsTmaxDir(fromDir: string): string {
+  const devPath = normalize(`${fromDir}/../../docs/tmax`);
+  if (fs.existsSync(`${devPath}/tmax.texinfo`)) return devPath;
+  // The compiled-binary layout: the assets sit beside the virtual root.
+  if (fs.existsSync(`${fromDir}/tmax.texinfo`)) return fromDir;
+  return fromDir;
+}
 
 /**
  * Key mapping for editor commands
