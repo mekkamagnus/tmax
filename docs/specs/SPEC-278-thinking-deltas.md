@@ -41,8 +41,8 @@ replay.
 - **Replay**: a MERGE pre-pass folds each same-block thought-delta run
   into ONE `thought` event (fragments joined; markers dropped) — the
   collapse then derives from lengths, deterministically. TAB toggles a
-  first-line-keyed display-only list (a user's live toggle is NOT a
-  parity input); the byte-parity assertion compares live-final vs
+  display-only list keyed PER SEGMENT (#327's run-ordinal keys; a
+  user's live toggle is NOT a parity input); the byte-parity assertion compares live-final vs
   replayed under DEFAULT collapse.
 - **Turn end** flushes the open block (its final marker rides inside
   the completing turn).
