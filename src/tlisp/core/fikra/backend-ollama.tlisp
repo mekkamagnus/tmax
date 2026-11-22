@@ -992,45 +992,30 @@ with its post-exit capture.")
   (fikra-ollama-state-diverged-scan root pre post paths))
 
 (defun fikra-ollama-path-state (root ref p)
-  ;; r149c: EXIT-STATUS sentinel (content never collides with a marker).
-  (let ((out (shell-command
-    (concat "git -C " (fikra/thread/fikra-thread-shq root)
-            " show " ref ":" (fikra/thread/fikra-thread-shq p)
-            " 2>/dev/null && echo || echo __ABSENT__"))))
-    (if (string-suffix-p (concat (hex-decode "0a") "__ABSENT__") out)
-      "__ABSENT__"
-      (if (string-suffix-p (hex-decode "0a") out)
-        (substring out 0 (- (length out) 1))
-        out))))
+  ;; r149d: TWO commands — an exit-status probe (content-independent)
+  ;; and the raw content. A content equal to any marker string can
+  ;; never collide; no newline stripping (byte-exact both sides).
+  (if (string= (string-trim (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " cat-file -e " ref ":" (fikra/thread/fikra-thread-shq p) " 2>/dev/null && echo OK || echo MISS"))) "OK")
+    (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " show " ref ":" (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
+    nil))
 
 (defun fikra-ollama-worktree-state (root p)
-  ;; r149c: exit-status sentinel; strip one echo newline on success.
-  (let ((out (shell-command
-    (concat "cat " (fikra/thread/fikra-thread-shq (concat root "/" p))
-            " 2>/dev/null && echo || echo __ABSENT__"))))
-    (if (string-suffix-p (concat (hex-decode "0a") "__ABSENT__") out)
-      "__ABSENT__"
-      (if (string-suffix-p (hex-decode "0a") out)
-        (substring out 0 (- (length out) 1))
-        out))))
+  ;; r149d: TWO commands — an exit-status probe (content-independent)
+  ;; and the raw content. A content equal to any marker string can
+  ;; never collide; no newline stripping (byte-exact both sides).
+  (if (string= (string-trim (shell-command (concat "test -e " (fikra/thread/fikra-thread-shq (concat root "/" p)) " && echo OK || echo MISS"))) "OK")
+    (shell-command (concat "cat " (fikra/thread/fikra-thread-shq (concat root "/" p)) " 2>/dev/null"))
+    nil))
 
 ;; r149: the INDEX content of a path (a staged-only change with a
 ;; matching worktree file must still refuse — the r146 staged catch).
 (defun fikra-ollama-index-state (root p)
-  ;; r149c: EXIT-STATUS sentinel — the content can never collide with
-  ;; a marker (a file whose CONTENT equals the marker string read as
-  ;; absent; the revert deleted it).
-  (let ((out (shell-command
-    (concat "git -C " (fikra/thread/fikra-thread-shq root)
-            " show :" (fikra/thread/fikra-thread-shq p)
-            " 2>/dev/null && echo || echo __UNSTAGED__"))))
-    ;; git show emits the blob verbatim; a successful show ends with the
-    ;; echo's newline — strip exactly one trailing newline on SUCCESS.
-    (if (string-suffix-p (concat (hex-decode "0a") "__UNSTAGED__") out)
-      "__UNSTAGED__"
-      (if (string-suffix-p (hex-decode "0a") out)
-        (substring out 0 (- (length out) 1))
-        out))))
+  ;; r149d: TWO commands — an exit-status probe (content-independent)
+  ;; and the raw content. A content equal to any marker string can
+  ;; never collide; no newline stripping (byte-exact both sides).
+  (if (string= (string-trim (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " ls-files --error-unmatch -- " (fikra/thread/fikra-thread-shq p) " >/dev/null 2>&1 && echo OK || echo MISS"))) "OK")
+    (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq root) " show :" (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
+    nil))
 
 (defun fikra-ollama-state-diverged-scan (root pre post paths)
   (if (or (not paths) (= (length paths) 0))
@@ -1040,11 +1025,24 @@ with its post-exit capture.")
            (ix (fikra-ollama-index-state root p))
            (want-post (fikra-ollama-path-state root post p))
            (want-pre (fikra-ollama-path-state root pre p)))
-      (if (not (and (or (string= cur want-post) (string= cur want-pre))
-                    (or (string= ix want-post) (string= ix want-pre)
-                        (string= ix "__UNSTAGED__"))))
+      ;; r149d: nil-aware — nil (absent/unstaged) equals only nil; strings
+      ;; compare byte-exactly. A non-string sentinel cannot collide with
+      ;; ANY content (the string markers did — bare and newline forms).
+      (if (not (and (or (fikra-ollama-state-eq cur want-post)
+                        (fikra-ollama-state-eq cur want-pre))
+                    (or (null ix)
+                        (fikra-ollama-state-eq ix want-post)
+                        (fikra-ollama-state-eq ix want-pre))))
         t
         (fikra-ollama-state-diverged-scan root pre post (cdr paths))))))
+
+;; nil=nil; string=string byte-exact; nil vs string = false.
+(defun fikra-ollama-state-eq (a b)
+  (if (null a)
+    (null b)
+    (if (null b)
+      nil
+      (string= a b))))
 
 (defun fikra-ollama-revert-latest-action ()
   (require-module fikra/checkpoint)

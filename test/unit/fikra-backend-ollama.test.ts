@@ -1246,11 +1246,15 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
       tool_calls: [{ function: { name: "buffer_edit", arguments: { path: "mark149.txt", content: "ACTION\n" } } }] } }));
     e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 340 "${r}")`);
     e(ed, `(fikra-http-complete 340 200 "${hex("{}")}")`);
-    // The user replaces the file's content with the marker string.
-    writeFileSync(join(process.cwd(), "mark149.txt"), "__ABSENT__\n");
-    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
-    expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
-    expect(readFileSync(join(process.cwd(), "mark149.txt"), "utf8")).toBe("__ABSENT__\n");
+    // The user replaces the file's content with the marker string —
+    // WITH and WITHOUT a trailing newline (both must refuse; the bare
+    // marker collided with the failure sentinel before r149d).
+    for (const content of ["__ABSENT__\n", "__ABSENT__"]) {
+      writeFileSync(join(process.cwd(), "mark149.txt"), content);
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
+      expect(readFileSync(join(process.cwd(), "mark149.txt"), "utf8")).toBe(content);
+    }
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
