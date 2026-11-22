@@ -98,6 +98,25 @@ describe("#328 — block cursor under wrap + wide characters", () => {
     expect(getWrappedCursorColumn(state, 5)).toBe(2);
   });
 
+  test("CURSOR-AT-EOL under wrap (gate r1 regression): the block paints PAST-END, hardware agrees", () => {
+    // ASCII: "abcdefgh" col 8 (end) at width 5 → rows abcde/fgh; the
+    // block sits past 'h' at cell 3 (the r1 fallback painted cell 0).
+    const st1 = makeState("abcdefgh", { line: 0, column: 8 });
+    const r1 = renderBufferLines(st1, 5, 24);
+    const b1 = blockCursorAt(r1[1]!);
+    expect(b1.blockIndex).toBe(3);
+    expect(getWrappedCursorRow(st1, 24, 5)).toBe(1);
+    expect(getWrappedCursorColumn(st1, 5)).toBe(3);
+    // WIDE: 7 界 col 7 (end) at width 12 → row 1 holds 1 char; the
+    // cursor past-end = visual cell 2 — the block paints the past-end
+    // cell (row padding), NOT over the first char.
+    const st2 = makeState("界界界界界界界", { line: 0, column: 7 });
+    const r2 = renderBufferLines(st2, 12, 24);
+    const b2 = blockCursorAt(r2[1]!);
+    expect(b2.blockIndex).toBe(2);
+    expect(getWrappedCursorColumn(st2, 12)).toBe(2);
+  });
+
   test("wrap CONTENT sanity: 10 wide chars over width 12 → 6 + 4", () => {
     const state = makeState("界界界界界界界界界界", { line: 0, column: 0 });
     const rows = renderBufferLines(state, 12, 24);

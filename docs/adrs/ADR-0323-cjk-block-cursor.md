@@ -22,6 +22,18 @@ made for the hardware cursor). The tests assert PAINT↔HARDWARE
 agreement (`getWrappedCursorRow`/`Column`) rather than only
 absolute cells — the agreement is the actual invariant.
 
+## Gate-r1 amendment: the past-end fallback
+
+The last-row fallback (cursor at/after the final cell — the constant
+insert-mode case) bases its column on the **PRE-increment
+accumulator** (`visualCursor - (accumWidth - rowWidth)` — the
+wrappedSegOf convention): at EOL this equals the final row's width,
+painting the block PAST-END via the row's padding. The first cut
+computed it post-increment — unconditionally 0, regressing the
+ASCII past-end block onto the row's first character (caught by the
+gate's base-vs-HEAD probe; EOL tests added for both ASCII and wide
+characters, asserting paint/hardware agreement).
+
 ## Consequences
 
 - The two cursor systems (painted block + hardware) share one

@@ -680,7 +680,12 @@ function renderSingleWindowWrapped(
         accumWidth += rowWidth;
         if (wr === wrappedRows.length - 1) {
           cursorWrapRow = wr;
-          cursorWrapCol = Math.max(0, visualCursor - accumWidth);
+          // PAST-END (cursor at/after the final cell — constant in
+          // insert mode): the base is the PRE-increment accumulator
+          // (the wrappedSegOf convention — gate r1: post-increment
+          // made this unconditionally 0, painting the block over the
+          // row's FIRST char while the hardware cursor sat past-end).
+          cursorWrapCol = visualCursor - (accumWidth - rowWidth);
         }
       }
     }
