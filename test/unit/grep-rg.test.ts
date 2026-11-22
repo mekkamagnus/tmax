@@ -56,7 +56,8 @@ const hitNil = (ev: string) => q(`(null (hashmap-get (rg-event->hit (hex-decode 
 describe("#308 — rg-event->hit (the output protocol)", () => {
   test("PLAIN match: file/line/col/text from a real rg event", () => {
     writeFileSync(join(process.cwd(), "a.txt"), "hello world\n");
-    const [ev] = rgMatches("hello", ".");
+    const evs0 = rgMatches("hello", ".");
+    const ev = evs0[0]!;
     expect(String(field(ev, "file").value)).toContain("a.txt");
     expect(String(field(ev, "text").value)).toContain("hello world");
     expect(String(field(ev, "col").value)).toBe("1"); // byte 0 → col 1
@@ -64,14 +65,16 @@ describe("#308 — rg-event->hit (the output protocol)", () => {
 
   test("COLON-PATH and UNICODE content", () => {
     writeFileSync(join(process.cwd(), "we:ird.txt"), "ünïcødé needle here\n");
-    const [ev] = rgMatches("needle", ".");
+    const evs0 = rgMatches("needle", ".");
+    const ev = evs0[0]!;
     expect(String(field(ev, "file").value)).toContain("we:ird.txt");
     expect(String(field(ev, "text").value)).toContain("ünïcødé needle here");
   });
 
   test("BYTE→CHAR column: a multi-submatch event reports the FIRST submatch", () => {
     writeFileSync(join(process.cwd(), "m.txt"), "xx needle zz needle\n");
-    const [ev] = rgMatches("needle", ".");
+    const evs0 = rgMatches("needle", ".");
+    const ev = evs0[0]!;
     // "xx needle": byte start 3 → 3 code points → col 4 (the FIRST
     // submatch — one event, two matches).
     expect(String(field(ev, "col").value)).toBe("4");
@@ -79,7 +82,8 @@ describe("#308 — rg-event->hit (the output protocol)", () => {
 
   test("UNICODE column: code points counted, not bytes", () => {
     writeFileSync(join(process.cwd(), "u.txt"), "ünïcødé needle\n");
-    const [ev] = rgMatches("needle", ".");
+    const evs0 = rgMatches("needle", ".");
+    const ev = evs0[0]!;
     // 8 code points precede the match (ünïcødé + space) → col 9
     // (a BYTE column would say 13).
     expect(String(field(ev, "col").value)).toBe("9");
@@ -89,9 +93,10 @@ describe("#308 — rg-event->hit (the output protocol)", () => {
     writeFileSync(join(process.cwd(), "a.txt"), "hello\n");
     const evs = execFileSync("rg", ["--json", "--", "hello", "."], { encoding: "utf8" })
       .split("\n").filter((l) => l.includes('"type":"begin"'));
-    const r = hitNil(evs[0]);
+    const begin0 = evs[0]!;
+    const r = hitNil(begin0);
     expect(["t", "true"]).toContain(String(r.value)); // hit nil
-    const f = flagOf(evs[0]);
+    const f = flagOf(begin0);
     expect(["nil", "null", "false"]).toContain(String(f.value)); // flag nil
   });
 
