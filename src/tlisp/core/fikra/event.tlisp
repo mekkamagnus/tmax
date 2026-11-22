@@ -5,7 +5,7 @@
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
           fikra-event-get-str
-          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel) fikra-gate-panel fikra-event-get)
+          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
