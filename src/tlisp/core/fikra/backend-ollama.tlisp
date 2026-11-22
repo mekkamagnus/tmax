@@ -12,7 +12,8 @@
           fikra-ollama-path-contained-p fikra-ollama-revert-latest-action
           fikra-ollama-action-posts-get fikra-ollama-record-action-pair
           fikra-ollama-last-action-stash-get fikra-ollama-exchanges-file-get
-          fikra-ollama-tool-exchanges-reset fikra-ollama-action-state-reset)
+          fikra-ollama-tool-exchanges-reset fikra-ollama-action-state-reset
+          fikra-ollama-set-streaming)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -63,6 +64,10 @@ let).")
 (defvar fikra-ollama-stream-rendered nil
   "r153: t when THIS request's content already rendered via deltas (the
 plain-content branch then skips the re-render).")
+(defun fikra-ollama-set-streaming (flag)
+  ;; r153b: the test seam (a cross-module setq on a defvar fails).
+  (setq fikra-ollama-streaming (if flag t nil)))
+
 (defvar fikra-ollama-streaming t
   "t: stream:true on /api/chat (progressive rendering); nil: one-shot.")
 (defvar fikra-ollama-stream-bufs (hashmap)
@@ -157,7 +162,9 @@ availability gate must be synchronous; the turn itself is async)."
   ;; permissions surface (a pure chat model; nothing to mediate).
   (list (list "session-resume" nil)
         (list "interactive-approvals" nil)
-        (list "streaming" nil)))
+        ;; r153b (codex): streaming is REAL now (r153) — the capability
+        ;; reports it honestly (toggling the flag toggles the report).
+        (list "streaming" (if fikra-ollama-streaming t nil))))
 
 ;; Drop ONE trailing comma (the accumulator appends separators; the
 ;; array close must not follow a comma — ollama 400s ',]').
@@ -1556,23 +1563,26 @@ with its post-exit capture.")
 (defun fikra-ollama-stream-line (k line)
   (if (> (length (string-trim line)) 0)
     (progn
-      ;; A tool_calls line rides RAW (the complete handler parses it).
-      (if (string-match "tool_calls" line)
-        (keymap-mutable-set! fikra-ollama-stream-tools k line)
-        nil)
+      ;; r153b (codex): classify by the PARSED shape — a raw substring
+      ;; match on "tool_calls" misfiled ordinary text mentioning the
+      ;; field. A tool_calls line rides RAW and its content is NOT
+      ;; emitted here (the tool round renders the narration ONCE).
       (condition-case nil
         (let* ((obj (json-read-from-string line))
-               (c (fikra-ollama-alist-get "content"
-                     (fikra-ollama-alist-get "message" obj))))
-          (if (and c (stringp c) (> (length c) 0))
-            (progn
-              (keymap-mutable-set! fikra-ollama-stream-content k
-                (concat (or (hashmap-get fikra-ollama-stream-content k) "") c))
-              (fikra/event/fikra-event-emit
-                (list (list "kind" "text-delta")
-                      (list "speaker" "assistant")
-                      (list "text" c))))
-            nil))
+               (m (fikra-ollama-alist-get "message" obj))
+               (tc (if m (fikra-ollama-alist-get "tool_calls" m) nil))
+               (c (if m (fikra-ollama-alist-get "content" m) nil)))
+          (if (and tc (listp tc) (> (length tc) 0))
+            (keymap-mutable-set! fikra-ollama-stream-tools k line)
+            (if (and c (stringp c) (> (length c) 0))
+              (progn
+                (keymap-mutable-set! fikra-ollama-stream-content k
+                  (concat (or (hashmap-get fikra-ollama-stream-content k) "") c))
+                (fikra/event/fikra-event-emit
+                  (list (list "kind" "text-delta")
+                        (list "speaker" "assistant")
+                        (list "text" c))))
+              nil)))
         (error () nil)))
     nil))
 

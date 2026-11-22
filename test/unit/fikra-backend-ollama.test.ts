@@ -121,12 +121,18 @@ const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: {
         '{"done":true}',
       ];
       socket.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/x-ndjson\\r\\nConnection: close\\r\\n\\r\\n");
+      // The RELEASE-FILE handshake (the r132 pattern): the first delta
+      // lands, then the stream WAITS for the test to release it —
+      // deterministic DURING observation regardless of machine load.
+      const release = process.argv[2] + ".release";
+      const fs = require("node:fs");
       let i = 0;
       const tick = () => {
         if (i >= lines.length) { socket.end(); return; }
+        if (i > 0 && !fs.existsSync(release)) { setTimeout(tick, 50); return; }
         socket.write(lines[i] + "\\n");
         i += 1;
-        setTimeout(tick, 250);
+        setTimeout(tick, 100);
       };
       setTimeout(tick, 100);
     }
@@ -222,9 +228,14 @@ describe("#8.1 raw-API ollama chat backend (r108)", () => {
     expect(bare).not.toMatch(/\(/);
   });
 
-  tt("the capabilities are honest: no streaming, no approvals", async () => {
+  tt("the capabilities are honest: streaming ON (r153b), no approvals", async () => {
     const ed = await armed();
+    // r153/r153b: streaming is REAL now — the capability reports it; the
+    // flag toggles the report honestly.
+    expect(String(e(ed, '(fikra/adapter/fikra-backend-capable-p "ollama" "streaming")').value)).toBe("true");
+    e(ed, '(fikra/backend-ollama/fikra-ollama-set-streaming nil)');
     expect(String(e(ed, '(fikra/adapter/fikra-backend-capable-p "ollama" "streaming")').value)).toBe("null");
+    e(ed, '(fikra/backend-ollama/fikra-ollama-set-streaming t)');
     expect(String(e(ed, '(fikra/adapter/fikra-backend-capable-p "ollama" "interactive-approvals")').value)).toBe("null");
   });
 });
@@ -1462,15 +1473,19 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
   // exactly once (no duplicate at completion).
   tt("a streaming reply renders progressively and exactly once", async () => {
     const ed = await armed();
+    rmSync(bodiesFile + ".release", { force: true });
     e(ed, '(fikra/chat/fikra-turn-send "STREAM-PROBE please")');
-    // The FIRST delta renders while the stream is still open.
-    const first = strip(await until(ed, "(buffer-text)", "Str", 80));
+    // The FIRST delta renders while the stream is HELD OPEN (the stub
+    // waits for the release file — deterministic under any load).
+    const first = strip(await until(ed, "(buffer-text)", "Str", 150));
     expect(first).toContain("Str");
     expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    expect(first).not.toContain("DONE");
+    writeFileSync(bodiesFile + ".release", "go");
     // The full reply lands and the turn completes.
-    const full = strip(await until(ed, "(buffer-text)", "DONE", 80));
+    const full = strip(await until(ed, "(buffer-text)", "DONE", 150));
     expect(full).toContain("Streaming DONE");
-    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(await untilStatus(ed, "idle", 150)).toBe("idle");
     // EXACTLY ONCE (no completion re-render).
     const text = strip(String(e(ed, "(buffer-text)").value));
     expect(text.split("Streaming DONE").length - 1).toBe(1);
@@ -1478,6 +1493,36 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     const lines = readFileSync(bodiesFile, "utf8").trimEnd().split("\n").filter(Boolean);
     const last = lines[lines.length - 1] ?? "";
     expect(last).toContain('"stream":true');
+  });
+
+  // r153b (codex catches): narration beside tool_calls renders ONCE;
+  // ordinary text MENTIONING "tool_calls" is text, not a tool line.
+  tt("streamed narration beside tool_calls renders exactly once", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "narrate then call")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 630 "live")');
+    // ONE NDJSON line carrying both content and tool_calls (the ollama shape).
+    const line = JSON.stringify({ message: { role: "assistant", content: "Checking now.", tool_calls: [
+      { function: { name: "bash", arguments: { command: "echo NARRATE-ONCE" } } }] } });
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 630 "${hex(line + "\n")}")`);
+    e(ed, `(fikra-http-complete 630 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "NARRATE-ONCE", 80);
+    await settleRefireFrom(ed, "630", "NARR-DONE");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text.split("Checking now.").length - 1).toBe(1);
+  });
+
+  tt("ordinary text mentioning tool_calls is TEXT (rendered once)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "mention the field")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 631 "live")');
+    const line = JSON.stringify({ message: { role: "assistant", content: "The tool_calls field is here." } });
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 631 "${hex(line + "\n")}")`);
+    e(ed, `(fikra-http-complete 631 200 "${hex("{}")}")`);
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    const text = strip(String(e(ed, "(buffer-text)").value));
+    expect(text.split("The tool_calls field is here.").length - 1).toBe(1);
   });
 
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
