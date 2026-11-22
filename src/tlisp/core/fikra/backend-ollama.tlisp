@@ -1354,7 +1354,11 @@ availability gate must be synchronous; the turn itself is async)."
          (acc fikra-ollama-parked-acc))
     (setq fikra-ollama-parked-rest nil)
     (setq fikra-ollama-parked-acc "")
-    (if (not rest)
+    ;; r140 ROOT CAUSE: (list) is TRUTHY in this dialect — a single-call
+    ;; park (empty proper-list rest) took the NON-empty branch, whose
+    ;; remember serialized the empty rest as the assistant's calls
+    ;; ("tool_calls":[]). The branch test is LENGTH-based now.
+    (if (or (not rest) (= (length rest) 0))
       (progn
         ;; Nothing to resume — the pre-park results still count.
         (if (> (length acc) 0)
@@ -1372,10 +1376,18 @@ availability gate must be synchronous; the turn itself is async)."
         ;; r139 (codex catch): the DECISION continuations flow through
         ;; here — their exchanges must persist for future turns (the
         ;; full call list lives in the parked continuation's stash).
+        ;; r140: the fragment carries the STASH's full call list (the
+        ;; parked call + remainder — rest-only fragments showed the
+        ;; remainder as the whole assistant message).
         (if (stringp results)
           (fikra-ollama-remember-exchange
             (concat "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
-                    (fikra-ollama-calls-json rest 0 "")
+                    (fikra-ollama-calls-json
+                      (if (and fikra-ollama-last-parked-calls
+                               (> (length fikra-ollama-last-parked-calls) 0))
+                        fikra-ollama-last-parked-calls
+                        rest)
+                      0 "")
                     "]}," results)))
         (cond
           ((and (symbolp results) (string= (symbol-name results) "parked"))

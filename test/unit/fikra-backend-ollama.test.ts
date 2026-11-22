@@ -978,6 +978,31 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(body.indexOf("user rejected this command")).toBeLessThan(body.indexOf("REJ-DONE"));
   });
 
+  // r140 ROOT CAUSE (the declared r139 gap, closed): (list) is TRUTHY
+  // in this dialect — a single-call park took the NON-empty resume
+  // branch and serialized the empty rest as the assistant's calls.
+  tt("a single-call rejection records the actual call in the exchange", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "solo reject")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "rm -rf solo140/" } } }] } }));
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 240 "live")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 240 "${r}")`);
+    e(ed, `(fikra-http-complete 240 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-reject)");
+    await settleRefireFrom(ed, "240", "SOLO-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // Turn 2 rebuilds from history — the fragment carries the ACTUAL call.
+    e(ed, '(fikra/chat/fikra-turn-send "after solo")');
+    const msgs = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(msgs).toContain('"name":"bash"');
+    expect(msgs).toContain("solo140");
+    expect(msgs).toContain("user rejected this command");
+    // The refusal appears exactly once.
+    expect(msgs.split("user rejected this command").length - 1).toBe(1);
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
