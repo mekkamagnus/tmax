@@ -564,3 +564,75 @@ describe("#291 — gate r5 residuals", () => {
     expect(git("diff", "--cached")).toBe(""); // nothing applied
   });
 });
+
+describe("#291 — valve r1 fixes", () => {
+  /** Multi-file worktree view via the Unstaged section header. */
+  const openUnstagedSection = () => {
+    e(editor, "(stagehand/status/stagehand-status)");
+    const ls0 = strip(bufferText(editor)).split("\n");
+    const hdr = ls0.findIndex((l) => l.startsWith("Unstaged ("));
+    e(editor, `(cursor-move ${hdr} 0)`);
+    e(editor, "(stagehand/status/stagehand-status-diff)");
+  };
+
+  test("hunk selection is BLOCK-BOUNDED: a later file's header never stages the previous file's hunk", async () => {
+    writeFileSync(join(process.cwd(), "f1.txt"), "a\n");
+    writeFileSync(join(process.cwd(), "f2.txt"), "b\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f1.txt"), "A1\n");
+    writeFileSync(join(process.cwd(), "f2.txt"), "B1\n");
+    openUnstagedSection();
+    // Cursor on f2's diff --git HEADER (above f2's @@, below f1's
+    // hunk): the old global lookup grabbed F1's hunk — wrong file.
+    const ls = strip(bufferText(editor)).split("\n");
+    const f2hdr = ls.findIndex((l) => l.startsWith("diff --git a/f2.txt"));
+    e(editor, `(cursor-move ${f2hdr} 0)`);
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("no hunk at point");
+    expect(git("diff", "--cached")).toBe(""); // NOTHING staged
+    // And INSIDE f2's hunk it stages F2's hunk (not f1's).
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    const st = await waitApply(editor);
+    expect(st).toContain("hunk applied");
+    expect(git("diff", "--cached")).toContain("+B1");
+    expect(git("diff", "--cached")).not.toContain("A1");
+  });
+
+  test("an apply IN FLIGHT blocks s/u/D (state not stomped)", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
+    openDiff("f.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    // Launch directly (no await — the sentinel cannot have landed).
+    e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
+    e(editor, "(stagehand/diff/stagehand-diff-stage-hunk)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("an apply is still running");
+  });
+
+  test("a sentinel whose view CHANGED does not refresh the wrong view", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "v1\n");
+    writeFileSync(join(process.cwd(), "b.txt"), "w1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "a.txt"), "v2\n");
+    writeFileSync(join(process.cwd(), "b.txt"), "w2\n");
+    openDiff("a.txt");
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(stagehand/diff/stagehand-diff-next)");
+    // Launch the apply against view A, then open view B (gen bump)
+    // BEFORE the sentinel lands; drive the sentinel directly.
+    e(editor, '(stagehand/diff/stagehand-diff-apply-hunk-at 0 "stage")');
+    const genA = e(editor, "(stagehand/diff/stagehand-diff-side-get)");
+    openDiff("b.txt");
+    const bBefore = strip(bufferText(editor));
+    e(editor, "(stagehand/diff/stagehand-diff-apply-sentinel 0 0)");
+    expect(String(e(editor, "(editor-status)").value)).toContain("the view changed");
+    // B's view is UNTOUCHED (never refreshed with A's targets).
+    expect(strip(bufferText(editor))).toBe(bBefore);
+    expect(String(genA.value)).toBe("worktree");
+    // Drain the real sentinel before teardown.
+    await waitApply(editor, 3000);
+  });
+});

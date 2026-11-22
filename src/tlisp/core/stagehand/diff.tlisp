@@ -9,6 +9,7 @@
           stagehand-diff-table stagehand-diff-accept
           stagehand-diff-apply-filter stagehand-diff-apply-sentinel
           stagehand-diff-apply-exit-get stagehand-diff-side-get
+          stagehand-diff-apply-hunk-at
           stagehand-diff-refresh-view)
 
 ;; #289 — Stagehand T0: the diff GRAMMAR + faces. `git diff
@@ -21,6 +22,14 @@
 ;; (recency restore). The `d` dispatch lives in stagehand/status (it
 ;; reads the status buffer's row/section state); this module renders.
 
+(defvar stagehand-diff-view-gen 0
+  "Bumped on every open — an apply's sentinel refreshes only when
+its ORIGINATING view is still current (valve r1: a diff opened
+mid-apply made the sentinel refresh the WRONG view's targets).")
+(defvar stagehand-diff-apply-in-flight nil
+  "An apply is running (s/u/D no-op until its sentinel lands).")
+(defvar stagehand-diff-apply-view-gen nil
+  "The view generation the in-flight apply was launched against.")
 (defvar stagehand-diff-hunks (list)
   "The buffer line indices of hunk-header lines (n/p targets).")
 (defun stagehand-diff-side-get ()
@@ -151,6 +160,7 @@ diff)."
     (if (and (null (cdr pairs)) (string= (car (car pairs)) "context") (string= (car (cdr (car pairs))) ""))
       (editor-set-status "Stagehand: empty diff")
       (progn
+        (setq stagehand-diff-view-gen (+ (or stagehand-diff-view-gen 0) 1))
         (setq stagehand-diff-raw text)
         (setq stagehand-diff-side side)
         (setq stagehand-diff-root root)
@@ -356,20 +366,53 @@ the n-first y/n."
       (editor-set-status "Stagehand: discard cancelled"))))
 
 (defun stagehand-diff-hunk-idx-at-cursor ()
-  ;; The 0-based hunk index whose HEADER is at/above the cursor (the
-  ;; hunk the cursor is inside).
-  (let ((hunks stagehand-diff-hunks) (best nil) (i 0))
-    (while (< i (length hunks))
-      (if (<= (nth i hunks) (cursor-line))
-        (setq best i)
-        (setq i (length hunks)))
+  ;; The 0-based hunk index whose HEADER is at/above the cursor AND
+  ;; in the CURSOR'S file block (valve r1: on a later file's header
+  ;; region the old global lookup grabbed the PREVIOUS file's last
+  ;; hunk — s/u/D acted on the wrong file; now it yields nil).
+  (let ((blk (stagehand-diff-block-at-cursor)) (best nil) (i 0))
+    (while (< i (length stagehand-diff-hunks))
+      (if (<= (nth i stagehand-diff-hunks) (cursor-line))
+        (if (= (stagehand-diff-hunk-block-of i) blk)
+          (setq best i))
+        (setq i (length stagehand-diff-hunks)))
       (setq i (+ i 1)))
     best))
+
+(defun stagehand-diff-hunk-block-of (idx)
+  ;; Hunk IDX → its 0-based file block (a pairs-walk counting
+  ;; diff --git blocks and hunks; RAW-index space like block-scan).
+  (stagehand-diff-hunk-block-of-scan
+    (stagehand-diff-parse (or stagehand-diff-raw ""))
+    -1 0 idx))
+
+(defun stagehand-diff-hunk-block-of-scan (pairs block count target)
+  (if (null pairs)
+    block
+    (let* ((pair (car pairs))
+           (cls (car pair))
+           (line (car (cdr pair))))
+      (cond
+        ((and (string= cls "file-header")
+              (string-prefix-p "diff --git " line))
+          (stagehand-diff-hunk-block-of-scan (cdr pairs)
+            (+ block 1) count target))
+        ((string= cls "hunk-header")
+          (if (= count target)
+            block
+            (stagehand-diff-hunk-block-of-scan (cdr pairs) block
+              (+ count 1) target)))
+        (t
+          (stagehand-diff-hunk-block-of-scan (cdr pairs) block count target))))))
 
 (defun stagehand-diff-apply-hunk (op)
   ;; Key availability FIRST (the issue: a key that does not apply in
   ;; the current view no-ops with a status).
   (cond
+    (stagehand-diff-apply-in-flight
+      ;; valve r1: a second s/u/D before the running apply's sentinel
+      ;; lands would stomp its err/exit state — no-op instead.
+      (editor-set-status "Stagehand: an apply is still running"))
     ((and (string= op "stage") (not (string= stagehand-diff-side "worktree")))
       (editor-set-status "Stagehand: s stages worktree hunks (open with d)"))
     ((and (string= op "unstage") (not (string= stagehand-diff-side "cached")))
@@ -413,6 +456,8 @@ the n-first y/n."
                     :sentinel "stagehand/diff/stagehand-diff-apply-sentinel")))
         (setq stagehand-diff-apply-err nil)
         (setq stagehand-diff-apply-exit nil)
+        (setq stagehand-diff-apply-view-gen stagehand-diff-view-gen)
+        (setq stagehand-diff-apply-in-flight t)
         (process-write pid (concat patch "\n"))
         (process-close-stdin pid)
         (editor-set-status "Stagehand: applying hunk…")))
@@ -526,10 +571,15 @@ failure message's first line possible)."
 ≠ 0 → the failure names exit + stderr + the refresh-and-retry hint
 (a stale diff lands here — the view does NOT auto-retry)."
   (setq stagehand-diff-apply-exit code)
+  (setq stagehand-diff-apply-in-flight nil)
   (if (and (numberp code) (= code 0))
-    (progn
-      (stagehand-diff-refresh-view)
-      (editor-set-status "Stagehand: hunk applied"))
+    (if (not (= stagehand-diff-apply-view-gen stagehand-diff-view-gen))
+      ;; valve r1: the view CHANGED since this apply launched —
+      ;; refreshing now would render the WRONG view's targets.
+      (editor-set-status "Stagehand: hunk applied (the view changed — press g to refresh)")
+      (progn
+        (stagehand-diff-refresh-view)
+        (editor-set-status "Stagehand: hunk applied")))
     (editor-set-status
       (concat "Stagehand: apply failed ("
         (number-to-string code) ") "
