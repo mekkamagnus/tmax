@@ -52,8 +52,15 @@ const openStash = () => {
   e(editor, "(stagehand/stash/stagehand-stash)");
   return strip(bufferText(editor));
 };
-/** Cursor to row I (0-based, after the 2 header lines). */
-const toRow = (i: number) => e(editor, `(cursor-move ${i + 2} 0)`);
+/** Cursor to the row whose REF is displayed (by its ACTUAL rendered
+ * line — gate r1: placing by a guessed offset encoded the
+ * implementation's own wrong constant and masked the off-by-one). */
+const toRow = (ref: string) => {
+  const ls = strip(bufferText(editor)).split("\n");
+  const i = ls.findIndex((l) => l.startsWith(ref + "  "));
+  if (i < 0) throw new Error(`row ${ref} not displayed`);
+  e(editor, `(cursor-move ${i} 0)`);
+};
 
 describe("#292 — creation (the z prefix)", () => {
   test("z z creates (plain): the worktree clean, the new ref shown", () => {
@@ -147,7 +154,7 @@ describe("#292 — apply / pop / drop", () => {
     git("stash");
     writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
     openStash();
-    toRow(0);
+    toRow("stash@{0}");
     e(editor, "(stagehand/stash/stagehand-stash-apply)");
     e(editor, '(stagehand/stash/stagehand-stash-accept "y")');
     expect(st(editor)).toContain("stash apply stash@{0} done");
@@ -161,7 +168,7 @@ describe("#292 — apply / pop / drop", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "STASHED\n");
     git("stash");
     openStash();
-    toRow(0);
+    toRow("stash@{0}");
     e(editor, "(stagehand/stash/stagehand-stash-pop)");
     e(editor, '(stagehand/stash/stagehand-stash-accept "y")');
     expect(st(editor)).toContain("stash pop stash@{0} done");
@@ -177,7 +184,7 @@ describe("#292 — apply / pop / drop", () => {
     // Diverge the same line — the apply must conflict.
     writeFileSync(join(process.cwd(), "f.txt"), "CONFLICTING\nv2\n");
     openStash();
-    toRow(0);
+    toRow("stash@{0}");
     e(editor, "(stagehand/stash/stagehand-stash-pop)");
     e(editor, '(stagehand/stash/stagehand-stash-accept "y")');
     const s = st(editor);
@@ -194,7 +201,7 @@ describe("#292 — apply / pop / drop", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
     git("stash");
     openStash();
-    toRow(0);
+    toRow("stash@{0}");
     e(editor, "(stagehand/stash/stagehand-stash-drop)");
     e(editor, '(stagehand/stash/stagehand-stash-accept "y")');
     expect(st(editor)).toContain("stash drop stash@{0} done");
@@ -207,7 +214,7 @@ describe("#292 — apply / pop / drop", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "v2\n");
     git("stash");
     openStash();
-    toRow(0);
+    toRow("stash@{0}");
     e(editor, "(stagehand/stash/stagehand-stash-drop)");
     e(editor, '(stagehand/stash/stagehand-stash-accept "n")');
     expect(st(editor)).toContain("cancelled");
@@ -257,7 +264,47 @@ describe("#292 — refusals + parsing", () => {
     expect(strip(bufferText(editor))).toContain(msg);
   });
 
-  test("IDENTITY REVALIDATION: a shifted ref refuses with 'reselect'", () => {
+  test("IDENTITY REVALIDATION (SHIFTED-PRESENT): a ref now resolving to a DIFFERENT commit refuses", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "A\n");
+    execFileSync("git", ["stash", "push", "-m", "A"], { cwd: process.cwd() });
+    writeFileSync(join(process.cwd(), "f.txt"), "B\n");
+    execFileSync("git", ["stash", "push", "-m", "B"], { cwd: process.cwd() });
+    openStash(); // rendered [stash@{0}=B, stash@{1}=A]
+    toRow("stash@{1}"); // recorded (stash@{1}, A's id)
+    // Push a NEW stash externally: every ref shifts — stash@{1} now
+    // resolves to B's id (PRESENT but ≠ the recorded A).
+    writeFileSync(join(process.cwd(), "f.txt"), "C\n");
+    execFileSync("git", ["stash", "push", "-m", "C"], { cwd: process.cwd() });
+    e(editor, "(stagehand/stash/stagehand-stash-drop)");
+    expect(st(editor)).toContain("stash list changed — reselect");
+    // NOTHING dropped: all three stashes survive.
+    expect(git("stash", "list")).toContain("A");
+    expect(git("stash", "list")).toContain("B");
+    expect(git("stash", "list")).toContain("C");
+  });
+
+  test("the STALE-CONFIRM window: a shift between confirm-open and y refuses at the MUTATION point", () => {
+    writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
+    commit("base");
+    writeFileSync(join(process.cwd(), "f.txt"), "A\n");
+    execFileSync("git", ["stash", "push", "-m", "A"], { cwd: process.cwd() });
+    openStash();
+    toRow("stash@{0}"); // the confirm opens against (stash@{0}, A)
+    e(editor, "(stagehand/stash/stagehand-stash-drop)");
+    // A NEW stash lands BEFORE the y — refs shift.
+    writeFileSync(join(process.cwd(), "f.txt"), "NEW\n");
+    execFileSync("git", ["stash", "push", "-m", "NEW"], { cwd: process.cwd() });
+    e(editor, '(stagehand/stash/stagehand-stash-accept "y")');
+    expect(st(editor)).toContain("stash list changed — reselect");
+    // The NEW, never-confirmed stash SURVIVES (gate r1's repro had
+    // it destroyed with a 'done' status).
+    expect(git("stash", "list")).toContain("NEW");
+    expect(git("stash", "list")).toContain("A");
+  });
+
+  test("IDENTITY REVALIDATION: a gone ref refuses with 'reselect'", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "v1\n");
     commit("base");
     writeFileSync(join(process.cwd(), "f.txt"), "A\n");
@@ -265,7 +312,7 @@ describe("#292 — refusals + parsing", () => {
     writeFileSync(join(process.cwd(), "f.txt"), "B\n");
     execFileSync("git", ["stash", "push", "-m", "B"], { cwd: process.cwd() });
     openStash();
-    toRow(1); // stash@{1} = A's recorded (ref id)
+    toRow("stash@{1}"); // stash@{1} = A's recorded (ref id)
     // Drop stash@{0} EXTERNALLY — every ref shifts by one.
     execFileSync("git", ["stash", "drop", "stash@{0}"], { cwd: process.cwd() });
     e(editor, "(stagehand/stash/stagehand-stash-drop)");
