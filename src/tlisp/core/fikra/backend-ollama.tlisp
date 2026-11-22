@@ -81,6 +81,10 @@ ride too).")
 start-turn and abort — an async bash sentinel whose spawn-time epoch
 differs is SUPERSEDED: no result row, no resume, no re-fire (the turn
 it belonged to is gone).")
+(defvar fikra-ollama-batch-calls nil
+  "r145 (#4): the FULL batch call list at park time — the reconstructed
+assistant message must carry EVERY call in the reply (calls before the
+parked one were dropped; their results rode without their call).")
 (defvar fikra-ollama-last-parked-calls nil
   "r139b: the parked call + its remainder (the exchange's TRUE assistant
 message — the reject/approve-with-empty-rest path records from here).")
@@ -367,7 +371,10 @@ availability gate must be synchronous; the turn itself is async)."
           ;; r120: the REMAINDER rides the park — the decision resumes
           ;; them (they were dropped). r121: the ACC rides too (results
           ;; before the park were discarded — 'echo BEFOREPARK' vanished).
+          ;; r145 (#4): the FULL batch list rides too (the reconstruction
+          ;; dropped calls before the parked one).
           (progn
+            (setq fikra-ollama-batch-calls calls)
             (setq fikra-ollama-parked-acc acc)
             (setq fikra-ollama-parked-rest
               (condition-case nil
@@ -564,9 +571,20 @@ with its post-exit capture.")
     (if (not same-epoch)
       'superseded
       (progn
+        ;; r145 (codex #7): the focus call itself is guarded — a throw
+        ;; here bypassed the settle/restore logic below entirely.
+        (let ((focused (if (and home (not (string= home prev)))
+                         (condition-case nil
+                           (progn (fikra/thread/fikra-thread-focus home) t)
+                           (error () nil))
+                         t)))
+          (if (not focused)
+            (progn
+              (setq fikra-ollama-pending-message nil)
+              (editor-set-status "Fikra-ollama: sentinel home focus failed")
+              'focus-failed)
+            (progn
         ;; The HOME focus for everything this sentinel does.
-        (if (and home (not (string= home prev)))
-          (fikra/thread/fikra-thread-focus home))
         ;; r131c (codex r131b catches): EVERYTHING after the focus
         ;; switch lives inside the handler — a throw anywhere restores
         ;; the focus — AND a thrown body SETTLES the turn honestly (the
@@ -641,7 +659,7 @@ with its post-exit capture.")
             (if (and home (not (string= home prev)))
               (fikra/thread/fikra-thread-focus prev))
             (error () nil))
-          r)))))
+          r))))))))
 
 ;; Resume run-calls from the stash's index (the message already
 ;; appended).
@@ -1080,10 +1098,19 @@ with its post-exit capture.")
       ;; snapshot per line); reload takes the LAST line per key — the
       ;; incremental-lines + concatenate model DOUBLE-LOADED overlapping
       ;; content (the rejection rode twice).
-      (condition-case nil
-        (append-file (fikra-ollama-exchanges-file)
-          (concat (hex-encode key) " " (hex-encode full) (hex-decode "0a")))
-        (error () nil)))))
+      ;; r145 (#5): a write failure is VISIBLE — the in-memory map
+      ;; serves the session, but a restart would silently lose this
+      ;; exchange; the status says so (once per failure, not per turn).
+      (let ((out (condition-case nil
+                  (progn
+                    (append-file (fikra-ollama-exchanges-file)
+                      (concat (hex-encode key) " " (hex-encode full) (hex-decode "0a")))
+                    "ok")
+                  (error () "failed"))))
+        (if (string= out "failed")
+          (editor-set-status
+            "Fikra: exchange persistence FAILED — a restart may lose recent tool context")
+          nil)))))
 
 ;; r143: accessors for the durability regression.
 (defun fikra-ollama-exchanges-file-get ()
@@ -1317,9 +1344,15 @@ with its post-exit capture.")
             (progn
               (setq fikra-ollama-pending-message nil)
               (editor-set-status "Fikra-ollama: reply thread focus failed")
+              ;; r145 (#7): settle the ORIGINATING thread — focus it by
+              ;; id inside the guard (the current thread after a failed
+              ;; focus is arbitrary), end the turn, restore.
               (condition-case nil
-                (if (string= (fikra/thread/fikra-thread-status) "running")
-                  (fikra/thread/fikra-thread-turn-end "error"))
+                (progn
+                  (fikra/thread/fikra-thread-focus thread-id)
+                  (if (string= (fikra/thread/fikra-thread-status) "running")
+                    (fikra/thread/fikra-thread-turn-end "error"))
+                  (fikra/thread/fikra-thread-focus prev))
                 (error () nil))
               'focus-failed)
           (let ((r (condition-case nil
@@ -1442,12 +1475,14 @@ with its post-exit capture.")
 (defun fikra-backend-ollama-decide-inner (decision)
   (let* ((call fikra-ollama-parked-call)
          (home-thread fikra-ollama-parked-thread))
-    ;; r139b: the exchange fragment's TRUE call list (the parked call +
-    ;; its remainder — stashed HERE: at park time the remainder is not
-    ;; yet known, and by resume time it is consumed).
+    ;; r139b/r145 (#4): the exchange fragment's TRUE call list — the
+    ;; FULL batch when known (calls before the parked one included);
+    ;; the parked call + remainder otherwise.
     (if call
       (setq fikra-ollama-last-parked-calls
-        (append (list call) fikra-ollama-parked-rest)))
+        (if (and fikra-ollama-batch-calls (> (length fikra-ollama-batch-calls) 0))
+          fikra-ollama-batch-calls
+          (append (list call) fikra-ollama-parked-rest))))
     (setq fikra-ollama-parked-call nil)
     (setq fikra-ollama-parked-thread nil)
     (if (not call)

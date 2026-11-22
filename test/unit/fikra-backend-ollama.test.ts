@@ -1133,6 +1133,35 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(staged).toContain("USER-STAGED");
   });
 
+  // r145 (#4): a MIXED batch (buffer_read then a destructive bash)
+  // parks — the reconstructed assistant message carries BOTH calls
+  // (the read's result rode without its call before).
+  tt("a parked mixed batch reconstructs BOTH calls (the read's call rides)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "mix145.txt"), "MIX-READ-CONTENT");
+    e(ed, '(fikra/chat/fikra-turn-send "read then destructive")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 300 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [
+        { function: { name: "buffer_read", arguments: { path: "mix145.txt" } } },
+        { function: { name: "bash", arguments: { command: "rm -rf mix145dir/" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 300 "${r}")`);
+    e(ed, `(fikra-http-complete 300 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-reject)");
+    await settleRefireFrom(ed, "300", "MIX-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    // Turn 2: the reconstructed batch carries the READ's call too.
+    e(ed, '(fikra/chat/fikra-turn-send "follow mix")');
+    const msgs = String(e(ed, "(fikra/backend-ollama/fikra-ollama-messages-get)").value);
+    expect(msgs).toContain("MIX-READ-CONTENT");
+    const readCallAt = msgs.indexOf('"name":"buffer_read"');
+    const bashCallAt = msgs.indexOf('"name":"bash"');
+    expect(readCallAt).toBeGreaterThan(-1);
+    expect(bashCallAt).toBeGreaterThan(readCallAt);
+    expect(msgs).toContain("user rejected this command");
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
