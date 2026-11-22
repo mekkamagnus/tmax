@@ -116,18 +116,26 @@ describe("#329 — auto-revert integration", () => {
     e(editor, "(auto-revert-mode nil)");
   });
 
-  test("MULTIPLE buffers on one file ALL revert (the shared watch fans out; gate r1)", async () => {
+  test("RE-FIND dedups the registry: one file, one registration, ONE revert per change (gate r2)", async () => {
+    // buffer-create REPLACES same-named buffers — one file = one
+    // buffer name in practice. The registry DEDUPS the append (the
+    // r2 finding: unbounded duplicate growth, N redundant reverts).
     writeFileSync("shared.txt", "v1\n");
     e(editor, '(find-file "shared.txt")');
     e(editor, "(auto-revert-mode t)");
-    // A SECOND buffer on the same file (the shared-watch append).
+    // Re-find the SAME file three times — no duplicate registrations.
     e(editor, '(find-file "shared.txt")');
+    e(editor, '(find-file "shared.txt")');
+    const before = Number(e(editor, "(auto-revert-buffers-get)").value);
     writeFileSync("shared.txt", "v2\n");
     await new Promise((r) => setTimeout(r, 700));
-    // Both registrations reverted (the counter counts per-buffer).
-    expect(Number(e(editor, "(auto-revert-buffers-get)").value)).toBeGreaterThanOrEqual(2);
+    const after = Number(e(editor, "(auto-revert-buffers-get)").value);
+    // Exactly ONE revert for the change (not 3, not 0).
+    expect(after - before).toBe(1);
+    expect(strip(String(bufferText(editor))).includes("v2")).toBe(true);
     e(editor, "(auto-revert-mode nil)");
   });
+
 
   test("mode OFF stops all watches (the registry clears)", () => {
     writeFileSync("h.txt", "x\n");

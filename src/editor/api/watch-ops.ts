@@ -17,8 +17,6 @@ import { createValidationError, type AppError } from "../../error/types.ts";
 import { watch } from "node:fs";
 import type { LogCategory } from "../log-entry.ts";
 
-type Eitherish = { type?: string } | undefined | null;
-
 export function createWatchOps(
   evalTlisp: ((expr: string) => unknown) | undefined,
   logProgram?: (category: LogCategory, entry: { level: string; text: string; [k: string]: unknown }) => void,
@@ -64,11 +62,12 @@ export function createWatchOps(
         const hex = Buffer.from(path, "utf8").toString("hex");
         const expr = `(${callback} (hex-decode "${hex}") "${_eventType}")`;
         try {
-          const result = evalTlisp(expr) as Eitherish;
+          const result = evalTlisp(expr);
           // Production evalTlisp returns Either — a T-Lisp error is
           // a LEFT, not a throw (gate r1: the catch alone never fired;
-          // undefined callbacks were silent).
-          if (result && typeof result === "object" && "type" in result && (result as { type: string }).type === "Left") {
+          // gate r2: the old result.type check was DEAD CODE — the
+          // utils Either's shape is {_tag:'Left'}).
+          if (Either.isLeft(result as ReturnType<typeof Either.left>) as boolean) {
             logProgram?.("watch", {
               level: "error",
               text: `watch callback eval failed (T-Lisp error): ${expr.slice(0, 80)}`,
