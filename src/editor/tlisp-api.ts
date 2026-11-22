@@ -46,6 +46,7 @@ import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps } from "./api/visual-ops.ts";
 import { createFlashOps } from "./api/flash-ops.ts";
+import { createGrepOps } from "./api/grep-ops.ts";
 import { createGhostOps } from "./api/ghost-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
@@ -1653,6 +1654,13 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
 
         return ops;
       },
+    },
+
+    // ── #308: the rg search backend's TS primitives ─────────────────────
+    {
+      name: "grep",
+      factory: (_ctx: EditorAPIContext): Map<string, TLispFunctionImpl> =>
+        createGrepOps(),
     },
 
     // ── subprocess (make-process + process-write + signal) ──────────────
