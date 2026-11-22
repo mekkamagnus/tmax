@@ -1191,6 +1191,33 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect((msgs.match(/"name":"bash"/g) ?? []).length).toBe(1);
   });
 
+  // r149 (the r146 mystery, resolved): a no-change action SKIPS in
+  // ISOLATION (r148 proved the async-batch edit flow works — the r146
+  // in-suite failure was cross-test state; this test pins the behavior
+  // so the pollution bisect has its marker).
+  tt("a no-change action skips; the edit pair rides", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "async then edit")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 400 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [
+        { function: { name: "bash", arguments: { command: "true" } } },
+        { function: { name: "buffer_edit", arguments: { path: "edit149.txt", content: "EDIT-CONTENT\n" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 400 "${r}")`);
+    e(ed, `(fikra-http-complete 400 200 "${hex("{}")}")`);
+    await settleRefireFrom(ed, "400", "R149-DONE");
+    expect(await untilStatus(ed, "idle", 60)).toBe("idle");
+    expect(existsSync(join(process.cwd(), "edit149.txt"))).toBe(true);
+    // The edit reverts (its own pair).
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(existsSync(join(process.cwd(), "edit149.txt"))).toBe(false);
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    // Only the edit paired (a plain non-destructive bash never captures
+    // pre/post — that's mediated-only), so the stack is empty: honest.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("no action");
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
