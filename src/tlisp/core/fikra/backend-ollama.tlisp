@@ -12,7 +12,7 @@
           fikra-ollama-path-contained-p fikra-ollama-revert-latest-action
           fikra-ollama-action-posts-get fikra-ollama-record-action-pair
           fikra-ollama-last-action-stash-get fikra-ollama-exchanges-file-get
-          fikra-ollama-tool-exchanges-reset)
+          fikra-ollama-tool-exchanges-reset fikra-ollama-action-state-reset)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -955,6 +955,64 @@ with its post-exit capture.")
     (fikra-ollama-join-strings (cdr items)
       (concat acc (if (> (length acc) 0) (hex-decode "0a") "") (car items)))))
 
+;; r150 (codex): the action pairs are DURABLE — each pair appends a
+;; line to the thread's actions.jsonl (post-ref SPACE pre-ref); the
+;; revert reloads the stack from it when memory is empty (a restart kept
+;; the refs but lost the pairs — the command reported "no action").
+(defun fikra-ollama-actions-file ()
+  (concat (fikra/thread/fikra-thread-field "root")
+          "/.tmax/fikra/threads/" (fikra/thread/fikra-thread-current)
+          "/actions.jsonl"))
+
+(defun fikra-ollama-load-action-pairs ()
+  (condition-case nil
+    (let ((text (condition-case nil
+                  (read-file-content (fikra-ollama-actions-file))
+                  (error () nil))))
+      (if (and text (stringp text) (> (length text) 0))
+        (fikra-ollama-load-action-lines (reverse (string-split text (hex-decode "0a"))))
+        nil))
+    (error () nil)))
+
+;; r150: the restart-simulation accessor (pairs + stack wiped).
+(defun fikra-ollama-action-state-reset ()
+  (setq fikra-ollama-action-pairs (hashmap))
+  (setq fikra-ollama-action-posts (list)))
+
+(defun fikra-ollama-tombstone-action (post)
+  (condition-case nil
+    (append-file (fikra-ollama-actions-file)
+      (concat post " REVERTED" (hex-decode "0a")))
+    (error () nil)))
+
+;; Newest-last in the file; reversed = newest-first = the stack order.
+;; Memory wins per key; the stack rebuilds newest-first.
+(defun fikra-ollama-load-action-lines (lines)
+  (if (or (not lines) (= (length lines) 0))
+    nil
+    (progn
+      (condition-case nil
+        (let* ((line (car lines))
+               (sp (string-match " " line)))
+          (if (and sp (numberp sp) (> sp 0))
+            (let* ((post (substring line 0 sp))
+                   (pre (substring line (+ sp 1) (length line)))
+                   (have (hashmap-get fikra-ollama-action-pairs post)))
+              ;; r150: a REVERTED tombstone (newest line for the post)
+              ;; stays reverted — the loader never resurrects it.
+              (cond
+                ;; r150: the tombstone MARKS the post (newest line wins) —
+                ;; older pair lines for the same post then skip.
+                ((and (not have) (string= pre "REVERTED"))
+                  (keymap-mutable-set! fikra-ollama-action-pairs post "REVERTED"))
+                ((not have)
+                  (progn
+                    (keymap-mutable-set! fikra-ollama-action-pairs post pre)
+                    (setq fikra-ollama-action-posts
+                      (append (list post) fikra-ollama-action-posts))))))))
+        (error () nil))
+      (fikra-ollama-load-action-lines (cdr lines)))))
+
 ;; r142: pair an action's post-ref with its pre-ref (called right
 ;; after the post capture; both names read from the checkpoint module's
 ;; last-ref-name stash).
@@ -964,7 +1022,12 @@ with its post-exit capture.")
     (if (and post pre-ref)
       (progn
         (keymap-mutable-set! fikra-ollama-action-pairs post pre-ref)
-        (setq fikra-ollama-action-posts (append (list post) fikra-ollama-action-posts)))
+        (setq fikra-ollama-action-posts (append (list post) fikra-ollama-action-posts))
+        ;; r150: the durable line (best-effort).
+        (condition-case nil
+          (append-file (fikra-ollama-actions-file)
+            (concat post " " pre-ref (hex-decode "0a")))
+          (error () nil)))
       nil)))
 
 ;; r142: THE ACTION-LEVEL REVERT — restore the LATEST action's touched
@@ -1046,6 +1109,10 @@ with its post-exit capture.")
 
 (defun fikra-ollama-revert-latest-action ()
   (require-module fikra/checkpoint)
+  ;; r150: a restart kept the refs but lost the pairs — reload first.
+  (if (or (not fikra-ollama-action-posts) (= (length fikra-ollama-action-posts) 0))
+    (fikra-ollama-load-action-pairs)
+    nil)
   (if (or (not fikra-ollama-action-posts) (= (length fikra-ollama-action-posts) 0))
     (editor-set-status "Fikra: no action to revert")
     (let* ((post (car fikra-ollama-action-posts))
@@ -1070,6 +1137,7 @@ with its post-exit capture.")
               (progn
                 (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
                 (keymap-mutable-set! fikra-ollama-action-pairs post nil)
+                (fikra-ollama-tombstone-action post)
                 (editor-set-status "Fikra: the action changed nothing — skipped")
                 'skipped))
             ;; r146 (codex): the divergence compares the CURRENT state
@@ -1110,6 +1178,7 @@ with its post-exit capture.")
                         (progn
                           (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
                           (keymap-mutable-set! fikra-ollama-action-pairs post nil)
+                          (fikra-ollama-tombstone-action post)
                           (editor-set-status (concat "Fikra: action reverted to " pre))
                           'ok))))))))))))))
 
@@ -1209,7 +1278,10 @@ with its post-exit capture.")
                   (read-file-content (fikra-ollama-exchanges-file))
                   (error () nil))))
       (if (and text (stringp text) (> (length text) 0))
-        (fikra-ollama-load-exchange-lines (string-split text (hex-decode "0a")))
+        ;; r150: REVERSE order + set-if-absent = memory wins, else the
+        ;; NEWEST file line wins (r143b's last-wins preserved).
+        (fikra-ollama-load-exchange-lines
+          (reverse (string-split text (hex-decode "0a"))))
         nil))
     (error () nil)))
 
@@ -1225,8 +1297,12 @@ with its post-exit capture.")
                    (frag (hex-decode (substring line (+ sp 1) (length line))))
                    (have (hashmap-get fikra-ollama-tool-exchanges k)))
               ;; r143b: LAST snapshot wins (each line is the full
-              ;; accumulated value at write time).
-              (keymap-mutable-set! fikra-ollama-tool-exchanges k frag))))
+              ;; accumulated value at write time). r150 (codex): the
+              ;; IN-MEMORY value wins over the FILE — a failed append left
+              ;; the disk stale; reloading clobbered the newer memory.
+              (if have
+                nil
+                (keymap-mutable-set! fikra-ollama-tool-exchanges k frag)))))
         (error () nil))
       (fikra-ollama-load-exchange-lines (cdr lines)))))
 

@@ -1257,6 +1257,30 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     }
   });
 
+  // r150 (codex): the action pairs are DURABLE — a simulated restart
+  // (pairs + stack wiped) still reverts the latest action from the file;
+  // a reverted pair stays reverted (tombstoned — never resurrected).
+  tt("the action pairs survive a simulated restart; reverted pairs stay reverted", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "durable action")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 350 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "buffer_edit", arguments: { path: "dur150.txt", content: "DUR-CONTENT\n" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 350 "${r}")`);
+    e(ed, `(fikra-http-complete 350 200 "${hex("{}")}")`);
+    expect(existsSync(join(process.cwd(), "dur150.txt"))).toBe(true);
+    // SIMULATED RESTART: wipe the pairs + the stack (the daemon restart's
+    // effect on this process-local state).
+    e(ed, "(fikra/backend-ollama/fikra-ollama-action-state-reset)");
+    // The revert reloads from actions.jsonl and restores the pre-state.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(existsSync(join(process.cwd(), "dur150.txt"))).toBe(false);
+    // A SECOND revert does NOT resurrect the tombstoned pair.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("no action");
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
