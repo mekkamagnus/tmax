@@ -448,7 +448,12 @@ falsely blocked every later file's hunks in a multi-file view)."
     ((string-prefix-p "+++ b/" header-line)
       (substring header-line 6 (length header-line)))
     ((string-prefix-p "+++ " header-line)
-      (substring header-line 4 (length header-line)))
+      ;; /dev/null (a DELETED file's b-side) must NOT override the
+      ;; real b-path from the diff --git line — nil lets it survive
+      ;; (the gate r4 concern: an empty refusal scope by accident).
+      (if (string= header-line "+++ /dev/null")
+        nil
+        (substring header-line 4 (length header-line))))
     ((string-prefix-p "diff --git " header-line)
       (stagehand-diff-b-side-scan header-line))
     (t nil)))
