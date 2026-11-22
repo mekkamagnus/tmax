@@ -224,6 +224,11 @@ buffer switches to the next survivor (or *scratch*). M-x discoverable via this
 docstring. Note: the command-line :bd/:bdelete path is wired in command-line.tlisp."
   (interactive)
   (let ((target (or name (buffer-current))))
+    (condition-case nil (progn
+                          (editor/modes/auto-revert/auto-revert-note-kill target)
+                          (run-hooks "kill-buffer-hook"))
+      (error () nil))
+
     (unless target
       (message "No buffer to kill")
       (return-from kill-buffer))

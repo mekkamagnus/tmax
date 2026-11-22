@@ -149,6 +149,34 @@ describe("#329 — auto-revert integration", () => {
     expect(String(r.value)).not.toContain("ERR:");
   });
 
+  test("PRESERVATION: read-only state and cursor survive the revert (valve r2)", async () => {
+    writeFileSync("ro.txt", "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n");
+    e(editor, '(find-file "ro.txt")');
+    e(editor, "(auto-revert-mode t)");
+    e(editor, "(cursor-move 5 1)");
+    e(editor, "(buffer-set-read-only t)");
+    writeFileSync("ro.txt", "n1\nn2\nn3\nn4\nn5\nn6\nn7\nn8\n");
+    const reverted = await waitFor(() =>
+      strip(String(bufferText(editor))).includes("n5"));
+    expect(reverted).toBe(true);
+    // Cursor + read-only preserved — read WITHOUT switching (#127:
+    // buffer-switch itself resets point; the buffer is current).
+    expect(Number(e(editor, "(cursor-line)").value)).toBe(5);
+    expect(String(e(editor, "(buffer-read-only-p)").value)).toContain("t");
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, "(auto-revert-mode nil)");
+  });
+
+  test("KILL retires the registration; the last buffer stops the watch (valve r2)", async () => {
+    writeFileSync("k.txt", "v1\n");
+    e(editor, '(find-file "k.txt")');
+    e(editor, "(auto-revert-mode t)");
+    expect(String(e(editor, '(if (member "k.txt" (file-watch-list)) "t" "nil")').value)).toContain("t");
+    e(editor, '(buffer-switch "*scratch*")');
+    e(editor, '(kill-buffer "k.txt")');
+    expect(String(e(editor, '(if (member "k.txt" (file-watch-list)) "t" "nil")').value)).toContain("nil");
+  });
+
   test("mode OFF stops all watches (the registry clears)", () => {
     writeFileSync("h.txt", "x\n");
     e(editor, '(find-file "h.txt")');

@@ -1,7 +1,8 @@
 (defmodule editor/modes/auto-revert
   (export auto-revert-mode global-auto-revert-mode
           auto-revert-handle auto-revert-watched-p
-          auto-revert-stop-all auto-revert-buffers-get)
+          auto-revert-stop-all auto-revert-buffers-get
+          auto-revert-note-kill)
 
 ;; auto-revert-mode.tlisp — revert-on-external-change (#329, RFC-028's
 ;; want; the classic emacs auto-revert). The PRIMITIVE layer is
@@ -27,38 +28,69 @@ globally as the watch callback; the path arrives via hex-decode."
     (if (string= (nth 0 entry) path)
       ;; Entry = (path id buf1 buf2 ...): revert EVERY buffer on it.
       (dolist (b (auto-revert-buffers-of entry))
-        (auto-revert-revert-buffer b))))
+        (auto-revert-revert-buffer b path))))
   nil)
 
-(defun auto-revert-revert-buffer (bufname)
-  "Revert BUFNAME IN PLACE unless it is modified (the guard) or
-already gone. Valve r1: revert-buffer re-FINDS the filename —
-buffer-create replaces same-named buffers, so with several buffers
-on one file a re-find could clobber a DIFFERENT buffer. The in-place
-shape clears + refills the TARGET buffer only."
+(defun auto-revert-revert-buffer (bufname fn)
+  "Revert BUFNAME IN PLACE unless modified (the guard). Valve r1:
+revert-buffer re-FINDS the filename — buffer-create replaces
+same-named buffers, so a re-find could clobber a DIFFERENT buffer;
+the in-place shape clears + refills the TARGET only. Valve r2:
+read-only state AND the cursor are preserved (#127: buffer-switch
+RESETS point — the capture happens BEFORE the switch; a background
+buffer's point is not retained by the engine at all)."
   (if (member bufname (buffer-list))
-    (let ((cur (buffer-current)))
-      ;; Switch-scan-revert-restore: the T-Lisp buffer primitives are
-      ;; nameless/current-buffer-scoped (#127's class).
+    (let ((cur (buffer-current))
+          (cl0 (cursor-line))
+          (cc0 (cursor-column)))
       (buffer-switch bufname)
       (if (buffer-modified-p)
-        (editor-set-status (concat "auto-revert: " bufname " modified — not reverted"))
-        (let ((fn (buffer-filename)))
-          (if (and (stringp fn) (file-exists-p fn))
-            (let ((content (read-file-content fn)))
-              (if (stringp content)
-                (progn
-                  (buffer-set-read-only nil)
-                  (stagehand-clear-buffer-329)
-                  (buffer-insert content)
-                  (set-buffer-modified-p false)
-                  (setq auto-revert-buffers (+ auto-revert-buffers 1))
-                  (editor-set-status (concat "auto-revert: " bufname " reverted")))
-                (editor-set-status (concat "auto-revert: " bufname " unreadable")))
-              nil)
-            (editor-set-status (concat "auto-revert: " bufname " file gone")))))
-      (buffer-switch cur))
-    nil))
+        (progn
+          (editor-set-status (concat "auto-revert: " bufname " modified — not reverted"))
+          (auto-revert-restore-cur cur))
+        (let ((bfn (buffer-filename)))
+          (if (not (and (stringp bfn) (string= bfn fn)))
+            (progn
+              (editor-set-status (concat "auto-revert: " bufname " no longer backs " fn))
+              (auto-revert-restore-cur cur))
+            (if (not (file-exists-p fn))
+              (progn
+                (editor-set-status (concat "auto-revert: " bufname " file gone"))
+                (auto-revert-restore-cur cur))
+              (let ((content (read-file-content fn)))
+                (if (not (stringp content))
+                  (progn
+                    (editor-set-status (concat "auto-revert: " bufname " unreadable"))
+                    (auto-revert-restore-cur cur))
+                  (let ((was-ro (buffer-read-only-p))
+                        (cl (if (string= bufname cur) cl0 0))
+                        (cc (if (string= bufname cur) cc0 0)))
+                    (progn
+                      (buffer-set-read-only nil)
+                      (auto-revert-clear-in-place)
+                      (buffer-insert content)
+                      (set-buffer-modified-p false)
+                      (cursor-move (min cl (max (- (buffer-line-count) 1) 0)) cc)
+                      (if was-ro (buffer-set-read-only t))
+                      (setq auto-revert-buffers (+ auto-revert-buffers 1))
+                      (editor-set-status (concat "auto-revert: " bufname " reverted"))
+                      (auto-revert-restore-cur cur))))))))))))
+
+(defun auto-revert-restore-cur (cur)
+  ;; #127: buffer-switch RESETS point — switching back to the SAME
+  ;; buffer would destroy the just-preserved cursor.
+  (if (not (string= (buffer-current) cur))
+    (buffer-switch cur))
+  cur)
+
+(defun auto-revert-clear-in-place ()
+  ;; All-lines delete (the stagehand clear shape, in-module).
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
 
 (defun stagehand-clear-buffer-329 ()
   ;; A local all-lines delete (the stagehand clear shape — no
@@ -197,6 +229,53 @@ call passed arg-supplied-p as a POSITIONAL second arg — the mode's
 
 (defun auto-revert-active-p ()
   (if (null auto-revert-enabled) nil t))
+
+;; ── kill-side lifecycle (valve r2) ───────────────────────────────────
+(defvar auto-revert-dying-buffer nil
+  "The buffer kill-buffer is about to kill (module-scoped — the
+cross-module setter is auto-revert-note-kill).")
+
+(defun auto-revert-note-kill (bufname)
+  "Record the dying buffer (called from kill-buffer — module envs
+are NOT in setq's lookup chain, so the bridge is a function)."
+  (setq auto-revert-dying-buffer bufname)
+  (if (auto-revert-active-p)
+    (setq auto-revert-watches
+      (auto-revert-prune-path (or auto-revert-watches (list)) bufname (list))))
+  nil)
+
+(defun auto-revert-prune-path (entries b acc)
+  ;; Retire B from every entry whose path B backs (read the filename
+  ;; BEFORE the kill takes it).
+  (if (null entries)
+    (reverse acc)
+    (let* ((e (car entries))
+           (fn (nth 0 e)))
+      (if (auto-revert-buffer-backs-p b fn)
+        (let ((rest (auto-revert-without (auto-revert-buffers-of e) b (list))))
+          (if (null rest)
+            (progn
+              (file-watch-stop (nth 1 e))
+              (auto-revert-prune-path (cdr entries) b acc))
+            (auto-revert-prune-path (cdr entries) b
+              (cons (append (list fn (nth 1 e)) rest) acc))))
+        (auto-revert-prune-path (cdr entries) b (cons e acc))))))
+
+(defun auto-revert-buffer-backs-p (bufname path)
+  (if (not (member bufname (buffer-list)))
+    nil
+    (let ((cur (buffer-current)))
+      (buffer-switch bufname)
+      (let ((fn (buffer-filename)))
+        (buffer-switch cur)
+        (and (stringp fn) (string= fn path))))))
+
+(defun auto-revert-without (lst name acc)
+  (if (null lst)
+    (reverse acc)
+    (if (string= (car lst) name)
+      (auto-revert-without (cdr lst) name acc)
+      (auto-revert-without (cdr lst) name (cons (car lst) acc)))))
 
 (provide "auto-revert-mode")
 )
