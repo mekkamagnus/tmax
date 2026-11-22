@@ -165,3 +165,6 @@
 {"ts":"2026-11-23T06:55:00Z","event":"gate-launch","issue":292,"round":2,"head":"859ae0d","workflow":"wf_09e53d54-5f7"}
 {"ts":"2026-11-23T08:10:00Z","event":"gate-round","issue":292,"round":2,"workflow":"wf_09e53d54-5f7","verdict":"GAPS","findings":["empty-list placeholder dropped on toggle rerender (spec deviation)","pending-op docstring drift (2-tuple vs 3-tuple)"],"nonblocking":["n clamps to buffer not rows (safe refusal)","status-only rev-parse race on create","narrowed TOCTOU accepted"],"fix_commit":"41ba726","proof":"regression proven failing pre-fix; 18/18 x3, family 99/99"}
 {"ts":"2026-11-23T08:15:00Z","event":"gate-launch","issue":292,"round":3,"head":"41ba726","workflow":"wf_400b5cb2-c19","note":"final gate retry per the rail"}
+{"ts":"2026-11-23T09:05:00Z","event":"gate-round","issue":292,"round":3,"workflow":"wf_400b5cb2-c19","verdict":"PASS","note":"r1+r2 fixes confirmed genuine; the gate independently re-ran the suite (18/18); non-blocking notes only"}
+{"ts":"2026-11-23T09:10:00Z","event":"adr","issue":292,"adr":"docs/adrs/ADR-0314-stagehand-stash.md","commit":"189b269"}
+{"ts":"2026-11-23T09:12:00Z","event":"valve-launch","issue":292,"round":1,"head":"189b269","task":"bf3w5t8yl"}
