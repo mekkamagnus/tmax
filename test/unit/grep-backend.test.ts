@@ -411,4 +411,22 @@ describe("#308 — the backend", () => {
     expect(String(e(editor, "(buffer-current)").value)).toContain("inner308.txt");
     expect(strip(bufferText(editor))).toContain("scoped needle here");
   });
+
+  test("SCOPED SEARCH (trailing-slash spelling) → RET still opens (gate r8)", async () => {
+    // rg NORMALIZES its emitted paths: scope "sub/" emits
+    // "sub/inner.txt" — the prefix check must use the normalized
+    // scope or the join doubles the path.
+    mkdirSync(join(process.cwd(), "ts"));
+    writeFileSync(join(process.cwd(), "ts", "trailing308.txt"), "trailing slash needle\n");
+    e(editor, '(grep-search "trailing slash" "ts/")');
+    const s = await waitDone(editor);
+    expect(s).toContain("1 hits");
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toContain("trailing308.txt");
+    e(editor, '(cursor-move 0 0)');
+    e(editor, '(editor/commands/grep/grep-ret)');
+    expect(String(st(editor))).not.toContain("file gone");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("trailing308.txt");
+    expect(strip(bufferText(editor))).toContain("trailing slash needle");
+  });
 });

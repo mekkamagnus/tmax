@@ -429,15 +429,26 @@ and flipped it read-only).")
               (find-file path)
               (grep-land (nth 1 hit) (nth 2 hit)))))))))
 
+(defun grep-scope-normalize (scope)
+  "Strip TRAILING slashes — rg NORMALIZES its emitted paths (scope
+\"sub/\" emits \"sub/inner.txt\"), so the prefix check and the join
+must use the normalized form or the path doubles (gate r8's
+live-reproduced residual). \"/\" itself is preserved (absolute root)."
+  (if (not (stringp scope)) ""
+    (if (and (> (length scope) 1)
+             (string= (substring scope (- (length scope) 1) (length scope)) "/"))
+      (grep-scope-normalize (substring scope 0 (- (length scope) 1)))
+      scope)))
+
 (defun grep-resolve-path (path)
   "Absolute paths pass through. Relative hit paths resolve against
-the registered SCOPE — UNLESS rg already emitted the scope prefix
-(rg --json paths are cwd-relative and CARRY the scope: joining
-again doubled it into sub/sub — valve r3's reproduced finding;
-synthetic producer hits without the prefix still join)."
+the registered SCOPE (normalized) — UNLESS rg already emitted the
+scope prefix (rg --json paths are cwd-relative and CARRY the scope:
+joining again doubled it into sub/sub — valve r3's reproduced
+finding; synthetic producer hits without the prefix still join)."
   (if (string-prefix-p "/" path)
     path
-    (let ((scope (hashmap-get grep-meta "scope")))
+    (let ((scope (grep-scope-normalize (hashmap-get grep-meta "scope"))))
       (if (and (stringp scope) (> (length scope) 0)
                (not (string-prefix-p (concat scope "/") path)))
         (concat scope "/" path)
