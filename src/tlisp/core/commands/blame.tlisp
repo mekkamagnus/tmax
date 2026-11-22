@@ -1,0 +1,17 @@
+(defmodule editor/commands/blame
+  (export blame)
+
+;; blame.tlisp — M-x blame (#296): blame the CURRENT file's path
+;; through the Stagehand blame popup (SPEC-289's consumer half).
+
+(defun blame ()
+  "Blame the current file against HEAD (the tint marks blamed lines;
+the echo shows sha author date summary; RET shows the commit)."
+  (interactive)
+  (let ((path (buffer-filename)))
+    (if path
+      (stagehand/blame/stagehand-blame-file path)
+      (editor-set-status "Blame: the current buffer has no file"))))
+
+(provide "editor/commands/blame")
+)

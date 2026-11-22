@@ -1,5 +1,5 @@
 (defmodule stagehand/log
-  (export stagehand-log-open stagehand-log-rerun
+  (export stagehand-log-open stagehand-log-rerun stagehand-show-commit
           stagehand-log-next stagehand-log-prev
           stagehand-log-quit stagehand-log-show
           stagehand-log-checkout stagehand-log-checkout-accept
@@ -325,6 +325,37 @@ grammar; n/p walk the log's commits; q returns to the log."
       i
       (stagehand-index-scan (cdr shas) sha (+ i 1)))))
 
+(defun stagehand-show-commit (sha)
+  "Show an arbitrary SHA in *Stagehand-Show* (#296's blame RET; no
+log context — idx nil means n/p report no log to walk)."
+  (if (not sha)
+    (editor-set-status "Stagehand: no commit")
+    (let ((res (stagehand/status/stagehand-git
+                 (concat "show --no-color " sha)
+                 ;; #296: blame's RET arrives with no log context —
+                 ;; the log root may be unset.
+                 (or stagehand-log-root "."))))
+      (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+        (stagehand-show-render nil (car res))
+        (editor-set-status
+          (concat "Stagehand: git show failed (" (number-to-string (nth 2 res)) ") "
+            (car (string-split (concat (nth 1 res) "\n") "\n"))))))))
+
+(defun stagehand-show-render (idx out)
+  ;; The shared render: IDX nil = no log context (blame's RET).
+  (setq stagehand-show-idx idx)
+  (if (not (member (stagehand-show-buffer-name) (buffer-list)))
+    (buffer-create (stagehand-show-buffer-name)))
+  (buffer-switch (stagehand-show-buffer-name))
+  (major-mode-set "stagehand-show")
+  (editor-set-mode "normal")
+  (buffer-set-read-only nil)
+  (stagehand-show-clear)
+  (dolist (pair (stagehand/diff/stagehand-diff-parse out))
+    (buffer-append (concat (stagehand/diff/stagehand-diff-face-line pair) "\n")))
+  (buffer-set-read-only t)
+  (stagehand-show-ensure-keymap))
+
 (defun stagehand-show-at (idx)
   (if (null idx)
     (editor-set-status "Stagehand: no commit")
@@ -333,19 +364,7 @@ grammar; n/p walk the log's commits; q returns to the log."
                   (concat "show --no-color " sha)
                   stagehand-log-root)))
       (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
-        (progn
-          (setq stagehand-show-idx idx)
-          (if (not (member (stagehand-show-buffer-name) (buffer-list)))
-            (buffer-create (stagehand-show-buffer-name)))
-          (buffer-switch (stagehand-show-buffer-name))
-          (major-mode-set "stagehand-show")
-          (editor-set-mode "normal")
-          (buffer-set-read-only nil)
-          (stagehand-show-clear)
-          (dolist (pair (stagehand/diff/stagehand-diff-parse (car res)))
-            (buffer-append (concat (stagehand/diff/stagehand-diff-face-line pair) "\n")))
-          (buffer-set-read-only t)
-          (stagehand-show-ensure-keymap))
+        (stagehand-show-render idx (car res))
         (editor-set-status
           (concat "Stagehand: git show failed (" (number-to-string (nth 2 res)) ") "
             (car (string-split (concat (nth 1 res) "\n") "\n"))))))))

@@ -1,0 +1,275 @@
+(defmodule stagehand/blame
+  (export stagehand-blame-file stagehand-blame-row stagehand-blame-buffer-name
+          stagehand-blame-next stagehand-blame-prev
+          stagehand-blame-quit stagehand-blame-show
+          stagehand-blame-refresh stagehand-blame-attribution-get
+          stagehand-blame-rows-get)
+
+  (require-module stagehand/status)
+  (require-module stagehand/log)
+
+;; #296 — Stagehand T2: BLAME MODE (SPEC-289's consumer half). `git
+;; blame --porcelain HEAD -- <path>` (argv; explicit HEAD — never the
+;; worktree state) parsed structurally: header lines carry
+;; <sha> <line> <orig-line>; author/summary ride the group; a TAB
+;; prefix marks the source line. The blame FACE tints every source
+;; line (ONE multi-line span — the API half); attribution
+;; (sha author date summary) shows ONLY on the echo line under point
+;; (display-only, no phantom text). RET opens #290's show view for
+;; the line's commit.
+
+;; ── state ───────────────────────────────────────────────────────────
+(defvar stagehand-blame-rows nil
+  "((sha author date summary) ...) — one per source line, 0-based.")
+(defvar stagehand-blame-path nil "The blamed path.")
+(defvar stagehand-blame-root nil "The repo root.")
+(defvar stagehand-blame-head nil "HEAD recorded at popup-open (re-run gate).")
+(defvar stagehand-blame-span-id nil "The tint span (re-applied on refresh).")
+
+(defun stagehand-blame-buffer-name () "*Stagehand-Blame*")
+(defun stagehand-blame-rows-get () stagehand-blame-rows)
+
+;; ── the porcelain parse ─────────────────────────────────────────────
+(defun stagehand-blame-parse (out)
+  "The porcelain stream → ((sha author date summary content) ...) —
+one entry per SOURCE line, in display order."
+  ;; ROWS starts as an EMPTY LIST (cons onto nil is a type error in
+  ;; T-Lisp — the stash-parse lesson).
+  (stagehand-blame-scan (string-split (or out "") "\n")
+    nil nil nil nil (list) nil))
+
+(defun stagehand-blame-scan (lines sha author date summary rows acc)
+  ;; SHA/AUTHOR/DATE/SUMMARY: the current group; ROWS: the completed
+  ;; entries; ACC: the pending content lines (reversed).
+  (if (null lines)
+    (reverse rows)
+    (let ((line (car lines)))
+      (cond
+        ((stagehand-blame-header-p line)
+          (stagehand-blame-scan (cdr lines)
+            (nth 0 (string-split line " "))
+            author date summary rows acc))
+        ((string-prefix-p "author " line)
+          ;; author-mail does NOT match (hyphen after 'author').
+          (stagehand-blame-scan (cdr lines) sha
+            (substring line 7 (length line)) date summary rows acc))
+        ((string-prefix-p "author-time " line)
+          (stagehand-blame-scan (cdr lines) sha author
+            (substring line 12 (length line)) summary rows acc))
+        ((string-prefix-p "summary " line)
+          (stagehand-blame-scan (cdr lines) sha author date
+            (substring line 8 (length line)) rows acc))
+        ((string-prefix-p (hex-decode "09") line)
+          ;; The source line — flush the group entry.
+          (stagehand-blame-scan (cdr lines) sha author date summary
+            (cons (list sha author date summary
+                     (substring line 1 (length line)))
+              rows)
+            acc))
+        (t
+          (stagehand-blame-scan (cdr lines) sha author date summary rows acc))))))
+
+(defun stagehand-blame-header-p (line)
+  ;; '<40-hex> <num> <num>' — structural (never a content line: those
+  ;; carry the TAB prefix).
+  (let ((parts (string-split line " ")))
+    (and (>= (length parts) 3)
+      (= (length (nth 0 parts)) 40)
+      (stagehand-blame-hex-p (nth 0 parts)))))
+
+(defun stagehand-blame-hex-p (s)
+  (stagehand-blame-hex-scan s 0))
+
+(defvar stagehand-blame-hex-chars
+  (list "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+        "a" "b" "c" "d" "e" "f"))
+
+(defun stagehand-blame-hex-scan (s i)
+  (if (>= i (length s))
+    t
+    (if (member (substring s i (+ i 1)) stagehand-blame-hex-chars)
+      (stagehand-blame-hex-scan s (+ i 1))
+      nil)))
+
+;; ── preflight (one rule, three checks) ─────────────────────────────
+(defun stagehand-blame-preflight (path)
+  "nil when clean; a refusal string otherwise. (a) tracked, (b) clean
+vs HEAD AND nothing staged, (c) the buffer (when one holds the file)
+matches the disk."
+  (cond
+    ((not (= (stagehand-blame-git-exit
+               (list "ls-files" "--error-unmatch" "--" path)) 0))
+      "untracked file")
+    ((not (= (stagehand-blame-git-exit
+               (list "diff" "--quiet" "HEAD" "--" path)) 0))
+      "file differs from HEAD")
+    ((not (= (stagehand-blame-git-exit
+               (list "diff" "--quiet" "--cached" "--" path)) 0))
+      "file differs from HEAD")
+    ((not (stagehand-blame-buffer-matches-disk path))
+      "file differs from HEAD")
+    (t nil)))
+
+(defun stagehand-blame-git-exit (argv)
+  (let ((res (shell-exec-argv (cons "git" argv) (stagehand-blame-root-of))))
+    (if (numberp (nth 2 res)) (nth 2 res) 1)))
+
+(defun stagehand-blame-root-of ()
+  (or (stagehand/status/stagehand-status-root) "."))
+
+(defun stagehand-blame-buffer-matches-disk (path)
+  ;; The check applies when the CURRENT buffer holds this file; a file
+  ;; with no open buffer is trivially consistent.
+  (if (not (string= (or (buffer-filename) "") path))
+    t
+    (string= (buffer-text)
+      (or (read-file-content path) ""))))
+
+;; ── the blame popup ─────────────────────────────────────────────────
+(defun stagehand-blame-row ()
+  "b (a status row) — blame the row's file (the row's path; untracked
+rows refuse in the preflight)."
+  (let* ((idx (stagehand/status/stagehand-current-index))
+         (pairs (stagehand/status/stagehand-visible-pairs)))
+    (if (and (>= idx 0) (< idx (length pairs)))
+      (stagehand-blame-file (nth 1 (nth idx pairs)))
+      (editor-set-status "Stagehand: no row here"))))
+
+(defun stagehand-blame-file (path)
+  "Blame PATH against HEAD (the M-x entry + the status `b` row key)."
+  (setq stagehand-blame-path path)
+  (setq stagehand-blame-root (stagehand-blame-root-of))
+  (let ((refusal (stagehand-blame-preflight path)))
+    (if refusal
+      (editor-set-status (concat "Stagehand: " refusal " — commit first"))
+      (stagehand-blame-render
+        (stagehand-blame-parse
+          (stagehand-blame-run path))))))
+
+(defun stagehand-blame-run (path)
+  (let ((res (shell-exec-argv
+               (list "git" "blame" "--porcelain" "HEAD" "--" path)
+               (or stagehand-blame-root "."))))
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      (car res)
+      "")))
+
+(defun stagehand-blame-render (rows)
+  (setq stagehand-blame-rows rows)
+  (setq stagehand-blame-head (stagehand-blame-current-head))
+  (if (null rows)
+    (editor-set-status "Stagehand: no blame output")
+    (progn
+      (if (not (string= (buffer-current) (stagehand-blame-buffer-name)))
+        (progn
+          (if (not (member (stagehand-blame-buffer-name) (buffer-list)))
+            (buffer-create (stagehand-blame-buffer-name)))
+          (buffer-switch (stagehand-blame-buffer-name))))
+      (major-mode-set "stagehand-blame")
+      (editor-set-mode "normal")
+      (buffer-set-read-only nil)
+      (stagehand-blame-clear)
+      (stagehand-blame-emit rows 0)
+      (buffer-set-read-only t)
+      (stagehand-blame-ensure-keymap)
+      ;; ONE multi-line span tints every source line (the API half).
+      (if stagehand-blame-span-id
+        (span-remove stagehand-blame-span-id))
+      (setq stagehand-blame-span-id
+        (span-make (stagehand-blame-buffer-name)
+          0 0 (- (length rows) 1) 1000000 "blame"))
+      (cursor-move 0 0)
+      (stagehand-blame-echo))))
+
+(defun stagehand-blame-emit (rows i)
+  (if (< i (length rows))
+    (progn
+      (buffer-append (concat (nth 4 (nth i rows)) "\n"))
+      (stagehand-blame-emit rows (+ i 1)))))
+
+(defun stagehand-blame-clear ()
+  (let ((count (buffer-line-count)))
+    (if (> count 1)
+      (buffer-delete-range 0 0 (- count 1) 0)))
+  (let ((l (buffer-line 0)))
+    (if (and l (> (length l) 0))
+      (buffer-delete-range 0 0 0 (length l)))))
+
+(defun stagehand-blame-current-head ()
+  (let ((res (shell-exec-argv (list "git" "rev-parse" "HEAD")
+               (or stagehand-blame-root "."))))
+    (if (and (numberp (nth 2 res)) (= (nth 2 res) 0))
+      (string-trim (car res))
+      nil)))
+
+;; ── the echo + navigation ───────────────────────────────────────────
+(defun stagehand-blame-attribution-get ()
+  "The attribution string for the line under point (tests poll this)."
+  (let ((row (nth (cursor-line) stagehand-blame-rows)))
+    (if row
+      (concat (nth 0 row) " " (nth 1 row) " " (nth 2 row) " " (nth 3 row))
+      "")))
+
+(defun stagehand-blame-echo ()
+  (editor-set-status (concat "Blame: " (stagehand-blame-attribution-get))))
+
+(defun stagehand-blame-next ()
+  "n — next line (echo updates)."
+  (if (< (+ (cursor-line) 1) (buffer-line-count))
+    (progn (cursor-move (+ (cursor-line) 1) 0) (stagehand-blame-echo))))
+
+(defun stagehand-blame-prev ()
+  "p — previous line (echo updates)."
+  (if (> (cursor-line) 0)
+    (progn (cursor-move (- (cursor-line) 1) 0) (stagehand-blame-echo))))
+
+(defun stagehand-blame-show ()
+  "RET — open #290's show view for the line's commit."
+  (let ((row (nth (cursor-line) stagehand-blame-rows)))
+    (if row
+      (stagehand/log/stagehand-show-commit (nth 0 row))
+      (editor-set-status "Stagehand: no commit on this line"))))
+
+(defun stagehand-blame-quit ()
+  "q — close (the tint span rides the buffer's registry; kill drops it)."
+  (buffer-kill (stagehand-blame-buffer-name)))
+
+;; ── re-run (HEAD moved / spans invalidated by an edit) ─────────────
+(defun stagehand-blame-refresh ()
+  "g — re-run: a moved HEAD re-preflights + re-blames; a stable HEAD
+just re-applies (an edit invalidated the tint — the API contract)."
+  (let ((now (stagehand-blame-current-head)))
+    (cond
+      ((not (string= (or now "") (or stagehand-blame-head "")))
+        ;; HEAD moved: the full path (preflight + blame) against it.
+        (stagehand-blame-file stagehand-blame-path))
+      (t
+        (progn
+          ;; Stable HEAD: re-apply the tint (the buffer may have
+          ;; been edited — the preflight would refuse a diverged
+          ;; file, so only the span refresh is needed).
+          (if stagehand-blame-span-id
+            (span-remove stagehand-blame-span-id))
+          (setq stagehand-blame-span-id
+            (span-make (stagehand-blame-buffer-name)
+              0 0 (- (length stagehand-blame-rows) 1) 1000000 "blame"))
+          (editor-set-status "Stagehand: blame re-applied"))))))
+
+;; ── mode + keymap ───────────────────────────────────────────────────
+(major-mode-register "stagehand-blame" '() nil)
+(major-mode-doc "stagehand-blame" "Stagehand blame — the tint marks blamed lines; the echo shows the line's sha author date summary; RET shows the commit; g re-runs; q closes")
+
+(defun stagehand-blame-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap (stagehand-blame-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "stagehand-blame"))
+        (editor/keymaps/keymap-set-key kmap "n" "(stagehand/blame/stagehand-blame-next)")
+        (editor/keymaps/keymap-set-key kmap "p" "(stagehand/blame/stagehand-blame-prev)")
+        (editor/keymaps/keymap-set-key kmap "Enter" "(stagehand/blame/stagehand-blame-show)")
+        (editor/keymaps/keymap-set-key kmap "g" "(stagehand/blame/stagehand-blame-refresh)")
+        (editor/keymaps/keymap-set-key kmap "q" "(stagehand/blame/stagehand-blame-quit)")
+        (editor/keymaps/buffer-set-keymap (stagehand-blame-buffer-name) kmap))))
+  t)
+
+(provide "stagehand-blame"))
