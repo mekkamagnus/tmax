@@ -992,28 +992,45 @@ with its post-exit capture.")
   (fikra-ollama-state-diverged-scan root pre post paths))
 
 (defun fikra-ollama-path-state (root ref p)
-  (let ((raw (shell-command
+  ;; r149c: EXIT-STATUS sentinel (content never collides with a marker).
+  (let ((out (shell-command
     (concat "git -C " (fikra/thread/fikra-thread-shq root)
             " show " ref ":" (fikra/thread/fikra-thread-shq p)
-            " 2>/dev/null || echo __ABSENT__"))))
-    (if (string= raw "__ABSENT__\n") "__ABSENT__" raw)))
+            " 2>/dev/null && echo || echo __ABSENT__"))))
+    (if (string-suffix-p (concat (hex-decode "0a") "__ABSENT__") out)
+      "__ABSENT__"
+      (if (string-suffix-p (hex-decode "0a") out)
+        (substring out 0 (- (length out) 1))
+        out))))
 
 (defun fikra-ollama-worktree-state (root p)
-  (let ((raw (shell-command
+  ;; r149c: exit-status sentinel; strip one echo newline on success.
+  (let ((out (shell-command
     (concat "cat " (fikra/thread/fikra-thread-shq (concat root "/" p))
-            " 2>/dev/null || echo __ABSENT__"))))
-    (if (string= raw "__ABSENT__\n") "__ABSENT__" raw)))
+            " 2>/dev/null && echo || echo __ABSENT__"))))
+    (if (string-suffix-p (concat (hex-decode "0a") "__ABSENT__") out)
+      "__ABSENT__"
+      (if (string-suffix-p (hex-decode "0a") out)
+        (substring out 0 (- (length out) 1))
+        out))))
 
 ;; r149: the INDEX content of a path (a staged-only change with a
 ;; matching worktree file must still refuse — the r146 staged catch).
 (defun fikra-ollama-index-state (root p)
-  (let ((raw (shell-command
+  ;; r149c: EXIT-STATUS sentinel — the content can never collide with
+  ;; a marker (a file whose CONTENT equals the marker string read as
+  ;; absent; the revert deleted it).
+  (let ((out (shell-command
     (concat "git -C " (fikra/thread/fikra-thread-shq root)
             " show :" (fikra/thread/fikra-thread-shq p)
-            " 2>/dev/null || echo __UNSTAGED__"))))
-    ;; r149: the unstaged sentinel strips its echo newline (content stays
-    ;; byte-exact — a whitespace-only user edit must still diverge).
-    (if (string= raw "__UNSTAGED__\n") "__UNSTAGED__" raw)))
+            " 2>/dev/null && echo || echo __UNSTAGED__"))))
+    ;; git show emits the blob verbatim; a successful show ends with the
+    ;; echo's newline — strip exactly one trailing newline on SUCCESS.
+    (if (string-suffix-p (concat (hex-decode "0a") "__UNSTAGED__") out)
+      "__UNSTAGED__"
+      (if (string-suffix-p (hex-decode "0a") out)
+        (substring out 0 (- (length out) 1))
+        out))))
 
 (defun fikra-ollama-state-diverged-scan (root pre post paths)
   (if (or (not paths) (= (length paths) 0))

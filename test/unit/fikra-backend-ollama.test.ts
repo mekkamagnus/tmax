@@ -1235,6 +1235,24 @@ describe("ollama transcript evidence (r135 — codex r130 P2s)", () => {
     expect(readFileSync(join(process.cwd(), "ws149.txt"), "utf8")).toBe("ACTION\n\n");
   });
 
+  // r149c (codex sentinel-collision catch): a file whose CONTENT equals
+  // the absent marker is a REAL file — the sentinel is exit-status based
+  // now; content never collides.
+  tt("a file whose content equals the absent marker is never read as absent", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "marker content")');
+    e(ed, '(fikra/backend-ollama/fikra-backend-ollama-seed 340 "live")');
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "buffer_edit", arguments: { path: "mark149.txt", content: "ACTION\n" } } }] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 340 "${r}")`);
+    e(ed, `(fikra-http-complete 340 200 "${hex("{}")}")`);
+    // The user replaces the file's content with the marker string.
+    writeFileSync(join(process.cwd(), "mark149.txt"), "__ABSENT__\n");
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("REFUSED");
+    expect(readFileSync(join(process.cwd(), "mark149.txt"), "utf8")).toBe("__ABSENT__\n");
+  });
+
   // r136 (codex re-grade P1): the REQUEST BODY is valid JSON — the
   // stub records every /api/chat body; parse the LAST one (the escaper
   // changes across rounds made this boundary invisible to the suite —
