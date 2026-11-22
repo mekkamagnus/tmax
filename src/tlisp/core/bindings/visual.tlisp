@@ -21,10 +21,10 @@
 ;; Key bindings specific to visual mode
 
 ;; Navigation keys (same as normal mode) - update visual selection after movement
-(key-bind "h" "(progn (cursor-move (cursor-line) (- (cursor-column) 1)) (visual-update-end))" "visual")
+(key-bind "h" "(progn (cursor-move (cursor-line) (- (cursor-column) 1)) (cursor-skip-hidden -1) (visual-update-end))" "visual")
 (key-bind "j" "(progn (cursor-move (+ (cursor-line) 1) (cursor-column)) (visual-update-end))" "visual")
 (key-bind "k" "(progn (cursor-move (- (cursor-line) 1) (cursor-column)) (visual-update-end))" "visual")
-(key-bind "l" "(progn (cursor-move (cursor-line) (+ (cursor-column) 1)) (visual-update-end))" "visual")
+(key-bind "l" "(progn (cursor-move (cursor-line) (+ (cursor-column) 1)) (cursor-skip-hidden 1) (visual-update-end))" "visual")
 
 ;; Word navigation - update visual selection after movement
 (key-bind "w" "(progn (word-next) (visual-update-end))" "visual")

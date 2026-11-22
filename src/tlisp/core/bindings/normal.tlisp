@@ -129,10 +129,10 @@
 ;; BASIC NAVIGATION (hjkl with count support)
 ;; =================================================================
 
-(key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) (vim-count-consume 1)))" "normal")
+(key-bind "h" "(progn (cursor-move (cursor-line) (- (cursor-column) (vim-count-consume 1))) (cursor-skip-hidden -1))" "normal")
 (key-bind "j" "(cursor-move (+ (cursor-line) (vim-count-consume 1)) (cursor-column))" "normal")
 (key-bind "k" "(cursor-move (- (cursor-line) (vim-count-consume 1)) (cursor-column))" "normal")
-(key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) (vim-count-consume 1)))" "normal")
+(key-bind "l" "(progn (cursor-move (cursor-line) (+ (cursor-column) (vim-count-consume 1))) (cursor-skip-hidden 1))" "normal")
 
 (key-bind "Left" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
 (key-bind "Down" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")

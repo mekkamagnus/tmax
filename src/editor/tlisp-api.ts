@@ -20,6 +20,8 @@ import type { TextBuffer } from "../core/contracts/buffer.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
 import { capTail } from "./log-entry.ts";
+import { getOrCreateModeState, applyGlobalMinorModes, type BufferModeState } from "./mode-state.ts";
+import type { WikiDisplayGate } from "../frontend/render/wiki-display.ts";
 import type { LogCategory, LogView } from "./log-entry.ts";
 import type { LogLevel } from "./message-log.ts";
 import { stateUtils } from "../utils/state.ts";
@@ -288,6 +290,29 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         };
         const getModeViaState = (): EditorModel["mode"] =>
           runModel(modelAccess, stateUtils.getProperty<EditorModel, "mode">("mode"));
+        // #333: scan-visible-column gates on the SAME effective mode state
+        // the render path's EditorState carries (getCurrentModeState:
+        // per-buffer state merged with globalized minor modes) — the raw
+        // model fields miss globalized defaults like wiki-link-display, and
+        // a gate that disagrees with the renderer would skip columns the
+        // display never hid.
+        const getWikiDisplayGate = (): WikiDisplayGate => {
+          const getBMS = ctx.getBufferModeStates;
+          const getKey = ctx.getCurrentBufferKey;
+          const getGlobal = ctx.getGlobalizedMinorModes;
+          if (getBMS && getKey && getGlobal) {
+            // The context getter is loosely typed (Map<string, unknown>);
+            // the editor supplies real BufferModeState maps.
+            const states = getBMS() as Map<string, BufferModeState>;
+            const state = applyGlobalMinorModes(getOrCreateModeState(states, getKey()), getGlobal());
+            return {
+              currentMajorMode: state.majorMode,
+              activeMinorModes: state.activeMinorModes,
+              currentFilename: getModel().currentFilename,
+            };
+          }
+          return getModel();
+        };
         return createCursorOps(
           modelAccess,
           setCursorLine,
@@ -300,6 +325,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               selection.end = { line: pos.line, column: pos.column };
             }
           },
+          getWikiDisplayGate,
         );
       },
     },

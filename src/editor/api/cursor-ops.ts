@@ -8,6 +8,9 @@ import { createNil, createNumber, createString, createBoolean, createList, creat
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import type { EditorModel } from "../functional/model.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
+import { snapToVisibleColumn, wikiDisplayActive, type WikiDisplayGate } from "../../frontend/render/wiki-display.ts";
+import { computeHighlightSpans } from "../../syntax/highlight-buffer.ts";
+import { makeWikiLinkResolver } from "../../syntax/wiki-link-faces.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -35,6 +38,11 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @param getCurrentBuffer - Function to get current buffer
  * @param getMode - Function to get current editor mode (optional)
  * @param updateVisualSelection - Function to update visual selection (optional)
+ * @param getWikiDisplayGate - Effective mode state for the wiki-display
+ *   activation gate (optional; scan-visible-column falls back to raw model
+ *   reads). Must mirror the render path's EditorState — per-buffer mode
+ *   state merged with globalized minor modes — or the cursor skip and the
+ *   display transform would disagree about which buffers transform.
  * @returns Map of cursor function names to implementations
  */
 export function createCursorOps(
@@ -42,7 +50,8 @@ export function createCursorOps(
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
   getMode?: () => EditorModel["mode"],
-  updateVisualSelection?: () => void
+  updateVisualSelection?: () => void,
+  getWikiDisplayGate?: () => WikiDisplayGate
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel (equivalent to the bridge getters, which proxy
@@ -148,6 +157,88 @@ export function createCursorOps(
       createNumber(end),
       createString(text.slice(start, end))
     ]));
+  });
+
+  /**
+   * scan-visible-column - #333 factual display-geometry scan for the h/l
+   * zero-width skip (cursor-skip-hidden in motions.tlisp). When the
+   * wiki-link display transform is active, raw columns inside a link's
+   * hidden zone ([[ ]], an alias's target| prefix, a markdown link's
+   * ](target) part) have no display cell of their own. Returns the nearest
+   * visible column at-or-before COL (DIR -1) or at-or-after COL (DIR +1);
+   * COL unchanged when the transform is inactive, the line has no compacted
+   * link, or the column is already visible. Pure scan — never moves the
+   * cursor; the T-Lisp caller decides to apply the result.
+   * Usage: (scan-visible-column LINE COL DIR) → number
+   */
+  api.set("scan-visible-column", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 3, "scan-visible-column");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const lineArg = args[0]!;
+    const lineTypeValidation = validateArgType(lineArg, "number", 0, "scan-visible-column");
+    if (Either.isLeft(lineTypeValidation)) {
+      return Either.left(lineTypeValidation.left);
+    }
+    const colArg = args[1]!;
+    const colTypeValidation = validateArgType(colArg, "number", 1, "scan-visible-column");
+    if (Either.isLeft(colTypeValidation)) {
+      return Either.left(colTypeValidation.left);
+    }
+    const dirArg = args[2]!;
+    const dirTypeValidation = validateArgType(dirArg, "number", 2, "scan-visible-column");
+    if (Either.isLeft(dirTypeValidation)) {
+      return Either.left(dirTypeValidation.left);
+    }
+
+    const line = lineArg.value as number;
+    const col = colArg.value as number;
+    const dir = (dirArg.value as number) < 0 ? -1 : 1;
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    // Same activation gate as the render path (markdown buffer + minor mode
+    // + markdown-language filename); an inactive transform has no hidden
+    // columns, so the scan is the identity.
+    const gate: WikiDisplayGate = getWikiDisplayGate
+      ? getWikiDisplayGate()
+      : {
+          currentMajorMode: runModel(access, readModelField("currentMajorMode")),
+          activeMinorModes: runModel(access, readModelField("activeMinorModes")),
+          currentFilename: runModel(access, readModelField("currentFilename")),
+        };
+    if (!wikiDisplayActive(gate)) {
+      return Either.right(createNumber(col));
+    }
+    const filename = gate.currentFilename;
+
+    const lineResult = currentBuffer!.getLine(line);
+    if (Either.isLeft(lineResult)) {
+      return Either.right(createNumber(col));
+    }
+
+    // Recompute the SAME spans the render path uses for this line, so
+    // code-span protection applies identically (a `[[link]]` inside backticks
+    // is visible raw and must not be skipped).
+    const spans = computeHighlightSpans(
+      (ln) => {
+        const r = currentBuffer!.getLine(ln);
+        return r && Either.isRight(r) ? r.right : "";
+      },
+      line,
+      line + 1,
+      filename,
+      makeWikiLinkResolver(currentBuffer!, filename),
+    );
+
+    const snapped = snapToVisibleColumn(lineResult.right, spans[line] ?? undefined, col, dir);
+    return Either.right(createNumber(snapped));
   });
 
   api.set("cursor-move", (args: TLispValue[]): Either<AppError, TLispValue> => {

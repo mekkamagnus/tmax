@@ -9,7 +9,7 @@
 import { describe, test, expect } from "bun:test";
 import { captureFrame } from "../../src/render/capture-frame.ts";
 import { getCursorScreenOffset, renderBufferLines } from "../../src/frontend/render/buffer-lines.ts";
-import { transformWikiLine } from "../../src/frontend/render/wiki-display.ts";
+import { transformWikiLine, snapToVisibleColumn } from "../../src/frontend/render/wiki-display.ts";
 import { defaultDarkTheme } from "../../src/syntax/types.ts";
 import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
@@ -203,5 +203,52 @@ describe("SPEC-119: render integration (toggle on/off)", () => {
     // cursor on a delimiter lands on the span edge
     state.cursorPosition = { line: 0, column: 4 }; // raw col 4 = "["
     expect(getCursorScreenOffset(state, 24, 80).col).toBe(4);
+  });
+});
+
+describe("#333: snapToVisibleColumn (pure scan behind the h/l skip)", () => {
+  // "see [[goals]] now": [[ 4-5, goals 6-10 (visible), ]] 11-12.
+  test("walking left through ]] lands on the last visible char", () => {
+    expect(snapToVisibleColumn("see [[goals]] now", undefined, 12, -1)).toBe(10); // "s"
+    expect(snapToVisibleColumn("see [[goals]] now", undefined, 11, -1)).toBe(10);
+  });
+
+  test("walking right through [[ lands on the first visible char", () => {
+    expect(snapToVisibleColumn("see [[goals]] now", undefined, 4, 1)).toBe(6); // "g"
+    expect(snapToVisibleColumn("see [[goals]] now", undefined, 5, 1)).toBe(6);
+  });
+
+  test("walking left through the whole [[ prefix exits before the link", () => {
+    // h from "g" (col 6) lands on "[" (col 5) — hidden — and skips to col 3.
+    expect(snapToVisibleColumn("see [[goals]] now", undefined, 5, -1)).toBe(3); // space
+  });
+
+  test("alias target| prefix is one hidden zone", () => {
+    // "a [[goals|the note]] x": hidden prefix 2..9 ([[goals|), visible 10-17.
+    expect(snapToVisibleColumn("a [[goals|the note]] x", undefined, 18, -1)).toBe(17); // "e"
+    expect(snapToVisibleColumn("a [[goals|the note]] x", undefined, 9, -1)).toBe(1); // before link
+  });
+
+  test("adjacent links: walking right skips ]] and [[ in one scan", () => {
+    // "[[a]][[b]]": visible 2 and 7; hidden {0,1} {3,4,5,6} {8,9}.
+    expect(snapToVisibleColumn("[[a]][[b]]", undefined, 3, 1)).toBe(7); // "b"
+    expect(snapToVisibleColumn("[[a]][[b]]", undefined, 6, -1)).toBe(2); // "a"
+  });
+
+  test("link at column 0: walking left clamps at the line start", () => {
+    expect(snapToVisibleColumn("[[a]] x", undefined, 1, -1)).toBe(0);
+  });
+
+  test("already-visible columns and plain lines return the column unchanged", () => {
+    expect(snapToVisibleColumn("see [[goals]] now", undefined, 13, -1)).toBe(13);
+    expect(snapToVisibleColumn("plain text", undefined, 5, -1)).toBe(5);
+    expect(snapToVisibleColumn("plain text", undefined, 5, 1)).toBe(5);
+  });
+
+  test("code-protected links are visible raw — no snap", () => {
+    const code: HighlightSpan = { start: 0, end: 10, style: defaultDarkTheme.code! };
+    expect(snapToVisibleColumn("`[[code]]` x", [code], 8, -1)).toBe(8);
+    // No spans: the backtick text scan protects the same way.
+    expect(snapToVisibleColumn("`[[code]]` x", undefined, 8, -1)).toBe(8);
   });
 });

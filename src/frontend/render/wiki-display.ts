@@ -14,7 +14,7 @@
  * cursor position.
  */
 
-import type { EditorState, HighlightSpan } from "../../core/contracts/editor.ts";
+import type { HighlightSpan } from "../../core/contracts/editor.ts";
 import { defaultDarkTheme } from "../../syntax/types.ts";
 
 const WIKI_LINK_RE = /\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/g;
@@ -27,7 +27,16 @@ const MD_LINK_RE = /\[([^\[\]]*)\]\(([^()]*)\)/g;
  *  markdown buffers by `wikiDisplayActive`). */
 export const WIKI_DISPLAY_MINOR = "wiki-link-display";
 
-export function wikiDisplayActive(state: EditorState): boolean {
+/** The state slice {@link wikiDisplayActive} consults. Declared structurally
+ *  (readonly arrays) so both `EditorState` and the functional `EditorModel`
+ *  satisfy it without adaptation. */
+export interface WikiDisplayGate {
+  currentMajorMode?: string;
+  activeMinorModes?: readonly string[];
+  currentFilename?: string;
+}
+
+export function wikiDisplayActive(state: WikiDisplayGate): boolean {
   if (state.currentMajorMode !== "markdown") return false;
   if (!(state.activeMinorModes ?? []).includes(WIKI_DISPLAY_MINOR)) return false;
   // The link FACE comes from the highlighter, which keys on the filename's
@@ -84,15 +93,32 @@ function codeRanges(rawLine: string, spans: HighlightSpan[] | undefined): Array<
   return ranges;
 }
 
+/** One compacted link on a line, in RAW column coordinates. */
+interface DisplayMatch {
+  /** Raw column of the first link char (`[`). */
+  start: number;
+  /** Raw column one past the last link char (`]`). */
+  end: number;
+  /** The trimmed visible text (alias display, or the target). */
+  display: string;
+  /** Raw column of the first VISIBLE char. */
+  displayStart: number;
+  /** Raw column one past the last visible char. */
+  displayEnd: number;
+}
+
 /**
- * Transform one line for display. Pure: no buffer mutation, no I/O.
+ * Collect the line's compacted links (wiki + inline markdown), honoring
+ * code-span protection and wiki-over-markdown precedence. Shared by the
+ * display transform and the #333 cursor skip scan so their notions of
+ * "hidden" can never drift apart.
  */
-export function transformWikiLine(rawLine: string, spans?: HighlightSpan[]): WikiDisplayLine {
+function collectDisplayMatches(rawLine: string, spans?: HighlightSpan[]): DisplayMatch[] {
   const protectedRanges = codeRanges(rawLine, spans);
   // `displayStart`/`displayEnd` are RAW columns of the visible sub-region
   // (the alias's display text, or the whole target) — needed for exact 1:1
   // cursor mapping over the visible glyphs.
-  const matches: Array<{ start: number; end: number; display: string; displayStart: number; displayEnd: number }> = [];
+  const matches: DisplayMatch[] = [];
   const pushWiki = (m: RegExpExecArray) => {
     const start = m.index;
     const end = start + m[0]!.length;
@@ -130,6 +156,44 @@ export function transformWikiLine(rawLine: string, spans?: HighlightSpan[]): Wik
     if (!matches.some((x) => m.index < x.end && m.index + m[0]!.length > x.start)) pushInline(m);
   }
   matches.sort((a, b) => a.start - b.start);
+  return matches;
+}
+
+/**
+ * #333: nearest display-visible raw column from COL in direction DIR.
+ * Raw columns inside a link's zero-width zone — the `[[`/`]]` delimiters, an
+ * alias's `target|` prefix, a markdown link's `](target)` part — have no
+ * screen cell of their own (they clamp onto an adjacent visible edge), so a
+ * cursor resting there appears frozen: consecutive hidden columns share one
+ * display column. Cursor motion uses this scan to land on a column that owns
+ * its display cell — DIR -1 walks left, DIR +1 walks right, stopping at the
+ * line edge when a link abuts it. Already-visible columns (and lines with no
+ * compacted links) return COL unchanged.
+ */
+export function snapToVisibleColumn(
+  rawLine: string,
+  spans: HighlightSpan[] | undefined,
+  col: number,
+  dir: -1 | 1,
+): number {
+  const matches = collectDisplayMatches(rawLine, spans);
+  if (matches.length === 0) return col;
+  const hidden = (c: number): boolean =>
+    matches.some((m) => (c >= m.start && c < m.displayStart) || (c >= m.displayEnd && c < m.end));
+  let c = Math.max(0, Math.min(col, rawLine.length));
+  if (dir < 0) {
+    while (c > 0 && hidden(c)) c--;
+  } else {
+    while (c < rawLine.length && hidden(c)) c++;
+  }
+  return c;
+}
+
+/**
+ * Transform one line for display. Pure: no buffer mutation, no I/O.
+ */
+export function transformWikiLine(rawLine: string, spans?: HighlightSpan[]): WikiDisplayLine {
+  const matches = collectDisplayMatches(rawLine, spans);
 
   if (matches.length === 0) {
     return { text: rawLine, spans: spans ?? [], mapCol: (c) => c, changed: false };
