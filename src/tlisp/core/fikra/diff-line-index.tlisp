@@ -106,8 +106,9 @@ repopulation; the empty-buffer heuristic missed both).")
   (2) a count BELOW the slot's recorded WATERMARK drops it (a log
   buffer only grows — a shrink is the killed-and-recreated shape,
   caught even after partial repopulation, and at line 0 too);
-  (3) a line at or beyond the named count is not visible — nil and
-  drop."
+  (3) a line at or beyond the named count is a MISS (nil) — NOT
+  invalidation (a speculative probe must not delete valid
+  entries)."
   (if (not (member buffer-name (buffer-list)))
     (progn
       (diff-line-index-drop-buffer buffer-name)
@@ -128,7 +129,7 @@ repopulation; the empty-buffer heuristic missed both).")
           ;; not DELETE the valid lower entries.
           nil)
         (t
-          (diff-line-index-assoc line (diff-line-index-slot buffer-name)))))))))
+          (diff-line-index-assoc line (diff-line-index-slot buffer-name)))))))
 
 (defun diff-line-index-drop-watermark (buffer-name)
   (setq diff-line-index-watermarks
