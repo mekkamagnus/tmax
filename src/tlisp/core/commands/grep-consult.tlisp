@@ -77,38 +77,52 @@ Returns (pattern glob|nil)."
 
 ;; ── glob translation (fnmatch-style → T-Lisp regex) ───────────────
 (defun grep-consult-glob->regex (glob)
-  "Translate ONE glob entry: * → .*; ? → .; [class] kept. Returns
-nil when UNTRANSLATABLE — an unbalanced [ (gate r1: concat cannot
-fail, so an invalid regex used to silently no-match at match time)."
-  (if (grep-consult-unbalanced-class-p glob 0)
-    nil
-    (concat "^" (grep-consult-glob-scan glob "") "$")))
+  "Translate ONE glob entry. valve r2: LITERAL characters are
+CLASS-ESCAPED ([.], [$], … — the reader strips backslashes, so
+[.]-classes are the only escape form T-Lisp can build; '*.tlisp'
+used to also match 'Xtlisp'). * → .*; ? → .; [class] passes through
+verbatim (so fnmatch [^…] negation works). A bare ^ or backslash
+outside a class, an EMPTY class [], or an unterminated class → nil
+(untranslatable — the entry is ignored + noted)."
+  (let ((body (grep-consult-glob-scan glob "" nil)))
+    (if (stringp body) (concat "^" body "$") nil)))
 
-(defun grep-consult-unbalanced-class-p (rest depth)
-  ;; [ without a matching ] anywhere → untranslatable.
+(defun grep-consult-glob-scan (rest acc in-class)
   (if (= (length rest) 0)
-    (> depth 0)
-    (let ((c (substring rest 0 1)))
+    (if in-class nil acc)
+    (let ((c (substring rest 0 1))
+          (tail (substring rest 1 (length rest))))
       (cond
-        ((string= c "[") (grep-consult-unbalanced-class-p (substring rest 1 (length rest)) (+ depth 1)))
-        ((string= c "]") (grep-consult-unbalanced-class-p (substring rest 1 (length rest)) (- depth 1)))
-        (t (grep-consult-unbalanced-class-p (substring rest 1 (length rest)) depth))))))
-
-(defun grep-consult-glob-scan (rest acc)
-  (if (= (length rest) 0)
-    acc
-    (let ((c (substring rest 0 1)))
-      (cond
-        ((string= c "*") (grep-consult-glob-scan (substring rest 1 (length rest)) (concat acc ".*")))
-        ((string= c "?") (grep-consult-glob-scan (substring rest 1 (length rest)) (concat acc ".")))
-        (t (grep-consult-glob-scan (substring rest 1 (length rest)) (concat acc c)))))))
+        (in-class
+          (grep-consult-glob-scan tail (concat acc c) (not (string= c "]"))))
+        ((string= c "*")
+          (grep-consult-glob-scan tail (concat acc ".*") nil))
+        ((string= c "?")
+          (grep-consult-glob-scan tail (concat acc ".") nil))
+        ((string= c "[")
+          (if (string-prefix-p tail "]")
+            nil
+            (grep-consult-glob-scan tail (concat acc "[") t)))
+        ((or (string= c "^") (string= c "\\"))
+          nil)
+        ((or (string= c ".") (string= c "$") (string= c "+") (string= c "(")
+             (string= c ")") (string= c "{") (string= c "}") (string= c "|"))
+          (grep-consult-glob-scan tail (concat acc (concat "[" c "]")) nil))
+        (t
+          (grep-consult-glob-scan tail (concat acc c) nil))))))
 
 (defun grep-consult-glob-match-p (path entries)
   "PATH (a full relative path string) vs the parsed ENTRIES
-((positive-regexes...) (negative-regexes...) note): matches iff ≥1
-positive AND no negative."
-  (if (grep-consult-glob-pos-p path (nth 0 entries) nil)
-    (grep-consult-glob-neg-p path (nth 1 entries))
+((positive-regexes...) (negative-regexes...) note): no negative AND
+(≥1 positive OR no positive constraint — valve r2: NEGATIVES-ONLY
+globs match everything not negated, the issue's combination
+clause). The emptiness check lives HERE, before the recursion — an
+exhausted positives list at the recursion base means 'no positive
+matched', not 'no constraint'."
+  (if (grep-consult-glob-neg-p path (nth 1 entries))
+    (if (null (nth 0 entries))
+      t
+      (grep-consult-glob-pos-p path (nth 0 entries) nil))
     nil))
 
 (defun grep-consult-glob-pos-p (path positives hit)
@@ -196,6 +210,12 @@ backend preflight, then the debounced live prompt."
               (grep-consult-teardown)
               (if (string= kind "cancel")
                 (grep-consult-cancel))))
+          ;; valve r2: the echo — the selected candidate shows in the
+          ;; status on every selection change (the issue's Navigation
+          ;; clause; the preview pane rides the recorded reduction).
+          (editor/completion/minibuffer/minibuffer-on-select-set!
+            (lambda (v)
+              (if (stringp v) (editor-set-status (concat "grep: " v)) nil)))
           ;; gate r1: the snapshot write rides #307's completion
           ;; (the setter seam — module defvars are not setq-able).
           (editor/commands/grep/grep-completion-hook-set!
@@ -221,9 +241,39 @@ backend preflight, then the debounced live prompt."
   "rg")
 
 (defun grep-consult-table (input action)
+  "valve r2: the prompt's candidates ARE the current generation's
+hits — Up/Down move the selection, the echo shows the candidate,
+RET jumps from the CURRENT selection (the issue's Navigation
+clause). The completion style filters by the query text."
   (if (string= action "metadata")
     (hashmap "category" "plain")
-    (list)))
+    (grep-consult-candidates (editor/commands/grep/grep-hits-get) (list))))
+
+(defun grep-consult-candidates (hits acc)
+  (if (null hits)
+    (reverse-of acc)
+    (grep-consult-candidates (cdr hits)
+      (cons (grep-consult-candidate (car hits)) acc))))
+
+(defun grep-consult-candidate (hit)
+  (hashmap
+    "value" (grep-consult-hit-ref hit)
+    "display" (concat (grep-consult-hit-ref hit) ":" (nth 3 hit))
+    "annotation" ""
+    "metadata" hit))
+
+(defun grep-consult-hit-ref (hit)
+  ;; "path:line:col" — unique per hit (rg emits one match per
+  ;; line:col); the accept path parses it back to the hit index.
+  (concat (nth 0 hit) ":" (number-to-string (nth 1 hit)) ":"
+    (number-to-string (nth 2 hit))))
+
+(defun grep-consult-index-of-hit (value hits i)
+  (if (null hits)
+    nil
+    (if (string= value (grep-consult-hit-ref (car hits)))
+      i
+      (grep-consult-index-of-hit value (cdr hits) (+ i 1)))))
 
 ;; ── per-keystroke: debounce + threshold + snapshot restore ──────────
 (defun grep-consult-on-input (input)
@@ -287,24 +337,37 @@ the jump; cancel clears them in grep-consult-cancel)."
   "The completedSnapshot write: ONLY completion updates it — a killed
 partial stream NEVER becomes the restore target. gate r2: the
 snapshot is the completed generation id AND its rendered content
-(the restore source for the input-change rule)."
+(the restore source for the input-change rule). valve r2: a live
+prompt re-refreshes so the CANDIDATES (the generation's hits)
+appear without another keystroke."
   (if (not (null grep-consult-state))
-    (setq grep-consult-state
-      (hashmap-set
-        (hashmap-set grep-consult-state "completedSnapshot"
-          (editor/commands/grep/grep-current-gen-get))
-        "snapshotContent" (editor/commands/grep/grep-buffer-content))))
+    (progn
+      (setq grep-consult-state
+        (hashmap-set
+          (hashmap-set grep-consult-state "completedSnapshot"
+            (editor/commands/grep/grep-current-gen-get))
+          "snapshotContent" (editor/commands/grep/grep-buffer-content)))
+      (if (minibuffer-state-get)
+        (editor/completion/minibuffer/minibuffer-refresh)
+        nil)))
   nil)
 
 (defun grep-consult-restore-snapshot ()
-  "The input-change rule (gate r2 — was a literal no-op): when a
-pending stream replaced the *grep* content, re-render the COMPLETED
-snapshot — a killed partial never stays on screen between
-keystrokes. Skips when *grep* already shows the completed render."
-  (let ((content (hashmap-get grep-consult-state "snapshotContent")))
-    (if (and (stringp content) (> (length content) 0)
-             (not (string= (editor/commands/grep/grep-buffer-content) content)))
-      (editor/commands/grep/grep-restore-content content)
+  "The input-change rule (gate r2 — was a literal no-op). valve r2:
+STRUCTURAL — roll the producer back to the completed generation
+(content AND selection/state, so RET/navigation agree with the
+display), not a text re-render over a newer generation's hits. nil
+snapshot (no completed search) → unchanged; already current →
+no-op; the newer generation already completed (snapshot moved on)
+→ the rollback guard refuses, caught, no-op."
+  (let ((snap-gen (hashmap-get grep-consult-state "completedSnapshot")))
+    (if (numberp snap-gen)
+      (if (= snap-gen (editor/commands/grep/grep-current-gen-get))
+        nil
+        (condition-case nil
+          (editor/commands/grep/grep-buffer-rollback
+            (editor/commands/grep/grep-current-gen-get))
+          (error () nil)))
       nil)))
 
 (defun grep-consult-chomp-nl (s)
@@ -359,11 +422,13 @@ glob-only queries DO run (the empty pattern registers per #307)."
           (if (and (stringp (nth 2 parsed)) (string= (nth 2 parsed) "empty"))
             (editor-set-status "empty glob")
             (let ((files
-                    (if (and (= (length (nth 0 parsed)) 0) (nth 2 parsed))
-                      ;; gate r2: EVERY entry ignored → NO filtering
-                      ;; applies (all files) + the note — the issue's
-                      ;; normative clause (was inverted: zero files,
-                      ;; no run).
+                    (if (and (= (length (nth 0 parsed)) 0)
+                             (= (length (nth 1 parsed)) 0)
+                             (nth 2 parsed))
+                      ;; gate r2 + valve r2: EVERY entry ignored (BOTH
+                      ;; lists empty) → NO filtering applies (all files)
+                      ;; + the note. A valid negative + an ignored entry
+                      ;; ('!*.txt,!') is NOT this case — it filters.
                       (progn
                         (editor-set-status "glob entries ignored — searching all files")
                         (grep-consult-files-in grep-consult-scope))
@@ -374,7 +439,9 @@ glob-only queries DO run (the empty pattern registers per #307)."
 
 (defun grep-consult-accept (value)
   "RET: kill pending + cancel the timer, jump via #307 from the
-CURRENT selection; the hook tears down with the close."
+CURRENT selection (valve r2: the prompt's SELECTED candidate when
+the value parses as a hit — the *grep* row otherwise); the hook
+tears down with the close."
   (let ((st grep-consult-state))
     (if (not (null st))
       (progn
@@ -386,20 +453,28 @@ CURRENT selection; the hook tears down with the close."
     (if (member "*grep*" (buffer-list))
       (progn
         (buffer-switch "*grep*")
+        (let ((idx (grep-consult-index-of-hit value (editor/commands/grep/grep-hits-get) 0)))
+          (if (numberp idx)
+            (cursor-move idx 0)
+            nil))
         (editor/commands/grep/grep-ret))
       nil)))
 
 (defun grep-consult-cancel ()
   "C-g/Escape: kill pending + cancel the timer, restore the
-snapshot (or close the results buffer when no search completed)."
+snapshot (valve r2: STRUCTURALLY — a later partial never stays on
+screen when a completed search exists), or close the results buffer
+when no search ever completed."
   (let ((st grep-consult-state))
     (if (not (null st))
       (progn
         (grep-consult-cancel-timer st)
         (grep-consult-kill-pending)
         (let ((snap (hashmap-get st "completedSnapshot")))
-          (if (and (null snap) (member "*grep*" (buffer-list)))
-            (buffer-kill "*grep*")))))
+          (if (null snap)
+            (if (member "*grep*" (buffer-list))
+              (buffer-kill "*grep*"))
+            (grep-consult-restore-snapshot)))))
     (setq grep-consult-state nil)
     (setq grep-consult-scope nil)))
 

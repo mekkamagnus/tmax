@@ -111,8 +111,10 @@ keystroke."
     (let ((selected (hashmap-get session "selection")))
       (let ((count (length (hashmap-get session "matches"))))
         (if (< selected (- count 1))
-          (minibuffer-replace-session
-            (hashmap-set session "selection" (+ selected 1)))
+          (progn
+            (minibuffer-replace-session
+              (hashmap-set session "selection" (+ selected 1)))
+            (minibuffer-notify-select))
           (vertico-publish))))))
 
 (defun vertico-previous ()
@@ -120,28 +122,36 @@ keystroke."
   (let ((session (minibuffer-state-get)))
     (let ((selected (hashmap-get session "selection")))
       (if (> selected 0)
-        (minibuffer-replace-session
-          (hashmap-set session "selection" (- selected 1)))
-        (if (and (= selected 0) (hashmap-get session "allow-input"))
+        (progn
           (minibuffer-replace-session
-            (hashmap-set session "selection" -1))
+            (hashmap-set session "selection" (- selected 1)))
+          (minibuffer-notify-select))
+        (if (and (= selected 0) (hashmap-get session "allow-input"))
+          (progn
+            (minibuffer-replace-session
+              (hashmap-set session "selection" -1))
+            (minibuffer-notify-select))
           (vertico-publish))))))
 
 (defun vertico-page-next ()
   (let ((session (minibuffer-state-get)))
     (let ((selected (hashmap-get session "selection")))
       (let ((count (length (hashmap-get session "matches"))))
-        (minibuffer-replace-session
-          (hashmap-set session "selection"
-            (min (- count 1) (+ selected (hashmap-get session "max-visible")))))))))
+        (progn
+          (minibuffer-replace-session
+            (hashmap-set session "selection"
+              (min (- count 1) (+ selected (hashmap-get session "max-visible")))))
+          (minibuffer-notify-select))))))
 
 (defun vertico-page-previous ()
   (let ((session (minibuffer-state-get)))
     (let ((selected (hashmap-get session "selection")))
-      (minibuffer-replace-session
-        (hashmap-set session "selection"
-          (max (if (hashmap-get session "allow-input") -1 0)
-            (- selected (hashmap-get session "max-visible"))))))))
+      (progn
+        (minibuffer-replace-session
+          (hashmap-set session "selection"
+            (max (if (hashmap-get session "allow-input") -1 0)
+              (- selected (hashmap-get session "max-visible")))))
+        (minibuffer-notify-select)))))
 
 (defun vertico-insert ()
   "Insert the selected candidate without accepting it."

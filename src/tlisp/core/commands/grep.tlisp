@@ -843,7 +843,7 @@ empty list would read stdin)."
         (let ((pid (condition-case nil
                       (make-process
                         :command (append (list grep-rg-executable "--json" "--smart-case" "--" pattern) files)
-                        :cwd "."
+                        :cwd scope
                         :filter "editor/commands/grep/grep-rg-filter"
                         :stderr-filter "editor/commands/grep/grep-rg-stderr-filter"
                         :sentinel "editor/commands/grep/grep-rg-sentinel")

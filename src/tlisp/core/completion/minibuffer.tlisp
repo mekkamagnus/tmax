@@ -1,5 +1,5 @@
 (defmodule editor/completion/minibuffer
-  (export minibuffer-on-input-set! minibuffer-on-close-set!
+  (export minibuffer-on-input-set! minibuffer-on-close-set! minibuffer-on-select-set! minibuffer-notify-select
           minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-exact-selection-index-recursive minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key)
 
 (defvar minibuffer-on-input-hook nil
@@ -23,6 +23,27 @@ the module boundary — the function seam)."
   "Set the close-teardown callback (the same seam class)."
   (setq minibuffer-on-close-hook fn)
   fn)
+
+(defvar minibuffer-on-select-hook nil
+  "The selection-change callback (#311 valve r2): the vertico movers
+fire it with the newly selected candidate's value (nil-safe) so
+owners can echo the candidate / drive previews.")
+
+(defun minibuffer-on-select-set! (fn)
+  "Set the selection-change callback (the same seam class)."
+  (setq minibuffer-on-select-hook fn)
+  fn)
+
+(defun minibuffer-notify-select ()
+  "Fire the owner's selection hook (nil-safe) with the newly
+selected candidate's value (#311 valve r2 — the echo clause).
+Called by the vertico movers after each selection update."
+  (let ((candidate (vertico-selected-candidate)))
+    (condition-case nil
+      (if minibuffer-on-select-hook
+        (funcall minibuffer-on-select-hook
+          (if candidate (hashmap-get candidate "value") nil)))
+      (error () nil))))
 
 ;; minibuffer.tlisp --- Serializable Lisp-owned minibuffer state machine
 
@@ -238,6 +259,7 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
         (error () nil))
       (setq minibuffer-on-input-hook nil)
       (setq minibuffer-on-close-hook nil)
+      (setq minibuffer-on-select-hook nil)
       (minibuffer-state-clear)
       (minibuffer-view-clear)
       (minibuffer-clear)

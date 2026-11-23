@@ -68,20 +68,58 @@ describe("#311 — the query grammar (left-to-right)", () => {
 });
 
 describe("#311 — glob translation + match semantics", () => {
-  test("* and ? translate; [class] passes through", () => {
-    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "*.tlisp")').value)).toBe("^.*.tlisp$");
+  test("* and ? translate; [class] passes through; literals CLASS-ESCAPED (valve r2)", () => {
+    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "*.tlisp")').value)).toBe("^.*[.]tlisp$");
     expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "a?c")').value)).toBe("^a.c$");
+    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "a.txt")').value)).toBe("^a[.]txt$");
+    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "x[a-c]y")').value)).toBe("^x[a-c]y$");
+  });
+
+  test("the escaped dot is LITERAL: '*.tlisp' does NOT match 'Xtlisp' (valve r2's repro)", () => {
+    const m = (path: string, glob: string) =>
+      e(editor, `(editor/commands/grep-consult/grep-consult-glob-match-p "${path}" (list (list (editor/commands/grep-consult/grep-consult-glob->regex "${glob}")) (list)))`);
+    expect(["t", "true"].includes(String(m("src/b.tlisp", "*.tlisp").value))).toBe(true);
+    expect(["t", "true"].includes(String(m("src/Xtlisp", "*.tlisp").value))).toBe(false);
+    expect(["t", "true"].includes(String(m("a.txt", "a.txt").value))).toBe(true);
+    expect(["t", "true"].includes(String(m("aXtxt", "a.txt").value))).toBe(false);
+  });
+
+  test("untranslatable: bare ^, backslash, empty class [], unterminated class → nil", () => {
+    const tr = (g: string) => String(e(editor, `(editor/commands/grep-consult/grep-consult-glob->regex "${g}")`).value);
+    expect(["nil", "null"].includes(tr("a^b"))).toBe(true);
+    expect(["nil", "null"].includes(tr("[]"))).toBe(true);
+    expect(["nil", "null"].includes(tr("[ab"))).toBe(true);
+  });
+
+  test("NEGATIVES-ONLY matches everything not negated (valve r2 — the issue's combination clause)", () => {
+    // parse "!*.md" → positives empty, negatives [^.*[.]md$].
+    const parsed = e(editor, '(editor/commands/grep-consult/grep-consult-parse-globs "!*.md")').value as unknown[];
+    const m = (path: string) =>
+      e(editor, `(editor/commands/grep-consult/grep-consult-glob-match-p "${path}" (editor/commands/grep-consult/grep-consult-parse-globs "!*.md"))`);
+    expect(["t", "true"].includes(String(m("src/a.tlisp").value))).toBe(true); // not negated
+    expect(["t", "true"].includes(String(m("src/b.md").value))).toBe(false); // negated
+  });
+
+  test("a valid negative + an ignored entry ('!*.lisp,!') is NOT the all-ignored case", () => {
+    const r = e(editor, '(editor/commands/grep-consult/grep-consult-parse-globs "!*.lisp,!")').value as unknown[];
+    const pos = e(editor, '(length (nth 0 (editor/commands/grep-consult/grep-consult-parse-globs "!*.lisp,!")))').value;
+    const neg = e(editor, '(length (nth 1 (editor/commands/grep-consult/grep-consult-parse-globs "!*.lisp,!")))').value;
+    expect(Number(neg)).toBe(1); // the valid negative survived
+    const m = (path: string) =>
+      e(editor, `(editor/commands/grep-consult/grep-consult-glob-match-p "${path}" (editor/commands/grep-consult/grep-consult-parse-globs "!*.lisp,!"))`);
+    expect(["t", "true"].includes(String(m("a.txt").value))).toBe(true); // not negated → matches
+    expect(["t", "true"].includes(String(m("b.lisp").value))).toBe(false); // negated
   });
 
   test("a file matches ≥1 positive AND no negative", () => {
-    // path "src/a.tlisp": *.tlisp positive, !*.lisp negative.
+    // path "src/a.tlisp": *.tlisp positive, !*.md negative.
     const m = (path: string, pos: string, neg: string) =>
       e(editor, `(editor/commands/grep-consult/grep-consult-glob-match-p "${path}" (list (list "${pos}") (list "${neg}")))`);
     // NB: a .tlisp file ends in 'lisp' — a *.lisp negative WOULD
     // reject it; use *.md as the rejecting negative.
-    expect(["t", "true"].includes(String(m("src/a.tlisp", "^.*.tlisp$", "^.*.md$").value))).toBe(true);
-    expect(["t", "true"].includes(String(m("src/b.lisp", "^.*.tlisp$", "^.*.md$").value))).toBe(false); // no positive
-    expect(["t", "true"].includes(String(m("src/c.md", "^.*.tlisp$", "^.*.md$").value))).toBe(false); // negated
+    expect(["t", "true"].includes(String(m("src/a.tlisp", "^.*[.]tlisp$", "^.*[.]md$").value))).toBe(true);
+    expect(["t", "true"].includes(String(m("src/b.lisp", "^.*[.]tlisp$", "^.*[.]md$").value))).toBe(false); // no positive
+    expect(["t", "true"].includes(String(m("src/c.md", "^.*[.]tlisp$", "^.*[.]md$").value))).toBe(false); // negated
   });
 
   test("an empty entry → the 'empty glob' marker; bare ! → noted", () => {
@@ -260,6 +298,53 @@ describe("#311 — the on-input state machine", () => {
     expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
   });
 
+  test("CANDIDATE NAVIGATION (valve r2): Up/Down select hits IN THE PROMPT; the echo shows it; RET jumps to the SELECTED hit", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult)');
+    for (const key of "consult") await editor.handleKey(key);
+    for (let i = 0; i < 240; i++) {
+      if (st(editor).includes("hits")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(st(editor)).toContain("2 hits");
+    // The candidates ARE the hits: the prompt shows rows (valve r2
+    // found the table always empty — Up/Down selected nothing).
+    const rows0 = (editor.getState() as unknown as { minibufferView?: { rows?: { selected?: boolean }[] } }).minibufferView?.rows ?? [];
+    expect(rows0.length).toBe(2);
+    // Down ×2: from the raw-prompt selection (-1) the FIRST Down
+    // selects the top hit, the SECOND the b.lisp hit; the echo
+    // names it.
+    await editor.handleKey("Down");
+    await editor.handleKey("Down");
+    const rows1 = (editor.getState() as unknown as { minibufferView?: { rows?: { selected?: boolean }[] } }).minibufferView?.rows ?? [];
+    expect(rows1[1]?.selected).toBe(true);
+    expect(st(editor)).toContain("b.lisp");
+    // RET jumps to the SELECTED hit (b.lisp — not the top a.txt).
+    await editor.handleKey("Enter");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    const cur = String(e(editor, "(buffer-current)").value);
+    expect(cur).toContain("b.lisp");
+  });
+
+  test("SCOPE cwd (valve r2): launched BELOW the project root, glob file-list searches still resolve (rg runs with :cwd scope)", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    const below = join(process.cwd(), "below");
+    execFileSync("mkdir", ["-p", below]);
+    process.chdir(below);
+    const ed2 = await createStartedEditor("");
+    ed2.setClientLaunchDir(below);
+    e(ed2, "(require-module editor/commands/grep-consult)");
+    e(ed2, '(editor/commands/grep-consult/grep-consult)');
+    // The scope resolves to the project ROOT; the glob query forces
+    // the file-list variant (root-relative paths + :cwd scope).
+    for (const key of "consult#*.lisp") await ed2.handleKey(key);
+    for (let i = 0; i < 240; i++) {
+      if (st(ed2).includes("hits") || st(ed2).includes("no matches") || st(ed2).includes("error")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(st(ed2)).toContain("1 hits"); // b.lisp from the root
+  });
+
   test("ESCAPE after a completed fire (gate r2): the cancel path RUNS — state cleared, *grep* STAYS (snapshot)", async () => {
     execFileSync("git", ["-C", process.cwd(), "add", "."]);
     e(editor, '(editor/commands/grep-consult/grep-consult)');
@@ -294,7 +379,7 @@ describe("#311 — the on-input state machine", () => {
     expect(String(e(editor, '(member "*grep*" (buffer-list))').value)).toMatch(/^(nil|null|false)$/);
   });
 
-  test("RESTORE-SNAPSHOT rule (gate r2): a replaced *grep* render restores the completed content on next input", async () => {
+  test("RESTORE rule, STRUCTURAL (valve r2): rollback restores content AND the generation's hits/state", async () => {
     execFileSync("git", ["-C", process.cwd(), "add", "."]);
     e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
     e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult")');
@@ -304,15 +389,27 @@ describe("#311 — the on-input state machine", () => {
     }
     expect(st(editor)).toContain("2 hits");
     const completed = String(e(editor, '(editor/commands/grep/grep-buffer-content)').value);
-    expect(completed).toContain("consult alpha");
-    // Simulate a pending stream having replaced the render.
-    e(editor, '(editor/commands/grep/grep-restore-content "PARTIAL STREAM")');
-    expect(String(e(editor, '(editor/commands/grep/grep-buffer-content)').value)).toContain("PARTIAL STREAM");
-    // The next input RESTORES the completed render synchronously (a
-    // killed partial never stays on screen). One char: below the
-    // threshold — no timer arms, no race.
+    const gen1 = Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value);
+    // Swap the stalling shim; the next fire registers gen2 and
+    // replaces the render — but never completes.
+    const shim = join(process.cwd(), "stalled-rg.sh");
+    writeFileSync(shim, "#!/bin/sh\nexec sleep 30\n");
+    execFileSync("chmod", ["+x", shim]);
+    e(editor, `(editor/commands/grep/grep-rg-executable-set! "${shim}")`);
+    e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consulz")');
+    for (let i = 0; i < 120; i++) {
+      if (String(e(editor, '(editor/commands/grep/grep-buffer-content)').value).includes("searching")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value)).toBeGreaterThan(gen1);
+    // The next input kills the pending and rolls the producer BACK:
+    // content, hits, AND generation id — RET/navigation then agree
+    // with the display (valve r2's structural finding).
     e(editor, '(editor/commands/grep-consult/grep-consult-on-input "x")');
     expect(String(e(editor, '(editor/commands/grep/grep-buffer-content)').value)).toBe(completed);
+    expect(Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value)).toBe(gen1);
+    const hits = e(editor, "(editor/commands/grep/grep-hits-get)").value as unknown[];
+    expect(hits.length).toBe(2);
     expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
   });
 
