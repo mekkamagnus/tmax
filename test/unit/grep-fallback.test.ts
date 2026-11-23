@@ -249,6 +249,10 @@ describe("#309 — gate r1 coverage additions", () => {
     const s = await waitStatus(["hits", "no matches", "error"]);
     expect(s).toContain("1 hits");
     expect(dump(editor)).toContain("matched=1");
+    // gate r2: DISCRIMINATING — the registered generation's backend
+    // field is "grep" (both backends find the needle; the shared
+    // gen counter moves either way — only this pins the dispatch).
+    expect(String(e(editor, "(editor/commands/grep/grep-backend-used-get)").value)).toBe("grep");
     e(editor, '(editor/commands/grep/grep-rg-executable-set! "rg")');
   });
 
@@ -260,9 +264,8 @@ describe("#309 — gate r1 coverage additions", () => {
     e(editor, '(editor/commands/grep/grep-search "rgfirst")');
     const s = await waitStatus(["hits", "no matches", "error"]);
     expect(s).toContain("1 hits");
-    // rg ran (the rg generation counter moved; the fallback's did not).
-    const rgGen = Number(e(editor, "(editor/commands/grep/grep-generation-get)").value);
-    expect(rgGen).toBeGreaterThanOrEqual(1);
+    // gate r2: DISCRIMINATING — the backend field is "rg".
+    expect(String(e(editor, "(editor/commands/grep/grep-backend-used-get)").value)).toBe("rg");
   });
 
   test("SPAWN FAILURE mid-sequence → #308 rollback (prior content restored)", async () => {

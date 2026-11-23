@@ -10,7 +10,8 @@
           grep-fallback-executable-set! grep-fallback-state!
           grep-fallback-detect-i grep-fallback-filter
           grep-fallback-stderr-filter grep-fallback-sentinel
-          grep-fallback-case-args grep-fallback-handle)
+          grep-fallback-case-args grep-fallback-handle
+          grep-backend-used-get)
 
 ;; #307 — the *grep* HIT-BUFFER subsystem (RFC-031 §2.1; SPEC-291).
 ;; The generic cross-file hit buffer every search backend feeds:
@@ -1006,20 +1007,30 @@ walk's [] used to complete no-matches silently)."
         (setq grep-fallback-stopped nil)
         (setq grep-fallback-file nil)
         (setq grep-fallback-pending nil)
-        (if (not (file-exists-p scope))
+        (if (not (= 0 (condition-case nil
+                          (nth 2 (shell-exec-argv (list "test" "-e" scope)))
+                          (error () 1))))
           (progn
             (setq grep-fallback-queue nil)
             (setq grep-fallback-total 0)
             (grep-buffer-complete gen "error"
               (concat "no such directory: " scope)))
-          (let ((files (condition-case nil
-                          (project-files-walk scope)
-                          (error () (list)))))
-            (setq grep-fallback-queue files)
-            (setq grep-fallback-total (length files))
-            (if (= grep-fallback-total 0)
-              (grep-buffer-complete gen "no-matches" nil)
-              (grep-fallback-next))))))))
+          (if (not (= 0 (condition-case nil
+                          (nth 2 (shell-exec-argv (list "test" "-r" scope)))
+                          (error () 1))))
+            (progn
+              (setq grep-fallback-queue nil)
+              (setq grep-fallback-total 0)
+              (grep-buffer-complete gen "error"
+                (concat "unreadable directory: " scope)))
+            (let ((files (condition-case nil
+                            (project-files-walk scope)
+                            (error () (list)))))
+              (setq grep-fallback-queue files)
+              (setq grep-fallback-total (length files))
+              (if (= grep-fallback-total 0)
+                (grep-buffer-complete gen "no-matches" nil)
+                (grep-fallback-next)))))))))
 
 (defun grep-fallback-pending-as-list ()
   (if (null grep-fallback-pending) (list) grep-fallback-pending))
@@ -1027,11 +1038,17 @@ walk's [] used to complete no-matches silently)."
 (defun grep-fallback-replay-pending ()
   "Replay OUR pid's stashed chunks (arrival order); strangers drop."
   (if (numberp grep-fallback-pid)
-    (let ((ours ""))
+    (let ((ours "") (errs ""))
       (dolist (pair (reverse (grep-fallback-pending-as-list)))
         (if (and (listp pair) (= (length pair) 2) (= (nth 0 pair) grep-fallback-pid))
           (setq ours (concat ours (nth 1 pair)))))
+      (dolist (pair (reverse (grep-fallback-stderr-pending-as-list)))
+        (if (and (listp pair) (= (length pair) 2) (= (nth 0 pair) grep-fallback-pid))
+          (setq errs (concat errs (nth 1 pair)))))
       (setq grep-fallback-pending nil)
+      (setq grep-fallback-stderr-pending nil)
+      (if (> (length errs) 0)
+        (setq grep-fallback-stderr (concat grep-fallback-stderr errs)))
       (if (> (length ours) 0) (grep-fallback-filter grep-fallback-pid ours))))
   nil)
 
@@ -1048,6 +1065,12 @@ walk's [] used to complete no-matches silently)."
       (if (and (not grep-fallback-i-ok) (grep-fallback-first-line-has-nul-p file))
         (progn
           (setq grep-fallback-done-files (+ grep-fallback-done-files 1))
+          (setq grep-fallback-since-progress
+            (- grep-fallback-since-progress 1))
+          (if (<= grep-fallback-since-progress 0)
+            (progn
+              (setq grep-fallback-since-progress 25)
+              (grep-fallback-progress)))
           (grep-fallback-next))
         (let ((argv (append
                       (list grep-fallback-executable "-n")
@@ -1098,12 +1121,19 @@ PID-ATTRIBUTED (the #308 race pattern)."
   nil)
 
 (defvar grep-fallback-stderr "" "The current file's buffered stderr (gate r1: the exit-2 error message carries it, rg-parity).")
+(defvar grep-fallback-stderr-pending nil "PID-ATTRIBUTED stderr chunks from the not-yet-registered pid (gate r2: the stdout side stashed but stderr DROPPED — an exit-2 error could lose its stderr tail in the spawn→setq race).")
+
+(defun grep-fallback-stderr-pending-as-list ()
+  (if (null grep-fallback-stderr-pending) (list) grep-fallback-stderr-pending))
 
 (defun grep-fallback-stderr-filter (pid output)
   "Buffer the CURRENT file's stderr (gate r1: the ≥2 error message
-carries grep's actual message, rg-parity)."
+carries grep's actual message, rg-parity). Unregistered pids stash
+PID-ATTRIBUTED (gate r2 — the #308 race pattern, stderr side)."
   (if (and (numberp grep-fallback-pid) (= pid grep-fallback-pid))
-    (setq grep-fallback-stderr (concat grep-fallback-stderr output)))
+    (setq grep-fallback-stderr (concat grep-fallback-stderr output))
+    (setq grep-fallback-stderr-pending
+      (cons (list pid output) (grep-fallback-stderr-pending-as-list))))
   nil)
 
 (defun grep-fallback-handle (ln)
@@ -1198,7 +1228,7 @@ carries the counter (visible, zero buffer desync)."
           (buffer-set-read-only nil)
           (grep-clear-buffer)
           (buffer-append
-            (concat "grep " (hashmap-get grep-meta "pattern") " — searching… "
+            (concat "grep " (grep-pattern-display) " — searching… "
               (number-to-string grep-fallback-done-files) "/"
               (number-to-string grep-fallback-total) "\n"))
           (buffer-set-read-only t)
@@ -1222,6 +1252,11 @@ carries the counter (visible, zero buffer desync)."
   (setq grep-fallback-i-probed nil)
   (setq grep-fallback-i-ok nil)
   v)
+
+(defun grep-backend-used-get ()
+  "The CURRENT generation's backend field (gate r2: the dispatch
+fix's regression pin — 'rg' vs 'grep' after a search)."
+  (hashmap-get grep-meta "backend"))
 
 (defun grep-fallback-state! (i-probed i-ok)
   "A test seam: force the -I detection state directly (module
