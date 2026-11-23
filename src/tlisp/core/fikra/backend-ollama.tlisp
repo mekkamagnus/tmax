@@ -642,27 +642,43 @@ with its post-exit capture.")
 (defun fikra-ollama-ignored-listing-cmd (out)
   (concat "git ls-files -o -i --exclude-standard --directory | sort > " out " ; "))
 
-;; r156: "mode:uid:gid TAB path" for every file the snapshot's view holds
-;; (git's own list; .tmax contents excluded exactly like the snapshot's
-;; pathspec). Listed before and after the command, the two listings'
-;; difference names a permission or ownership change — the one kind of
-;; change a git tree cannot record (it keeps the executable bit and
-;; nothing else). A RECORD, not an inference from timestamps: `touch`
-;; cannot move it and a chmod that changes nothing cannot appear in it.
-;; (The first cut inferred the change from ctime. That floods on Linux —
-;; `chmod` moves a file's ctime even when the mode is unchanged there —
-;; and misses a chmod after a touch on every platform.)
-;; GNU stat and BSD stat spell the format differently; `-c` is refused
-;; by the latter.
-(defun fikra-ollama-mode-listing-cmd (out)
+;; r156: "inode mode uid gid" for every file the snapshot's view holds —
+;; and NO NAME in it. The first two cuts listed "mode…<TAB>path" and
+;; compared lines: a name containing a newline arrives in pieces, and a
+;; piece can be the name of another, real file (codex gate round 2). Keyed
+;; by inode, nothing here can be cut, split or mistaken for another path.
+;; The table is taken before the command; after it the same tuple is read
+;; for the paths the stamp scan listed, and an inode whose tuple differs
+;; is a permission or ownership change — the one kind of change a git tree
+;; cannot record (it keeps the executable bit and nothing else). A RECORD,
+;; not an inference from timestamps: `touch` cannot move it and a chmod
+;; that changes nothing cannot appear in it. (The first cut inferred the
+;; change from ctime. That floods on Linux — `chmod` moves a file's ctime
+;; even when the mode is unchanged there — and misses a chmod after a
+;; touch on every platform.)
+;; GNU stat and BSD stat spell the format differently; `-c` is refused by
+;; the latter (and its %t is NOT a tab in GNU — the second cut's records
+;; were glued on Linux). `--` ends the options: a name may begin with a
+;; dash (without it the whole batch fails). Verified on both: GNU
+;; coreutils 9.1 on Linux 6.12, and macOS.
+(defun fikra-ollama-mode-table-cmd (out)
   (concat "if stat -c %a / >/dev/null 2>&1; then "
           "git ls-files -z --cached --others --exclude-standard -- . ':(exclude,glob)**/.tmax/**' "
-          "| xargs -0 stat -c %a:%u:%g%t%n 2>/dev/null | sort > " out " ; "
+          "| xargs -0 stat -c '%i %a %u %g' -- 2>/dev/null > " out " ; "
           "else "
           "git ls-files -z --cached --others --exclude-standard -- . ':(exclude,glob)**/.tmax/**' "
-          "| xargs -0 stat -f %Lp:%u:%g%t%N 2>/dev/null | sort > " out " ; "
+          "| xargs -0 stat -f '%i %Lp %u %g' -- 2>/dev/null > " out " ; "
           ;; The caller concatenates its next statement straight onto
           ;; this: `fi` needs its own separator.
+          "fi ; "))
+
+;; The same tuple for the paths the stamp scan listed (NUL-separated) —
+;; the only files whose mode can have changed.
+(defun fikra-ollama-mode-candidates-cmd (scan out)
+  (concat "if stat -c %a / >/dev/null 2>&1; then "
+          "xargs -0 stat -c '%i %a %u %g' -- 2>/dev/null < " scan " > " out " ; "
+          "else "
+          "xargs -0 stat -f '%i %Lp %u %g' -- 2>/dev/null < " scan " > " out " ; "
           "fi ; "))
 
 (defun fikra-ollama-snapshot-wrap (cmd dir)
@@ -674,18 +690,19 @@ with its post-exit capture.")
          (stamp (fikra/thread/fikra-thread-shq (concat d "/ckpt-stamp-" tid)))
          (changed (fikra/thread/fikra-thread-shq (concat d "/ckpt-changed-" tid)))
          (meta (fikra/thread/fikra-thread-shq (concat d "/ckpt-meta-" tid)))
-         (modes-a (fikra/thread/fikra-thread-shq (concat d "/ckpt-modes-" tid)))
-         (modes-b (fikra/thread/fikra-thread-shq (concat d "/ckpt-modes-after-" tid)))
+         (modes (fikra/thread/fikra-thread-shq (concat d "/ckpt-modes-" tid)))
+         (cand (fikra/thread/fikra-thread-shq (concat d "/ckpt-cand-" tid)))
+         (inodes (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-" tid)))
          (ignored (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-" tid)))
          (ign-a (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-" tid)))
          (ign-b (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-after-" tid))))
     ;; The caller has cd'ed into the working dir.
-    (concat "mkdir -p " dq " ; rm -f " f " " changed " " meta " " modes-a " " modes-b " " ignored " ; "
+    (concat "mkdir -p " dq " ; rm -f " f " " changed " " meta " " modes " " cand " " inodes " " ignored " ; "
             (fikra-ollama-ignored-listing-cmd ign-a)
             (fikra-ollama-snapshot-cmd idx "__p")
             ;; r156: what each file's mode and owner are BEFORE the
-            ;; command (the after-listing and the diff follow the scan).
-            (fikra-ollama-mode-listing-cmd modes-a)
+            ;; command (the candidates and the join follow the scan).
+            (fikra-ollama-mode-table-cmd modes)
             ;; r155c: everything the command modifies is listed — the
             ;; snapshot's view excludes ignored paths, so a write to one
             ;; is reported instead of vanishing.
@@ -706,17 +723,26 @@ with its post-exit capture.")
             ;; `-type f` scan could see, and the ignored-entry listing
             ;; names it before and after.
             "find . -cnewer " stamp " -not -type d -not -path '*/.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
-            ;; r156: the after-listing, and the paths whose "mode:uid:gid"
-            ;; line differs from the before-listing. A path appears twice
-            ;; when its line changed; T-Lisp reports it once. (New and
-            ;; deleted paths appear too — the tree diff covers those.)
-            ;; A permission or ownership change always moves the file's
-            ;; ctime, so when the scan above found nothing there is
-            ;; nothing to list again: a call that wrote no file pays ONE
-            ;; listing. (On a coarse-timestamp filesystem a change in the
-            ;; same tick as the stamp is missed by the scan — as before.)
-            "if [ -s " changed " ] ; then " (fikra-ollama-mode-listing-cmd modes-b)
-            "diff " modes-a " " modes-b " | grep '^[<>]' | cut -f2- | head -100 > " meta " ; fi ; rm -f " modes-a " " modes-b " ; "
+            ;; r156: the candidates' tuples, the inodes whose tuple differs
+            ;; from the table, and their paths — NUL-separated by find, so
+            ;; a name with a newline or a leading dash comes through WHOLE.
+            ;; (The cap is on the inode list, never on the paths: a byte cap
+            ;; could cut a name in half.) A permission or ownership change
+            ;; always moves the file's ctime, so when the scan above found
+            ;; nothing there is nothing to compare: a call that wrote no
+            ;; file pays for ONE table. (On a coarse-timestamp filesystem a
+            ;; change in the same tick as the stamp is missed by the scan
+            ;; — as before.)
+            ;; The marker is removed AFTER the command and written only
+            ;; here (codex gate round 2): a command that plants it has
+            ;; written a file nobody reads.
+            "rm -f " meta " ; if [ -s " changed " ] ; then "
+            (fikra-ollama-mode-candidates-cmd changed cand)
+            "awk 'NR==FNR {b[$1]=$0; next} ($1 in b) && b[$1]!=$0 {print $1}' " modes " " cand " | head -100 > " inodes " ; "
+            "if [ -s " inodes " ] ; then "
+            "find . -not -type d -not -path '*/.git/*' -not -path './.tmax/*' "
+            (hex-decode "5c") "( $(sed -e 's/^/-inum /' -e '$!s/$/ -o/' " inodes " | xargs) " (hex-decode "5c") ") -print0 > " meta " ; "
+            "fi ; fi ; rm -f " modes " " cand " " inodes " ; "
             ;; r155d: ignored entries that appeared or vanished (the scan
             ;; above cannot see a deletion).
             (fikra-ollama-ignored-listing-cmd ign-b)
@@ -839,16 +865,12 @@ with its post-exit capture.")
                (if (file-exists-p ignored)
                  (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
                  (list))))
-           ;; r156: the paths whose "mode:uid:gid" line changed between the
-           ;; two listings (newline-separated, like git's own listing).
-           ;; NOT trimmed: the text ends with the last path, and a path may
-           ;; end with a space. (It was harmless — a changed path is listed
-           ;; twice, "<" then ">", and only the last line loses anything —
-           ;; but that is an accident to not depend on. The empty entry the
-           ;; trailing newline leaves is dropped below.)
+           ;; r156: the paths whose mode or owner changed — NUL-separated
+           ;; by find, exactly like the scan's list (a name may contain a
+           ;; newline, or begin with a dash).
            (meta-lines
              (if (file-exists-p meta)
-               (string-split (read-file-content meta) (hex-decode "0a"))
+               (fikra-ollama-split-paths (read-file-content meta))
                (list))))
       ;; The markers are consumed whatever they held — a stale or useless
       ;; one must not be reported again by an unrelated later call.
@@ -918,24 +940,12 @@ with its post-exit capture.")
 ;; r156 (codex gate round 6, P2): "neither tree" had gone silent on a
 ;; change the trees hold the PATH of but cannot RECORD — a permission or
 ;; owner change (git keeps the executable bit and nothing else). Those
-;; arrive in META: the paths whose "mode:uid:gid" line differs between
-;; the child's before- and after-listings (fikra-ollama-mode-listing-cmd).
+;; arrive in META: the paths whose "inode mode uid gid" differs between
+;; the child's before-table and the candidates (fikra-ollama-mode-table-cmd,
+;; then the inode join and `find -inum … -print0` in the wrap).
 ;; A META entry is reported when the tree diff does not already cover it
 ;; — an executable bit, a link's target, a new or deleted file are
 ;; covered and stay silent.
-;; The mode listing is line-based (stat prints a name raw), so a name
-;; that CONTAINS a newline arrives in pieces ("line", "break"). A piece
-;; is not a path on disk: the report names only paths that exist
-;; (fikra-ollama-existing-paths). The price is declared — a permission
-;; change on a file with a newline in its name is not reported.
-(defun fikra-ollama-existing-paths (paths root)
-  (if (null paths)
-    (list)
-    (let ((p (car paths)))
-      (if (and (stringp p) (> (length p) 0) (file-exists-p (concat root "/" p)))
-        (cons p (fikra-ollama-existing-paths (cdr paths) root))
-        (fikra-ollama-existing-paths (cdr paths) root)))))
-
 (defun fikra-ollama-report-outside-checkpoint (changed meta pre post)
   (let* ((root (fikra/thread/fikra-thread-working-dir))
          (rq (fikra/thread/fikra-thread-shq root))
@@ -969,8 +979,7 @@ with its post-exit capture.")
          ;; the exclusions. A separate list, appended after the first —
          ;; the report's order must not depend on the second pass having
          ;; found anything (codex gate round 1, NIT).
-         (uncovered (fikra-ollama-outside-scan (fikra-ollama-existing-paths meta root)
-                     (list) covered unsighted 0))
+         (uncovered (fikra-ollama-outside-scan meta (list) covered unsighted 0))
          (outside (append unsighted uncovered)))
     (if (> (length outside) 0)
       (let ((n (length outside)))

@@ -3646,6 +3646,68 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(actionRefs()).toEqual([]);
   });
 
+  // Codex gate r156 round 2 (P2, reproduced): with both `innocent` and
+  // `innocent⏎other` present, a chmod of the latter was reported against
+  // `innocent` — the line-based mode listing split the name, and the piece
+  // named a real file. The table is keyed by inode and carries no name;
+  // the name comes from `find -print0`, whole.
+  tt("a chmod on a file whose name contains a NEWLINE is reported under that exact name — not against its first line (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "innocent"), "decoy\n");
+    writeFileSync(join(process.cwd(), "innocent\nother"), "odd\n");
+    e(ed, '(fikra/chat/fikra-turn-send "lock the oddly named one")');
+    call(ed, 551, "touch innocent && chmod 600 'innocent\nother'");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("551");
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    // One path, the whole name (a newline is escaped in the log's JSON) —
+    // and the decoy that was merely touched is not named.
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('"reason":"1 path(s) the checkpoint cannot hold changed — not revertable: innocent\\nother"'),
+    ]);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "locked");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // Codex gate r156 round 2 (P2, reproduced): a name beginning with a dash
+  // made the batched `stat` fail — "illegal option" — and the whole table
+  // was lost with it. `--` ends the options.
+  tt("a chmod on a file whose name BEGINS WITH A DASH is reported — and the table survives it (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "-dash"), "dash\n");
+    e(ed, '(fikra/chat/fikra-turn-send "two mode changes, odd names")');
+    call(ed, 552, "chmod 600 ./-dash && chmod 600 base.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("552");
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    expect(errorRows(ed)).toHaveLength(1);
+    // Both — the dash name did not cost the ordinary one its entry.
+    expect(errorRows(ed)[0]).toContain('"reason":"2 path(s) the checkpoint cannot hold changed — not revertable: ');
+    expect(errorRows(ed)[0]).toContain("-dash");
+    expect(errorRows(ed)[0]).toContain("base.txt");
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "locked");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // Codex gate r156 round 2 (reading-only P2): the META marker stayed in
+  // place when the scan found nothing, so a command could write it itself
+  // and name any existing file. It is removed AFTER the command now and
+  // written only by the checkpoint's own code.
+  tt("a marker the COMMAND plants is never read (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "plant.txt"), "base.txt\n");
+    e(ed, '(fikra/chat/fikra-turn-send "plant one")');
+    call(ed, 553, "cp plant.txt .tmax/fikra/ckpt-meta-main");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("553");
+    await settleRefireFrom(ed, seeded, "planted");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(errorRows(ed)).toEqual([]);
+    expect(actionRefs()).toEqual([]);
+  });
+
   // …nor a rewrite that leaves everything as it was, mtime included.
   tt("a preserved-mtime copy over an IDENTICAL tracked file is not reported (r156)", async () => {
     const ed = await armed();
