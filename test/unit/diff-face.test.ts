@@ -96,19 +96,32 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
     const preview = rows.map(([, s]) => s).join("\\n");
     const rendered = String(e(editor, `(condition-case nil (fikra/event/fikra-event-render-line (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "edited f.ts") (list "preview" "${preview}"))) (error (m) (concat "THREW:" m)))`).value);
     expect(rendered).not.toContain("THREW");
-    const cls = (l: string) => String(e(editor, `(condition-case nil (editor/fikra/diff-face/diff-classify-line "${l}") (error (m) "?"))`).value);
+    // valve r2: derive each line's class from the RENDERED ANSI SPAN
+    // (the face actually applied), not by re-classifying stripped
+    // text — a wrong face class now FAILS the comparison.
+    const codeToCls: Record<string, string> = { "\u001b[32m": "add", "\u001b[31m": "remove", "\u001b[36m": "hunk-header", "\u001b[1m": "file-header", "\u001b[2m": "meta" };
+    const spanCls = (l: string): string | null => {
+      for (const [code, c] of Object.entries(codeToCls)) {
+        if (l.startsWith(code)) return c;
+      }
+      return null; // plain (context) or non-row line
+    };
     const norm = (c: string, s: string) => `${c}|${s.replace(/^[\s+-]+/, "")}`;
-    const chatPairs: string[] = [];
-    for (const l of strip(rendered).split("\n")) {
-      const t = l.replace(/^ {4}/, "");
-      if (t.startsWith("+") || t.startsWith("-")) chatPairs.push(norm(cls(t), t));
-    }
+    const pairs = (renderedText: string, indent: boolean): string[] => {
+      const out: string[] = [];
+      for (const l of renderedText.split("\n")) {
+        const c = spanCls(l);
+        if (c === null) continue;
+        const stripped = strip(l);
+        const t = indent ? stripped.replace(/^ {4}/, "") : stripped;
+        if (t.startsWith("+") || t.startsWith("-")) out.push(norm(c, t));
+      }
+      return out;
+    };
+    const chatPairs = pairs(rendered, true);
     const viewer = String(e(editor, `(condition-case nil (fikra/diff/fikra-diff-facelines "${preview}") (error (m) (concat "THREW:" m)))`).value);
     expect(viewer).not.toContain("THREW");
-    const viewerPairs: string[] = [];
-    for (const l of strip(viewer).split("\n")) {
-      if (l.startsWith("+") || l.startsWith("-")) viewerPairs.push(norm(cls(l), l));
-    }
+    const viewerPairs = pairs(viewer, false);
     expect(chatPairs).toEqual(["add|added line", "remove|removed line", "add|второй added ünïcode"]);
     expect(viewerPairs).toEqual(chatPairs);
   });
