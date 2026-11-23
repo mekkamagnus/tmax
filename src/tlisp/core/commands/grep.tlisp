@@ -11,7 +11,8 @@
           grep-fallback-detect-i grep-fallback-filter
           grep-fallback-stderr-filter grep-fallback-sentinel
           grep-fallback-case-args grep-fallback-handle
-          grep-backend-used-get grep-fallback-replay-pending)
+          grep-backend-used-get grep-fallback-replay-pending
+          grep-fallback-filter-files)
 
 ;; #307 — the *grep* HIT-BUFFER subsystem (RFC-031 §2.1; SPEC-291).
 ;; The generic cross-file hit buffer every search backend feeds:
@@ -989,9 +990,52 @@ documented limitation): head -n 1, NUL via (hex-decode \"00\")."
               (length first))))
     (error () nil)))
 
-(defun grep-fallback-run (pattern scope)
+(defun grep-fallback-filter-files (files globs)
+  "The #311 seam (valve r3): GLOBS are pre-TRANSLATED regex entries
+((positives...) (negatives...)); a file matches iff >=1 positive
+AND no negative (nil positives = no positive constraint).
+--include never used."
+  (grep-fallback-filter-scan files globs (list)))
+
+(defun grep-fallback-reverse (lst)
+  ;; valve r3: reverse-of lives on #311's blocked branch — local.
+  (if (null lst) (list)
+    (append (grep-fallback-reverse (cdr lst)) (list (car lst)))))
+
+(defun grep-fallback-filter-scan (files globs acc)
+  (if (null files)
+    (grep-fallback-reverse acc)
+    (if (grep-fallback-file-matches-p (car files) globs)
+      (grep-fallback-filter-scan (cdr files) globs (cons (car files) acc))
+      (grep-fallback-filter-scan (cdr files) globs acc))))
+
+(defun grep-fallback-file-matches-p (file globs)
+  ;; valve r3: the emptiness check lives HERE — at the recursion
+  ;; base an EXHAUSTED positives list means 'no positive matched'
+  ;; (nil), not 'no constraint' (t). The #311 lesson.
+  (if (grep-fallback-no-neg-p file (nth 1 globs))
+    (if (null (nth 0 globs)) t (grep-fallback-any-pos-p file (nth 0 globs)))
+    nil))
+
+(defun grep-fallback-no-neg-p (file negatives)
+  (if (null negatives) t
+    (if (not (null (condition-case nil (string-match (car negatives) file) (error () nil))))
+      nil
+      (grep-fallback-no-neg-p file (cdr negatives)))))
+
+(defun grep-fallback-any-pos-p (file positives)
+  ;; NIL-SAFE: string-match returns a NUMBER; only (null hit) is
+  ;; the miss. The BASE is nil — exhaustion = no match.
+  (if (null positives) nil
+    (if (not (null (condition-case nil (string-match (car positives) file) (error () nil))))
+      t
+      (grep-fallback-any-pos-p file (cdr positives)))))
+
+(defun grep-fallback-run (pattern scope &optional (globs nil))
   "The fallback search (#309): enumerate (project-files-walk,
 DEFAULT_IGNORES applies), register, chain one grep per file.
+Valve r3 (the spec's section 5 / #311 seam): GLOBS filter the
+enumerated list in T-Lisp BEFORE invocation.
 Empty enumeration completes no-matches WITHOUT spawning. Gate r1:
 a MISSING scope errors honestly (rg exits 2 'No such file' — the
 walk's [] used to complete no-matches silently). Valve r2: the
@@ -1044,22 +1088,29 @@ calls the registered closure directly."
           (let ((files (condition-case nil
                           (project-files-walk scope)
                           (error () (list)))))
-            (setq grep-fallback-queue files)
-            (setq grep-fallback-total (length files))
+              ;; valve r3: the #311 glob seam — filter BEFORE queueing
+              ;; (nil globs = no filtering).
+              (let ((filtered (if globs
+                                (grep-fallback-filter-files files globs)
+                                files)))
+                (setq grep-fallback-queue filtered)
+                (setq grep-fallback-total (length filtered))
             (if (= grep-fallback-total 0)
-              (if (not (= 0 (condition-case nil
-                                (nth 2 (shell-exec-argv (list "test" "-r" scope)))
-                                (error () 1))))
+              ;; valve r3: NATIVE disambiguation — read-dir THROWS
+              ;; (nil under the case-guard) on an unreadable dir and
+              ;; returns a LIST (truthy, even empty) on a readable
+              ;; one. ZERO processes on the empty-scope path.
+              (if (condition-case nil (read-dir scope) (error () nil))
+                (grep-buffer-complete gen "no-matches" nil)
                 (progn
                   (setq grep-fallback-total 0)
                   (grep-buffer-complete gen "error"
-                    (concat "unreadable directory: " scope)))
-                (grep-buffer-complete gen "no-matches" nil))
+                    (concat "unreadable directory: " scope))))
               (progn
                 ;; valve r1: the -I probe DEFERRED until files
                 ;; exist — an empty scope spawns NOTHING.
                 (grep-fallback-detect-i)
-                (grep-fallback-next))))))))))
+                (grep-fallback-next)))))))))))
 
 (defun grep-fallback-pending-as-list ()
   (if (null grep-fallback-pending) (list) grep-fallback-pending))

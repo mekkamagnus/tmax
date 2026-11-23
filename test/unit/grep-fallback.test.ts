@@ -359,3 +359,28 @@ describe("#309 — gate r3", () => {
     expect(String(r.value)).toBe("ok");
   });
 });
+
+describe("#309 — valve r3", () => {
+  test("the GLOB SEAM filters the enumerated list pre-invocation (the #311 clause)", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "globseam needle\n");
+    writeFileSync(join(process.cwd(), "b.lisp"), "globseam needle\n");
+    // Pre-translated entries: positive [.]lisp$ only.
+    const r = e(editor, '(condition-case nil (progn (editor/commands/grep/grep-fallback-run "globseam" "." (list (list "[.]lisp$") (list))) "ok") (error (m) (concat "THREW:" m)))');
+    expect(String(r.value)).toBe("ok");
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits"); // b.lisp only
+    e(editor, '(buffer-switch "*grep*")');
+    const v = strip(bufferText(editor));
+    expect(v).toContain("b.lisp");
+    expect(v).not.toContain("a.txt");
+  });
+
+  test("an EMPTY scope spawns NOTHING (native disambiguation, zero processes)", async () => {
+    const empty = join(process.cwd(), "nothing-here");
+    mkdirSync(empty);
+    e(editor, '(editor/commands/grep/grep-search "x" "' + empty + '")');
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("no matches");
+    expect(dump(editor)).toContain("/0");
+  });
+});
