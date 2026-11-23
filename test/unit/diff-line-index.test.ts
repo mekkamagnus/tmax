@@ -61,7 +61,6 @@ describe("#312 — the registry primitive", () => {
     editor = await setup();
     idx(editor, `diff-line-index-record "*Fikra*" 1 ${target("a.ts", 1, "new")}`);
     idx(editor, `diff-line-index-record "*Fikra-Diff*" 1 ${target("b.ts", 1, "new")}`);
-    console.error("BISECT-state:", String(e(editor, "(editor/fikra/diff-line-index/diff-line-index-state-get)").value).slice(0, 100));
     expect(Number(idx(editor, 'diff-line-index-entry-count "*Fikra*"').value)).toBe(1);
     expect(Number(idx(editor, 'diff-line-index-entry-count "*Fikra-Diff*"').value)).toBe(1);
     idx(editor, 'diff-line-index-drop-buffer "*Fikra*"');
@@ -85,7 +84,7 @@ describe("#312 — the registry primitive", () => {
     idx(editor, `diff-line-index-record "*Ghost*" 1 ${target("g.ts", 1, "new")}`);
     const miss = idx(editor, 'diff-line-index-lookup "*Ghost*" 1');
     expect(["nil", "null"].includes(String(miss.value))).toBe(true);
-    expect(Number(idx(editor, 'diff-line-index-entry-count "*Ghost"').value)).toBe(0);
+    expect(Number(idx(editor, 'diff-line-index-entry-count "*Ghost*"').value)).toBe(0);
   });
 });
 
@@ -186,5 +185,45 @@ const recLine = Number(e(editor, '(nth 0 (editor/fikra/diff-line-index/diff-line
     e(editor, `(cursor-move ${visLine} 0)`);
     e(editor, "(fikra/chat/fikra-follow-link)");
     expect(String(e(editor, "(buffer-current)").value)).toContain("real2.ts");
+  });
+});
+
+describe("#312 gate r2 additions", () => {
+  test("RELATIVE path resolution via cwd (no thread root)", async () => {
+    editor = await setup();
+    writeFileSync(join(process.cwd(), "rel-target.ts"), "l0\nl1\n");
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(editor/fikra/diff-line-index/diff-line-index-record "*Fikra*" 0 (hashmap "path" "rel-target.ts" "line" 1 "side" "new" "hunk" nil))');
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/chat/fikra-follow-link)");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("rel-target.ts");
+    expect(Number(e(editor, "(cursor-line)").value)).toBe(1);
+  });
+
+  test("the REAL emit path records (emit-batch lands row + index + RET)", async () => {
+    editor = await setup();
+    writeFileSync(join(process.cwd(), "emit-target.ts"), "x\n");
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    const r = e(editor, '(condition-case nil (progn (fikra/event/fikra-event-emit-batch (list (list (list "kind" "file-change") (list "path" "emit-target.ts") (list "adds" "1") (list "dels" "0")))) "emitted") (error (m) (concat "THREW:" m)))');
+    expect(String(r.value)).toBe("emitted");
+    let visLine = -1;
+    const total = Number(e(editor, "(buffer-line-count)").value);
+    for (let li = 0; li < total; li++) {
+      if (String(e(editor, `(buffer-line ${li})`).value).includes("±")) { visLine = li; break; }
+    }
+    expect(visLine).toBeGreaterThanOrEqual(0);
+    const hit = e(editor, `(hashmap-get (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" ${visLine}) "path")`);
+    expect(String(hit.value)).toBe("emit-target.ts");
+    e(editor, `(cursor-move ${visLine} 0)`);
+    e(editor, "(fikra/chat/fikra-follow-link)");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("emit-target.ts");
+  });
+
+  test("multi-space trims", async () => {
+    editor = await setup();
+    const p2 = e(editor, '(condition-case nil (fikra/event/fikra-event-index-row-path (concat "±  double.ts" " +1" " -1")) (error (m) (concat "THREW:" m)))');
+    expect(String(p2.value)).toBe("double.ts");
   });
 });
