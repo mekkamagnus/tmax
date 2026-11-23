@@ -1035,68 +1035,50 @@ id-less completed thoughts too).")
 ;; (after face-stripping): "± <path> +<adds> -<dels>" — the path is
 ;; recorded AS EMITTED (resolved against the thread root at RET).
 (defun fikra-event-index-scan (buffer-name base-line text)
-  ;; gate r1 OFF-BY-ONE: base-line is the PRE-APPEND
-  ;; (buffer-line-count), whose last line is the (empty) line the
-  ;; append STARTS on — the first appended line's VISIBLE index is
-  ;; base-line - 1. An empty buffer counts 1; appending "row\n"
-  ;; makes the count 2 with the row visible at line 0.
+  ;; valve r2: validate candidates against the VISIBLE BUFFER LINE.
+  ;; The fragment's own line list can mislead twice: a batch landing
+  ;; mid-line joins earlier text (the fragment's first line is NOT
+  ;; the visible line's start), and trailing-open fragments carry a
+  ;; partial last line. After the append, the visible line at
+  ;; base+offset is the truth — a row records only when that line,
+  ;; face-stripped, actually starts with the ± prefix.
   (condition-case nil
     (fikra-event-index-scan-lines
-      (string-split text "\n") buffer-name (- base-line 1) 0)
+      (string-split text "\n") buffer-name (- base-line 1) 0
+      (- (length (string-split text "\n")) 1))
     (error () nil)))
 
-(defun fikra-event-index-scan-lines (lines buffer-name base-line i)
-  ;; valve r1 FRAGMENT SAFETY: a batch's first fragment may land
-  ;; MID-LINE (a continuation) — its text would parse as a ± row
-  ;; while the VISIBLE line starts with earlier text. Only the
-  ;; LAST line of the fragment list may be partial (the trailing
-  ;; open run); lines 0..n-2 are complete by construction. A
-  ;; partial line ending WITHOUT a newline boundary never begins a
-  ;; visible line, so ONLY complete lines record — and a complete
-  ;; line that IS a continuation carries earlier text before the ±,
-  ;; failing the row-path prefix check naturally.
+(defun fikra-event-index-scan-lines (lines buffer-name base-line i total)
+  ;; TOTAL is fixed at entry (a shrinking (length lines) compared
+  ;; against a growing i skipped later rows — the r1 heuristic bug).
   (if (null lines)
     nil
     (progn
-      (let* ((complete-p (< i (- (length lines) 1)))
-             (path (if complete-p
-                     (fikra-event-index-row-path
-                       (fikra-event-strip-faces (car lines)))
-                     nil)))
-        (if (stringp path)
-          (editor/fikra/diff-line-index/diff-line-index-record buffer-name
-            (+ base-line i)
-            (hashmap "path" path "line" nil "side" nil "hunk" nil))))
-      (fikra-event-index-scan-lines (cdr lines) buffer-name base-line (+ i 1)))))
+      (if (< i total)
+        (let ((visible
+                (condition-case nil
+                  (fikra-event-strip-faces (buffer-line (+ base-line i)))
+                  (error () nil))))
+          (let ((path (if (and (stringp visible)
+                               (> (length visible) 2)
+                               (string= (substring visible 0 2) "± "))
+                       (fikra-event-index-row-path visible)
+                       nil)))
+            (if (stringp path)
+              (editor/fikra/diff-line-index/diff-line-index-record buffer-name
+                (+ base-line i)
+                (hashmap "path" path "line" nil "side" nil "hunk" nil))))))
+      (fikra-event-index-scan-lines (cdr lines) buffer-name base-line (+ i 1) total))))
 
 (defun fikra-event-index-row-path (line)
   ;; "± <path> +<adds> -<dels>" → <path> (nil otherwise). The path ends
   ;; at the LAST " +" before the trailing " -<dels>" — char-scanned
   ;; (the reader strips backslashes; no regex).
+  ;; valve r2: NO trimming — paths record AS EMITTED (the trims
+  ;; altered valid leading/trailing-space paths).
   (if (and (> (length line) 2) (string= (substring line 0 2) "± "))
-    (fikra-event-index-trim
-      (fikra-event-index-path-scan (substring line 2 (length line)) ""))
+    (fikra-event-index-path-scan (substring line 2 (length line)) "")
     nil))
-
-(defun fikra-event-index-trim (s)
-  ;; gate r1 parser edges: a double space after '± ' or a trailing
-  ;; space must not poison the path.
-  (if (not (stringp s))
-    s
-    (fikra-event-index-trim-tail (fikra-event-index-trim-head s))))
-
-(defun fikra-event-index-trim-head (s)
-  ;; valve r1: LOOP (the single-pass trim left padding on
-  ;; multi-space rows).
-  (if (and (> (length s) 0) (string= (substring s 0 1) " "))
-    (fikra-event-index-trim-head (substring s 1 (length s)))
-    s))
-
-(defun fikra-event-index-trim-tail (s)
-  (if (and (> (length s) 0)
-           (string= (substring s (- (length s) 1) (length s)) " "))
-    (fikra-event-index-trim-tail (substring s 0 (- (length s) 1)))
-    s))
 
 (defun fikra-event-index-path-scan (rest acc)
   ;; The boundary: " +<digits> -<digits>" to EOL (OUR renderer's

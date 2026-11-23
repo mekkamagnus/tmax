@@ -87,12 +87,22 @@ FILE), side (\"new\" | \"old\"), hunk (number | nil).")
 (defun diff-line-index-lookup (buffer-name line)
   "The target at LINE for BUFFER-NAME, or nil. LAZY INVALIDATION:
   a buffer that no longer exists drops its slot here (the kill
-  observation point — buffer-kill has no hook)."
+  observation point — buffer-kill has no hook). Valve r2: a KILLED
+  AND RECREATED buffer (same name, fresh empty content) also
+  drops — a recorded line at or beyond the current line count
+  cannot be visible, so the slot is stale by construction."
   (if (not (member buffer-name (buffer-list)))
     (progn
       (diff-line-index-drop-buffer buffer-name)
       nil)
-    (diff-line-index-assoc line (diff-line-index-slot buffer-name))))
+    (if (and (= (buffer-line-count) 1) (> line 0))
+      ;; An EMPTY buffer holding entries beyond line 0 is the
+      ;; killed-and-recreated shape (a populated log buffer never
+      ;; shrinks below its recorded lines).
+      (progn
+        (diff-line-index-drop-buffer buffer-name)
+        nil)
+      (diff-line-index-assoc line (diff-line-index-slot buffer-name)))))
 
 (defun diff-line-index-drop-buffer (buffer-name)
   "Remove BUFFER-NAME's slot entirely (buffer-kill / replay
