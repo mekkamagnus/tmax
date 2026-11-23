@@ -664,21 +664,24 @@ with its post-exit capture.")
 (defun fikra-ollama-mode-table-cmd (out)
   (concat "if stat -c %a / >/dev/null 2>&1; then "
           "git ls-files -z --cached --others --exclude-standard -- . ':(exclude,glob)**/.tmax/**' "
-          "| xargs -0 stat -c '%i %a %u %g' -- 2>/dev/null > " out " ; "
+          "| xargs -0 stat -c '%d %i %a %u %g' -- 2>/dev/null > " out " ; "
           "else "
           "git ls-files -z --cached --others --exclude-standard -- . ':(exclude,glob)**/.tmax/**' "
-          "| xargs -0 stat -f '%i %Lp %u %g' -- 2>/dev/null > " out " ; "
+          "| xargs -0 stat -f '%d %i %Lp %u %g' -- 2>/dev/null > " out " ; "
           ;; The caller concatenates its next statement straight onto
           ;; this: `fi` needs its own separator.
           "fi ; "))
 
 ;; The same tuple for the paths the stamp scan listed (NUL-separated) —
-;; the only files whose mode can have changed.
+;; the only files whose mode can have changed. sort -u: every path of a
+;; hard-linked inode carries the same tuple, and the join below counts
+;; records — 105 links would emit 105 copies of one inode and the cap
+;; would crowd every other change out (codex gate round 3, reproduced).
 (defun fikra-ollama-mode-candidates-cmd (scan out)
   (concat "if stat -c %a / >/dev/null 2>&1; then "
-          "xargs -0 stat -c '%i %a %u %g' -- 2>/dev/null < " scan " > " out " ; "
+          "xargs -0 stat -c '%d %i %a %u %g' -- 2>/dev/null < " scan " | sort -u > " out " ; "
           "else "
-          "xargs -0 stat -f '%i %Lp %u %g' -- 2>/dev/null < " scan " > " out " ; "
+          "xargs -0 stat -f '%d %i %Lp %u %g' -- 2>/dev/null < " scan " | sort -u > " out " ; "
           "fi ; "))
 
 (defun fikra-ollama-snapshot-wrap (cmd dir)
@@ -738,7 +741,11 @@ with its post-exit capture.")
             ;; written a file nobody reads.
             "rm -f " meta " ; if [ -s " changed " ] ; then "
             (fikra-ollama-mode-candidates-cmd changed cand)
-            "awk 'NR==FNR {b[$1]=$0; next} ($1 in b) && b[$1]!=$0 {print $1}' " modes " " cand " | head -100 > " inodes " ; "
+            ;; The key is device AND inode (codex gate round 3,
+            ;; reading-only): two filesystems mounted under the working
+            ;; dir can reuse an inode number. find names by inode alone —
+            ;; see the declared limit.
+            "awk 'NR==FNR {b[$1 \" \" $2]=$0; next} (($1 \" \" $2) in b) && b[$1 \" \" $2]!=$0 {print $2}' " modes " " cand " | sort -u | head -100 > " inodes " ; "
             "if [ -s " inodes " ] ; then "
             "find . -not -type d -not -path '*/.git/*' -not -path './.tmax/*' "
             (hex-decode "5c") "( $(sed -e 's/^/-inum /' -e '$!s/$/ -o/' " inodes " | xargs) " (hex-decode "5c") ") -print0 > " meta " ; "

@@ -3708,6 +3708,27 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(actionRefs()).toEqual([]);
   });
 
+  // Codex gate r156 round 3 (P2, reproduced): an inode with more than 100
+  // hard links put one tuple per PATH into the join — 105 copies of that
+  // inode filled the cap and every OTHER change went unreported.
+  tt("a hard-linked inode with 105 links cannot crowd another change out of the report (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "target"), "t\n");
+    for (let i = 0; i < 105; i++) execFileSync("ln", ["target", `h${i}`]);
+    e(ed, '(fikra/chat/fikra-turn-send "two mode changes, one very shared")');
+    call(ed, 554, "chmod 600 target && chmod 600 base.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("554");
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    // The row shows only three names; the COUNT proves both inodes were
+    // named: all 106 paths of the shared inode plus base.txt.
+    expect(errorRows(ed)).toHaveLength(1);
+    expect(errorRows(ed)[0]).toContain('"reason":"107 path(s) the checkpoint cannot hold changed — not revertable: ');
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "locked");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
   // …nor a rewrite that leaves everything as it was, mtime included.
   tt("a preserved-mtime copy over an IDENTICAL tracked file is not reported (r156)", async () => {
     const ed = await armed();
