@@ -28,15 +28,18 @@ palette byte-for-byte where a palette existed (add 32 / remove 31
     (t text)))
 
 (defun diff-classify-line (text)
-  "The git-shape classifier: add/remove/context by leading sign
-(first char '+'/'-'/' '), hunk-header by '@@', file-header by
-'diff --git', everything else meta. Empty text → context."
+  "The git-shape classifier (gate r1: the #289 grammar — context
+IS a leading-space class, and --- a/ +++ b/ are FILE headers, not
+remove/add rows). Empty text → context."
   (cond
     ((string= text "") "context")
+    ((and (>= (length text) 10) (string= (substring text 0 10) "diff --git")) "file-header")
+    ((and (>= (length text) 3) (string= (substring text 0 3) "---")) "file-header")
+    ((and (>= (length text) 3) (string= (substring text 0 3) "+++")) "file-header")
+    ((and (> (length text) 1) (string= (substring text 0 2) "@@")) "hunk-header")
     ((string= (substring text 0 1) "+") "add")
     ((string= (substring text 0 1) "-") "remove")
-    ((and (> (length text) 1) (string= (substring text 0 2) "@@")) "hunk-header")
-    ((and (> (length text) 10) (string= (substring text 0 10) "diff --git")) "file-header")
+    ((string= (substring text 0 1) " ") "context")
     (t "meta")))
 
 (defun diff-face-strip (s)

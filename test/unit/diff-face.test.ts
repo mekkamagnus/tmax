@@ -67,10 +67,14 @@ describe("#313 — the shared face source", () => {
     const c = (t: string) => String(e(editor, `(editor/fikra/diff-face/diff-classify-line "${t}")`).value);
     expect(c("+added")).toBe("add");
     expect(c("-removed")).toBe("remove");
-    expect(c(" ctx")).toBe("meta"); // a single leading space isn't the context shape
-    expect(c("  ctx")).toBe("meta");
+    expect(c(" ctx")).toBe("context"); // gate r1: leading space IS the context class
+    expect(c("  ctx")).toBe("context");
+    expect(c("--- a/f.ts")).toBe("file-header"); // not a remove row
+    expect(c("+++ b/f.ts")).toBe("file-header"); // not an add row
     expect(c("@@ -1,2 @@")).toBe("hunk-header");
     expect(c("diff --git a/x b/x")).toBe("file-header");
+    expect(c("diff --git")).toBe("file-header"); // exact-10 boundary
+    expect(c("index abc..def")).toBe("meta");
     expect(c("other")).toBe("meta");
     expect(c("")).toBe("context");
   });
@@ -120,5 +124,30 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
     expect(buf).toContain("+второй added ünïcode");
     const kmap = e(editor, '(editor/keymaps/buffer-keymap "*Fikra-Diff*")');
     expect(String(kmap.value)).not.toBe("nil");
+    // gate r1: pin the actual bindings (n/N/r/[/]), not just non-nil.
+    for (const k of ["n", "N", "r", "]", "["]) {
+      const cmd = String(e(editor, `(hashmap-get (hashmap-get (editor/keymaps/buffer-keymap "*Fikra-Diff*") "bindings") "${k}")`).value);
+      expect(cmd).toContain("fikra/diff/");
+    }
+  });
+
+  test("facelines JOIN semantics: no doubled trailing newline; empty renders empty", async () => {
+    const r = e(editor, '(condition-case nil (fikra/diff/fikra-diff-facelines "+a\n-b") (error (m) (concat "THREW:" m)))');
+    expect(JSON.stringify(String(r.value))).toBe('"\\u001b[32m+a\\u001b[0m\\n\\u001b[31m-b\\u001b[0m"');
+    const empty = e(editor, '(condition-case nil (fikra/diff/fikra-diff-facelines "") (error (m) (concat "THREW:" m)))');
+    expect(JSON.stringify(String(empty.value))).toBe('""');
+  });
+
+  test("render-parts: the summary/footer pass VERBATIM; only the patch faces", async () => {
+    e(editor, "(require-module fikra/diff)");
+    // Evaluate render-parts to a STRING first (no buffer interaction),
+    // then append into a scratch buffer — avoids the render path's
+    // read-only lifecycle entirely.
+    const hdr = Buffer.from("\u001b[1;36mmy header\u001b[0m\n", "utf8").toString("hex");
+    e(editor, `(condition-case nil (fikra/diff/fikra-diff-render-parts (hex-decode "${hdr}") "+added" "") (error (m) (concat "THREW:" m)))`);
+    e(editor, '(buffer-switch "*Fikra-Diff*")');
+    const txt = String(bufferText(editor));
+    expect(txt).toContain("my header\u001b[0m"); // the summary's OWN face survived
+    expect(txt).toContain("\u001b[32m+added"); // the patch faced
   });
 });

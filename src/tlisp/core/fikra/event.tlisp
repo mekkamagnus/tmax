@@ -27,6 +27,8 @@
 ;;
 ;; Replay is crash-tolerant: a trailing partial JSONL line is dropped.
 
+(require-module editor/fikra/diff-face)
+
 (defvar fikra-event-log nil
   "Active JSONL log path (set per-thread by fikra/thread in #213).")
 

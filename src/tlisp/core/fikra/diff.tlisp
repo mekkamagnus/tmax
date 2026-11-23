@@ -5,7 +5,7 @@
           fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
           fikra-revert-confirm-table fikra-revert-confirm-accept
           fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed fikra-last-completed-turn fikra-turn-diff-for
-          fikra-diff-turn-cmd-next fikra-diff-turn-cmd-prev fikra-diff-facelines fikra-diff-render)
+          fikra-diff-turn-cmd-next fikra-diff-turn-cmd-prev fikra-diff-facelines fikra-diff-render fikra-diff-render-parts)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -14,6 +14,8 @@
 ;; full content for new untracked files — COLOR-PRESERVED (git
 ;; --color=always; the chat established buffers carry ANSI) in a
 ;; read-only *Fikra-Diff* buffer.
+
+(require-module editor/fikra/diff-face)
 
 (defvar fikra-diff-buffer-name "*Fikra-Diff*"
   "Name of the turn-diff buffer.")
@@ -52,11 +54,12 @@
               (dolist (p paths)
                 (if (not (hashmap-get fikra-diff-letters p))
                   (editor/keymaps/keymap-mutable-set! fikra-diff-letters p "A")))
-              (fikra-diff-render
+              (fikra-diff-render-parts
                 (concat (fikra-diff-summary state rows
                           (fikra-diff-turn-tools-line state))
-                        "\n" patch "\n"
-                        (fikra-diff-keys-footer))))))))))
+                        "\n")
+                (fikra-diff-facelines patch)
+                (concat "\n" (fikra-diff-keys-footer))))))))))
 
 ;; Summary table (mockup 8.4: file summary + totals) — colored header,
 ;; magenta ± rows with per-file counts, totals line.
@@ -85,10 +88,10 @@ per-file ± rows)."
       (editor-set-status (concat "Fikra: no captured diff for turn " (number-to-string n)))
       (progn
         (setq fikra-diff-view-turn n)
-        (fikra-diff-render
-          (concat (fikra-diff-completed-summary n)
-                  patch "\n"
-                  (fikra-diff-keys-footer)))))))
+        (fikra-diff-render-parts
+          (concat (fikra-diff-completed-summary n) "\n")
+          (fikra-diff-facelines patch)
+          (concat "\n" (fikra-diff-keys-footer)))))))
 
 ;; The numstat-derived ± rows for a COMPLETED turn (the live view builds
 ;; them from working state; here they come from the ref pair).
@@ -350,15 +353,52 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
 
 ;; The header + patch land in the (re)created read-only buffer.
 (defun fikra-diff-facelines (content)
-  ;; #313: git's colored output is NOT trusted intake — strip ANSI,
-  ;; then face EVERY line through the shared grammar helper. The
-  ;; context/unknown classes render plain.
-  (let ((lines (string-split (editor/fikra/diff-face/diff-face-strip content) "\n"))
-        (out ""))
-    (dolist (l lines)
-      (let ((cls (editor/fikra/diff-face/diff-classify-line l)))
-        (setq out (concat out (editor/fikra/diff-face/diff-face-line cls l) "\n"))))
-    out))
+  ;; #313 gate r1: git's colored output is NOT trusted intake —
+  ;; strip ANSI, then face every line through the shared grammar
+  ;; helper (context renders plain). JOIN semantics: the separator
+  ;; goes BETWEEN lines (git's trailing newline must not double to
+  ;; a blank); empty content renders empty.
+  (let ((stripped
+          ;; gate r1 PERF: skip the per-char strip entirely when no
+          ;; ESC is present (the --no-color spawns have none; the
+          ;; strip only guards legacy colored intake — 1317ms/225KB
+          ;; superlinear otherwise).
+          (if (condition-case nil (> (string-match "\e" content) -1) (error () nil))
+            (editor/fikra/diff-face/diff-face-strip content)
+            content)))
+    (fikra-diff-join-lines
+      (fikra-diff-face-scan (string-split stripped "\n") (list)))))
+
+(defun fikra-diff-face-scan (lines acc)
+  (if (null lines)
+    (reverse acc)
+    (fikra-diff-face-scan (cdr lines)
+      (cons (editor/fikra/diff-face/diff-face-line
+              (editor/fikra/diff-face/diff-classify-line (car lines))
+              (car lines))
+        acc))))
+
+(defun fikra-diff-join-lines (lines)
+  ;; between-lines separators only (reverse already applied by scan).
+  (fikra-diff-join-scan lines ""))
+
+(defun fikra-diff-join-scan (lines acc)
+  (if (null lines)
+    acc
+    (fikra-diff-join-scan (cdr lines)
+      (if (= (length acc) 0)
+        (car lines)
+        (concat acc "\n" (car lines))))))
+
+(defun when-string (s)
+  (if (and (stringp s) (> (length s) 0)) s ""))
+
+(defun fikra-diff-render-parts (summary patch footer)
+  "gate r1: the viewer's OWN summary/footer blocks pass through
+VERBATIM (their palette survives); only the GIT PATCH strips +
+faces through the shared grammar."
+  (fikra-diff-render
+    (concat (when-string summary) (when-string patch) (when-string footer))))
 
 (defun fikra-diff-render (content)
   (if (member fikra-diff-buffer-name (buffer-list))
