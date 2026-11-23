@@ -116,9 +116,12 @@ outside a class, an EMPTY class [], or an unterminated class → nil
         (in-class
           (grep-consult-glob-scan tail (concat acc c) (not (string= c "]"))))
         ((string= c "*")
-          (grep-consult-glob-scan tail (concat acc ".*") nil))
+          ;; valve r5: [^]* (the negated-empty class) = ANY char
+          ;; INCLUDING newlines — JS's . does not match \n, and
+          ;; fnmatch's * does; filenames with newlines exist.
+          (grep-consult-glob-scan tail (concat acc "[^]*") nil))
         ((string= c "?")
-          (grep-consult-glob-scan tail (concat acc ".") nil))
+          (grep-consult-glob-scan tail (concat acc "[^]") nil))
         ((string= c "[")
           (if (string-prefix-p tail "]")
             nil
@@ -420,19 +423,21 @@ appear without another keystroke."
   "The input-change rule (gate r2 — was a literal no-op). valve r2:
 STRUCTURAL — roll the producer back to the completed generation
 (content AND selection/state, so RET/navigation agree with the
-display), not a text re-render over a newer generation's hits. nil
-snapshot (no completed search) → unchanged; already current →
-no-op; the newer generation already completed (snapshot moved on)
-→ the rollback guard refuses, caught, no-op."
+display), not a text re-render over a newer generation's hits.
+valve r5: with NO completed snapshot yet, the killed FIRST search's
+partial (the 'searching…' placeholder / stream) ALSO rolls back —
+to the pre-register content (it used to linger on screen forever
+when the edited query went below threshold and never re-fired).
+Already current → no-op; the newer generation already completed
+(snapshot moved on) → the rollback guard refuses, caught, no-op."
   (let ((snap-gen (hashmap-get grep-consult-state "completedSnapshot")))
-    (if (numberp snap-gen)
-      (if (= snap-gen (editor/commands/grep/grep-current-gen-get))
-        nil
-        (condition-case nil
-          (editor/commands/grep/grep-buffer-rollback
-            (editor/commands/grep/grep-current-gen-get))
-          (error () nil)))
-      nil)))
+    (if (and (numberp snap-gen)
+             (= snap-gen (editor/commands/grep/grep-current-gen-get)))
+      nil
+      (condition-case nil
+        (editor/commands/grep/grep-buffer-rollback
+          (editor/commands/grep/grep-current-gen-get))
+        (error () nil)))))
 
 (defun grep-consult-chomp-nl (s)
   "Drop ONE trailing newline."

@@ -25,13 +25,15 @@ export function createTimerOps(
   let nextTimerId = 1;
 
   ops.set("run-with-idle-timer", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (args.length !== 2 || args[0]!.type !== "number" || args[1]!.type !== "string") {
+    if (args.length !== 2 || args[0]!.type !== "number"
+      || (args[1]!.type !== "string" && args[1]!.type !== "function")) {
       return Either.left(createValidationError(
         "TypeError",
-        "run-with-idle-timer requires 2 arguments: the delay (ms, number) and the callback name",
+        "run-with-idle-timer requires 2 arguments: the delay (ms, number) and the callback (a function name or lambda)",
       ));
     }
-    if (!evalTlisp) {
+    const isLambda = args[1]!.type === "function";
+    if (!isLambda && !evalTlisp) {
       return Either.left(createValidationError(
         "FormatError",
         "run-with-idle-timer requires an eval context (no interpreter attached)",
@@ -39,6 +41,7 @@ export function createTimerOps(
     }
     const ms = Math.max(0, Number(args[0]!.value));
     const callback = String(args[1]!.value);
+    const lambdaImpl = isLambda ? (args[1]!.value as unknown as (a: TLispValue[]) => unknown) : undefined;
     const id = nextTimerId++;
     const handle = setTimeout(() => {
       timers.delete(id);
@@ -46,14 +49,21 @@ export function createTimerOps(
       // above ran first only if cancel(id) precedes; the map delete
       // here is the fired-mark. If cancel already removed it, this
       // is a no-op delete.
-      const expr = `(${callback})`;
       try {
-        const result = evalTlisp(expr);
-        if (result && typeof result === "object" && (result as Eitherish)._tag === "Left") {
-          logProgram?.("process", {
-            level: "error",
-            text: `idle timer callback failed (T-Lisp error): ${expr.slice(0, 80)}`,
-          });
+        // valve r5 (#311): the spec's <fn> accepts a LAMBDA (a
+        // function value) as well as a callback NAME — call the
+        // impl directly (no eval round-trip).
+        if (lambdaImpl) {
+          lambdaImpl([]);
+        } else {
+          const expr = `(${callback})`;
+          const result = evalTlisp!(expr);
+          if (result && typeof result === "object" && (result as Eitherish)._tag === "Left") {
+            logProgram?.("process", {
+              level: "error",
+              text: `idle timer callback failed (T-Lisp error): ${expr.slice(0, 80)}`,
+            });
+          }
         }
       } catch (e: unknown) {
         logProgram?.("process", {

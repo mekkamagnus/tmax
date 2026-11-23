@@ -68,11 +68,18 @@ describe("#311 — the query grammar (left-to-right)", () => {
 });
 
 describe("#311 — glob translation + match semantics", () => {
-  test("* and ? translate; [class] passes through; literals CLASS-ESCAPED (valve r2)", () => {
-    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "*.tlisp")').value)).toBe("^.*[.]tlisp$");
-    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "a?c")').value)).toBe("^a.c$");
+  test("* and ? translate (newline-inclusive); [class] passes through; literals CLASS-ESCAPED (valve r2/r5)", () => {
+    // valve r5: [^]* — the negated-empty class — because JS's . does
+    // NOT match newlines and fnmatch's * does.
+    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "*.tlisp")').value)).toBe("^[^]*[.]tlisp$");
+    expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "a?c")').value)).toBe("^a[^]c$");
     expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "a.txt")').value)).toBe("^a[.]txt$");
     expect(String(e(editor, '(editor/commands/grep-consult/grep-consult-glob->regex "x[a-c]y")').value)).toBe("^x[a-c]y$");
+  });
+
+  test("'*' matches a NEWLINE in the filename (valve r5 — the NUL enumeration preserved it)", () => {
+    const r = e(editor, '(condition-case nil (editor/commands/grep-consult/grep-consult-glob-match-p "we\\nird.lisp" (editor/commands/grep-consult/grep-consult-parse-globs "*.lisp")) (error (m) (concat "THREW:" m)))');
+    expect(["t", "true"].includes(String(r.value))).toBe(true);
   });
 
   test("the escaped dot is LITERAL: '*.tlisp' does NOT match 'Xtlisp' (valve r2's repro)", () => {
@@ -157,6 +164,16 @@ describe("#311 — the timer + process invariants", () => {
     e(editor, '(run-with-idle-timer 30 "c311b-cb")');
     await new Promise((r) => setTimeout(r, 120));
     expect(String(e(editor, "c311b").value)).toContain("true");
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
+  });
+
+  test("run-with-idle-timer accepts a LAMBDA (valve r5 — the spec's <fn>)", async () => {
+    e(editor, "(defvar c311c nil)");
+    e(editor, "(setq c311c nil)");
+    const r = e(editor, '(condition-case nil (progn (run-with-idle-timer 30 (lambda () (setq c311c t))) "ok") (error (m) (concat "THREW:" m)))');
+    expect(String(r.value)).toBe("ok");
+    await new Promise((res) => setTimeout(res, 120));
+    expect(String(e(editor, "c311c").value)).toContain("true");
     expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
   });
 });
@@ -373,19 +390,18 @@ describe("#311 — the on-input state machine", () => {
     execFileSync("git", ["-C", process.cwd(), "add", "."]);
     e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
     e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult#*.lisp,!")');
-    let sawNote = false;
+    // valve r5: wait for HITS only — the note assert rides the
+    // durable lastNote record (gating the loop on the TRANSIENT
+    // status was the codex-sandbox timeout).
     let sawHits = false;
     for (let i = 0; i < 300; i++) {
-      const s = st(editor);
-      if (s.includes("glob entry ignored")) sawNote = true;
-      if (s.includes("hits")) sawHits = true;
-      if (sawNote && sawHits) break;
+      if (st(editor).includes("hits")) { sawHits = true; break; }
       await new Promise((r) => setTimeout(r, 10));
     }
     expect(sawHits).toBe(true);
     expect(st(editor)).toContain("1 hits"); // the valid entry still filters
     // …and the note fired (was: all-ignored only) — asserted via the
-    // durable lastNote record (the status poll was flaky under load).
+    // durable lastNote record.
     expect(String(e(editor, '(hashmap-get (editor/commands/grep-consult/grep-consult-state-get) "lastNote")').value)).toContain("glob entry ignored");
   });
 
@@ -460,6 +476,30 @@ describe("#311 — the on-input state machine", () => {
     expect(String(e(editor, '(member "*grep*" (buffer-list))').value)).toMatch(/^(nil|null|false)$/);
   });
 
+  test("FIRST-SEARCH pending + query edit (valve r5): the killed partial's placeholder does not linger", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
+    // Stall rg; the first search fires and never completes.
+    const shim = join(process.cwd(), "stalled-rg.sh");
+    writeFileSync(shim, "#!/bin/sh\nexec sleep 30\n");
+    execFileSync("chmod", ["+x", shim]);
+    e(editor, `(editor/commands/grep/grep-rg-executable-set! "${shim}")`);
+    e(editor, '(editor/commands/grep-consult/grep-consult-on-input "hello")');
+    let searching = false;
+    for (let i = 0; i < 120; i++) {
+      if (String(e(editor, "(editor/commands/grep/grep-buffer-content)").value).includes("searching")) { searching = true; break; }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(searching).toBe(true);
+    // Edit the query below threshold (no completed snapshot exists):
+    // the killed partial rolls back to the PRE-REGISTER content —
+    // the 'searching…' placeholder no longer lingers on screen.
+    e(editor, '(editor/commands/grep-consult/grep-consult-on-input "x")');
+    const content = String(e(editor, "(editor/commands/grep/grep-buffer-content)").value);
+    expect(content).not.toContain("searching");
+    expect(String(e(editor, "(idle-timer-count)").value)).toBe("0");
+  });
+
   test("RESTORE rule, STRUCTURAL (valve r2): rollback restores content AND the generation's hits/state", async () => {
     execFileSync("git", ["-C", process.cwd(), "add", "."]);
     e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
@@ -498,22 +538,16 @@ describe("#311 — the on-input state machine", () => {
     execFileSync("git", ["-C", process.cwd(), "add", "."]);
     e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
     e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult#!")');
-    let sawNote = false;
+    // valve r5: wait for HITS only; the note assert rides lastNote.
     let sawHits = false;
     for (let i = 0; i < 300; i++) {
-      const s = st(editor);
-      if (s.includes("glob entries ignored")) sawNote = true;
-      if (s.includes("hits")) sawHits = true;
-      if (sawNote && sawHits) break;
+      if (st(editor).includes("hits")) { sawHits = true; break; }
       await new Promise((r) => setTimeout(r, 10));
     }
     // BOTH files searched (the inverted zero-files behavior is gone).
     expect(sawHits).toBe(true);
     expect(st(editor)).toContain("2 hits");
-    // valve r4: the note is RECORDED (lastNote) — the transient
-    // status poll was timing-flaky under load; the record is not.
     expect(String(e(editor, '(hashmap-get (editor/commands/grep-consult/grep-consult-state-get) "lastNote")').value)).toContain("glob entries ignored");
-    expect(sawNote).toBe(true);
   });
 
   test("CANCEL kill-branch against a REAL live pending process (gate r3): stalled rg, escape kills *grep*", async () => {
