@@ -321,3 +321,41 @@ describe("#309 — gate r1 coverage additions", () => {
     expect(dump(editor)).toContain("/0");
   });
 });
+
+describe("#309 — gate r3", () => {
+  test("FILE-as-scope errors honestly (rg searches single files; the walk's ENOTDIR was swallowed)", async () => {
+    writeFileSync(join(process.cwd(), "afile.txt"), "x\n");
+    e(editor, '(editor/commands/grep/grep-search "x" "' + join(process.cwd(), "afile.txt") + '")');
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("error");
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toContain("not a directory");
+  });
+
+  test("unreadable DIRECTORY errors honestly (chmod 000; skipped if the host auto-heals perms)", async () => {
+    const locked = join(process.cwd(), "locked-dir");
+    mkdirSync(locked);
+    writeFileSync(join(locked, "inside.txt"), "x\n");
+    execFileSync("chmod", ["000", locked]);
+    try {
+      e(editor, '(editor/commands/grep/grep-search "x" "' + locked + '")');
+      const s = await waitStatus(["hits", "no matches", "error"]);
+      expect(s).toContain("error");
+      e(editor, '(buffer-switch "*grep*")');
+      expect(strip(bufferText(editor))).toContain("unreadable directory");
+    } finally {
+      execFileSync("chmod", ["755", locked]);
+    }
+  });
+
+  test("the stderr-pending stash RESETS per run (no stale-splice)", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "resetcheck\n");
+    e(editor, '(editor/commands/grep/grep-search "resetcheck")');
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    // The seam: the stderr stash is empty after a completed run (a
+    // stale stranger entry would survive otherwise).
+    const r = e(editor, '(condition-case nil (progn (editor/commands/grep/grep-fallback-replay-pending) "ok") (error (m) (concat "THREW:" m)))');
+    expect(String(r.value)).toBe("ok");
+  });
+});

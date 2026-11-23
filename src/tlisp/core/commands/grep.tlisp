@@ -11,7 +11,7 @@
           grep-fallback-detect-i grep-fallback-filter
           grep-fallback-stderr-filter grep-fallback-sentinel
           grep-fallback-case-args grep-fallback-handle
-          grep-backend-used-get)
+          grep-backend-used-get grep-fallback-replay-pending)
 
 ;; #307 — the *grep* HIT-BUFFER subsystem (RFC-031 §2.1; SPEC-291).
 ;; The generic cross-file hit buffer every search backend feeds:
@@ -1007,6 +1007,11 @@ walk's [] used to complete no-matches silently)."
         (setq grep-fallback-stopped nil)
         (setq grep-fallback-file nil)
         (setq grep-fallback-pending nil)
+        ;; gate r3: the STDERR stash resets with its stdout twin (a
+        ;; stale stranger chunk could splice into a future error on
+        ;; an OS pid-reuse collision).
+        (setq grep-fallback-stderr-pending nil)
+        (setq grep-fallback-stderr "")
         (if (not (= 0 (condition-case nil
                           (nth 2 (shell-exec-argv (list "test" "-e" scope)))
                           (error () 1))))
@@ -1015,6 +1020,18 @@ walk's [] used to complete no-matches silently)."
             (setq grep-fallback-total 0)
             (grep-buffer-complete gen "error"
               (concat "no such directory: " scope)))
+        (if (not (= 0 (condition-case nil
+                          (nth 2 (shell-exec-argv (list "test" "-d" scope)))
+                          (error () 1))))
+          (progn
+            ;; gate r3: a READABLE FILE as scope passed -e/-r but
+            ;; the walk's readdirSync throws ENOTDIR (swallowed to
+            ;; []) — silent no-matches where rg searches the file.
+            (setq grep-fallback-queue nil)
+            (setq grep-fallback-total 0)
+            (grep-buffer-complete gen "error"
+              (concat "not a directory: " scope
+                " (the fallback searches directories; rg handles single files)")))
           (if (not (= 0 (condition-case nil
                           (nth 2 (shell-exec-argv (list "test" "-r" scope)))
                           (error () 1))))
@@ -1030,7 +1047,7 @@ walk's [] used to complete no-matches silently)."
               (setq grep-fallback-total (length files))
               (if (= grep-fallback-total 0)
                 (grep-buffer-complete gen "no-matches" nil)
-                (grep-fallback-next)))))))))
+                (grep-fallback-next))))))))))
 
 (defun grep-fallback-pending-as-list ()
   (if (null grep-fallback-pending) (list) grep-fallback-pending))
