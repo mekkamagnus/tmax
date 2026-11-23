@@ -83,6 +83,11 @@ export function createProjectOps(
     return Either.right(createList(results.map(p => createString(p))));
   });
 
+  api.set("project-ignore-dirs", (): Either<AppError, TLispValue> =>
+    // #309: EXPOSE project-files-walk's DEFAULT_IGNORES read-only (the
+    // spec's transparency clause — the ADR names it).
+    Either.right(createList([...DEFAULT_IGNORES].map(s => createString(s)))));
+
   api.set("project-search", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const vc = validateArgsCount(args, 2, "project-search");
     if (Either.isLeft(vc)) return Either.left(vc.left);

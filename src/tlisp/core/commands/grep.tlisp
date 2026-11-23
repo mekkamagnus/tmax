@@ -5,7 +5,12 @@
           grep-current-gen-get grep-status-get
           grep-rg-replay-pending grep-rg-kill-prior grep-rg-stderr-filter
           grep-rg-executable-set! grep-rg-test-state!
-          grep-ret grep-next grep-prev grep-rerun grep-quit)
+          grep-ret grep-next grep-prev grep-rerun grep-quit
+          grep-fallback-run grep-fallback-kill-prior grep-fallback-dump
+          grep-fallback-executable-set! grep-fallback-state!
+          grep-fallback-detect-i grep-fallback-filter
+          grep-fallback-stderr grep-fallback-sentinel
+          grep-fallback-case-args grep-fallback-handle)
 
 ;; #307 — the *grep* HIT-BUFFER subsystem (RFC-031 §2.1; SPEC-291).
 ;; The generic cross-file hit buffer every search backend feeds:
@@ -532,6 +537,7 @@ explicit switch OVERRIDES it, and buffer-list is INSERTION order,
 not recency); *scratch* only if the survivor is somehow still
 *grep*. No windows are ever deleted."
   (grep-rg-kill-prior)
+  (grep-fallback-kill-prior)
   (buffer-kill (grep-buffer-name))
   (if (string= (buffer-current) (grep-buffer-name))
     (buffer-switch "*scratch*"))
@@ -640,9 +646,10 @@ used to be DROPPED).")
 (defvar grep-rg-last-line "??" "The last handled line (diagnostics).")
 
 (defun grep-backend-available-p ()
-  ;; The matrix: auto → rg (cached); rg → explicit; grep → #309. A
-  ;; non-string backend (nil) coalesces to auto — string= on nil
-  ;; THROWS (the same hazard class grep-rg-handle hit; gate r1).
+  ;; The matrix (#309): auto → rg (cached) → GREP FALLBACK; rg →
+  ;; explicit; grep → the fallback. A non-string backend (nil)
+  ;; coalesces to auto — string= on nil THROWS (the same hazard class
+  ;; grep-rg-handle hit; gate r1).
   (let ((b (if (stringp grep-backend) grep-backend "auto")))
     (cond
       ((string= b "rg")
@@ -650,21 +657,24 @@ used to be DROPPED).")
           (progn (editor-set-status
                    "grep: grep-backend is rg but rg is not on PATH") nil)))
       ((string= b "grep")
-        (progn
-          (editor-set-status "grep: grep backend pending (#309)") nil))
+        (if (exec-lookup grep-fallback-executable) t
+          (progn
+            (editor-set-status "grep: grep-backend is grep but grep is not on PATH")
+            nil)))
       (t
-        ;; auto: detect (cached per session — positive AND negative)
-        ;; then dispatch.
+        ;; auto: detect rg (cached per session — positive AND
+        ;; negative) then FALL THROUGH to the grep backend.
         (progn
           (if (null grep-rg-detection-done)
             (progn
               (setq grep-rg-detected (exec-lookup grep-rg-executable))
               (setq grep-rg-detection-done t)))
           (if grep-rg-detected t
-            (progn
-              (editor-set-status
-                "grep: no search backend: rg missing (grep fallback pending #309)")
-              nil)))))))
+            (if (exec-lookup grep-fallback-executable) t
+              (progn
+                (editor-set-status
+                  "grep: no search backend: rg and grep both missing")
+                nil))))))))
 
 (defun grep-rg-kill-prior ()
   "Kill the prior rg process (re-runs, quits and new searches all
@@ -713,11 +723,12 @@ as ours). The STDERR stash replays the same way (valve r1)."
     nil
     (progn
       ;; 0. Kill the prior process FIRST (re-runs and new searches
-      ;;    alike), and close the pid guard BEFORE the new register:
-      ;;    an old chunk arriving in the register→spawn window now
-      ;;    STASHES (pid-attributed) instead of landing in the new
-      ;;    generation.
+      ;;    alike; BOTH backends' — #309), and close the pid guard
+      ;;    BEFORE the new register: an old chunk arriving in the
+      ;;    register→spawn window now STASHES (pid-attributed)
+      ;;    instead of landing in the new generation.
       (grep-rg-kill-prior)
+      (grep-fallback-kill-prior)
       ;; 1. PROVISIONAL registration (callbacks guarded from here).
       (let ((gen (grep-buffer-register
                    (hashmap "backend" "rg" "pattern" pattern "scope" scope
@@ -883,11 +894,314 @@ status, gate r1: done/no-matches used to drop it)."
   (reverse (cdr (reverse lines))))
 
 (defun grep-search (pattern &optional (scope "."))
-  "The search entry (SPC s s / M-x): run the backend. grep-rg-run
-itself kills the prior process BEFORE spawning (the kill-first rule
-covers new searches AND g-reruns through one choke point)."
+  "The search entry (SPC s s / M-x): run the backend (#309: rg |
+grep-fallback — the matrix's explicit AND auto dispatch). The
+runners kill the prior process (BOTH backends') BEFORE spawning
+(the kill-first rule covers new searches AND g-reruns)."
   (interactive)
-  (grep-rg-run pattern scope))
+  (let ((b (if (stringp grep-backend) grep-backend "auto")))
+    (cond
+      ((string= b "grep") (grep-fallback-run pattern scope))
+      ((string= b "rg") (grep-rg-run pattern scope))
+      (t (if grep-rg-detected
+           (grep-rg-run pattern scope)
+           (grep-fallback-run pattern scope))))))
+
+;; ── #309: the standard-grep fallback backend ────────────────────────
+(defvar grep-fallback-gen nil "The running fallback search's generation.")
+(defvar grep-fallback-pid nil "The running per-file grep process id.")
+(defvar grep-fallback-queue nil "Remaining files (enumeration order).")
+(defvar grep-fallback-file nil "The file the current grep runs on.")
+(defvar grep-fallback-pattern nil "The running search's pattern (chaining).")
+(defvar grep-fallback-total 0 "The enumeration size.")
+(defvar grep-fallback-done-files 0 "Files processed so far.")
+(defvar grep-fallback-matched-files 0 "Files with ≥1 hit.")
+(defvar grep-fallback-binary-skipped 0 "Hits truncated at a NUL.")
+(defvar grep-fallback-partial "" "The trailing incomplete output line.")
+(defvar grep-fallback-since-progress 0 "Files since the last progress render.")
+(defvar grep-fallback-stopped nil "t once cancelled/errored — enumeration halts.")
+(defvar grep-fallback-pending nil "PID-ATTRIBUTED chunks from the not-yet-registered
+pid (the #308 spawn→setq race; replayed on setq; strangers drop).")
+(defvar grep-fallback-executable "grep")
+(defvar grep-fallback-i-probed nil "The -I feature detection ran.")
+(defvar grep-fallback-i-ok nil "The -I flag is supported.")
+
+(defun grep-fallback-kill-prior ()
+  "Cancel + kill the running per-file grep (the kill-first rule for
+the fallback side; rg-run and quit call this too — cross-backend)."
+  (setq grep-fallback-stopped t)
+  (if (numberp grep-fallback-pid)
+    (progn (signal grep-fallback-pid "SIGTERM") (setq grep-fallback-pid nil)))
+  nil)
+
+(defun grep-fallback-detect-i ()
+  "ONE-TIME -I probe: grep -I on /dev/null — the probe PATTERN finds
+nothing there, so exit 0 OR 1 (no-match) both mean the FLAG ran
+(supported); only ≥2 (the usage error of an unsupported flag) drops
+it — binary files then skipped by the first-line NUL check."
+  (if (not grep-fallback-i-probed)
+    (let ((r (condition-case nil
+                (shell-exec-argv
+                  (list grep-fallback-executable "-I" "-n" "-e" "x" "--" "/dev/null"))
+                (error () nil))))
+      (setq grep-fallback-i-probed t)
+      (setq grep-fallback-i-ok
+        (if (and (listp r) (= (length r) 3)
+                 (>= (nth 2 r) 0) (<= (nth 2 r) 1))
+          t nil))))
+  grep-fallback-i-ok)
+
+(defun grep-fallback-has-ascii-upper-p (pattern i)
+  ;; char-code scan: A=65 … Z=90 (the ASCII-only smart-case emulation).
+  (if (>= i (length pattern)) nil
+    (let ((cc (char-code (substring pattern i (+ i 1)))))
+      (if (and (>= cc 65) (<= cc 90)) t
+        (grep-fallback-has-ascii-upper-p pattern (+ i 1))))))
+
+(defun grep-fallback-case-args ()
+  "No ASCII uppercase → -i (rg smart-case parity for ASCII); any →
+case-sensitive. Unicode folding NOT attempted (the ADR's recorded
+divergence)."
+  (if (grep-fallback-has-ascii-upper-p grep-fallback-pattern 0)
+    (list)
+    (list "-i")))
+
+(defun grep-fallback-first-line-has-nul-p (file)
+  "The -I-unsupported branch's binary check (FIRST line only — the
+documented limitation): head -n 1, NUL via (hex-decode \"00\")."
+  (condition-case nil
+    (let* ((r (shell-exec-argv (list "head" "-n" "1" "--" file)))
+           (first (nth 0 r)))
+      (and (stringp first)
+           (< (length (nth 0 (string-split first (hex-decode "00"))))
+              (length first))))
+    (error () nil)))
+
+(defun grep-fallback-run (pattern scope)
+  "The fallback search (#309): enumerate (project-files-walk,
+DEFAULT_IGNORES applies), register, chain one grep per file.
+Empty enumeration completes no-matches WITHOUT spawning."
+  (if (not (grep-backend-available-p)) nil
+    (progn
+      (grep-fallback-kill-prior)
+      (grep-rg-kill-prior)
+      (grep-fallback-detect-i)
+      (let ((files (condition-case nil
+                      (project-files-walk scope)
+                      (error () (list)))))
+        (let ((gen (grep-buffer-register
+                     (hashmap "backend" "grep" "pattern" pattern "scope" scope
+                       "rerun" (lambda () (grep-fallback-run pattern scope))))))
+          (setq grep-fallback-gen gen)
+          (setq grep-fallback-pattern pattern)
+          (setq grep-fallback-queue files)
+          (setq grep-fallback-total (length files))
+          (setq grep-fallback-done-files 0)
+          (setq grep-fallback-matched-files 0)
+          (setq grep-fallback-binary-skipped 0)
+          (setq grep-fallback-partial "")
+          (setq grep-fallback-since-progress 25)
+          (setq grep-fallback-stopped nil)
+          (setq grep-fallback-file nil)
+          (setq grep-fallback-pending nil)
+          (if (= grep-fallback-total 0)
+            (grep-buffer-complete gen "no-matches" nil)
+            (grep-fallback-next)))))))
+
+(defun grep-fallback-pending-as-list ()
+  (if (null grep-fallback-pending) (list) grep-fallback-pending))
+
+(defun grep-fallback-replay-pending ()
+  "Replay OUR pid's stashed chunks (arrival order); strangers drop."
+  (if (numberp grep-fallback-pid)
+    (let ((ours ""))
+      (dolist (pair (reverse (grep-fallback-pending-as-list)))
+        (if (and (listp pair) (= (length pair) 2) (= (nth 0 pair) grep-fallback-pid))
+          (setq ours (concat ours (nth 1 pair)))))
+      (setq grep-fallback-pending nil)
+      (if (> (length ours) 0) (grep-fallback-filter grep-fallback-pid ours))))
+  nil)
+
+(defun grep-fallback-next ()
+  "Spawn the queue's next file (sequential, enumeration order)."
+  (if (or grep-fallback-stopped (null grep-fallback-queue))
+    (grep-fallback-finish)
+    (let ((file (car grep-fallback-queue)))
+      (setq grep-fallback-queue (cdr grep-fallback-queue))
+      (setq grep-fallback-file file)
+      (setq grep-fallback-partial "")
+      ;; The -I-unsupported binary check (first line only).
+      (if (and (not grep-fallback-i-ok) (grep-fallback-first-line-has-nul-p file))
+        (progn
+          (setq grep-fallback-done-files (+ grep-fallback-done-files 1))
+          (grep-fallback-next))
+        (let ((argv (append
+                      (list grep-fallback-executable "-n")
+                      (if grep-fallback-i-ok (list "-I") (list))
+                      (grep-fallback-case-args)
+                      (list "-e" grep-fallback-pattern "--" file))))
+          (let ((pid (condition-case nil
+                        (make-process
+                          :command argv
+                          :cwd "."
+                          :filter "editor/commands/grep/grep-fallback-filter"
+                          :stderr-filter "editor/commands/grep/grep-fallback-stderr"
+                          :sentinel "editor/commands/grep/grep-fallback-sentinel")
+                        (error (m) (concat "spawn error: " m)))))
+            (cond
+              ((numberp pid)
+                (progn
+                  (setq grep-fallback-pid pid)
+                  (grep-fallback-replay-pending)))
+              (t
+                ;; Spawn failure mid-sequence → #308 rollback (the
+                ;; prior generation's content restored).
+                (let ((gen grep-fallback-gen))
+                  (setq grep-fallback-gen nil)
+                  (setq grep-fallback-stopped t)
+                  (grep-buffer-rollback gen)
+                  (editor-set-status
+                    (concat "grep: grep spawn failed — "
+                      (if (stringp pid) pid "unknown error"))))))))))))
+
+(defun grep-fallback-filter (pid output)
+  "Line buffering; complete lines parsed as linenum:text (single
+operand — grep omits the filename). Unregistered pids stash
+PID-ATTRIBUTED (the #308 race pattern)."
+  (if (and (numberp grep-fallback-gen)
+           (numberp grep-fallback-pid)
+           (= pid grep-fallback-pid))
+    (progn
+      (let* ((joined (concat grep-fallback-partial output))
+             (lines (string-split joined "\n"))
+             (complete (grep-butlast lines))
+             (rest (if (null lines) "" (car (reverse lines)))))
+        (setq grep-fallback-partial rest)
+        (dolist (ln complete)
+          (grep-fallback-handle ln))))
+    (setq grep-fallback-pending
+      (cons (list pid output) (grep-fallback-pending-as-list))))
+  nil)
+
+(defun grep-fallback-stderr (pid _output)
+  "stderr is unused by the aggregation (per-file exit codes carry
+it); present for make-process parity."
+  nil)
+
+(defun grep-fallback-handle (ln)
+  "linenum:text — the FIRST colon terminates the number; match text
+may contain any characters (colons included). NUL in the text
+truncates there and counts as binary-skipped."
+  (if (> (length ln) 0)
+    (let ((colon (condition-case nil (string-match ":" ln) (error () nil))))
+      (if (and (numberp colon) (> colon 0))
+        (let ((num (condition-case nil
+                      (string-to-number (substring ln 0 colon))
+                      (error () nil))))
+          (if (and (numberp num) (> num 0))
+            (let* ((text (substring ln (+ colon 1) (length ln)))
+                   (clean (nth 0 (string-split text (hex-decode "00")))))
+              (if (< (length clean) (length text))
+                (setq grep-fallback-binary-skipped
+                  (+ grep-fallback-binary-skipped 1)))
+              (grep-buffer-append-hit grep-fallback-gen
+                (hashmap "file" grep-fallback-file
+                  "line" num "col" 1 "text" clean)))
+            nil))
+        nil))))
+
+(defun grep-fallback-sentinel (pid exit-code)
+  "Per-file aggregation: 0 = hits, 1 = no match (both chain); ≥2 =
+STOP → complete error naming the file + exit. Cancellation (the
+stopped flag) drops silently — a NEW run owns a new pid/gen."
+  (if (and (numberp grep-fallback-gen)
+           (numberp grep-fallback-pid)
+           (= pid grep-fallback-pid))
+    (progn
+      (setq grep-fallback-pid nil)
+      (if (> (length grep-fallback-partial) 0)
+        (progn
+          (grep-fallback-handle grep-fallback-partial)
+          (setq grep-fallback-partial "")))
+      (setq grep-fallback-done-files (+ grep-fallback-done-files 1))
+      (if grep-fallback-stopped
+        nil
+        (cond
+          ((and (>= exit-code 0) (<= exit-code 1))
+            (progn
+              (if (= exit-code 0)
+                (setq grep-fallback-matched-files
+                  (+ grep-fallback-matched-files 1)))
+              (setq grep-fallback-since-progress
+                (- grep-fallback-since-progress 1))
+              (if (<= grep-fallback-since-progress 0)
+                (progn
+                  (setq grep-fallback-since-progress 25)
+                  (grep-fallback-progress)))
+              (grep-fallback-next)))
+          (t
+            (progn
+              (setq grep-fallback-stopped t)
+              (grep-buffer-complete grep-fallback-gen "error"
+                (concat "grep exited "
+                  (number-to-string exit-code) " on "
+                  grep-fallback-file))))))))
+  nil)
+
+(defun grep-fallback-finish ()
+  "Final aggregation: any file matched → done (diagnostic K of N
+when K < N); none → no-matches."
+  (if (numberp grep-fallback-gen)
+    (if (> grep-fallback-matched-files 0)
+      (grep-buffer-complete grep-fallback-gen "done"
+        (if (< grep-fallback-matched-files grep-fallback-total)
+          (concat (number-to-string grep-fallback-matched-files) " of "
+            (number-to-string grep-fallback-total) " files matched")
+          nil))
+      (grep-buffer-complete grep-fallback-gen "no-matches" nil)))
+  nil)
+
+(defun grep-fallback-progress ()
+  "Rewrite the searching placeholder every 25 files (the streamed
+hits re-appended from the structural list)."
+  (if (member (grep-buffer-name) (buffer-list))
+    (progn
+      (grep-switch-in)
+      (buffer-set-read-only nil)
+      (grep-clear-buffer)
+      (buffer-append
+        (concat "grep " (hashmap-get grep-meta "pattern") " — searching… "
+          (number-to-string grep-fallback-done-files) "/"
+          (number-to-string grep-fallback-total) "\n"))
+      (dolist (h (grep-hits-get))
+        (buffer-append (concat (grep-hit-line h) "\n")))
+      (buffer-set-read-only t)
+      (grep-switch-out)))
+  nil)
+
+(defun grep-fallback-dump ()
+  "Diagnostics (the #308 discipline)."
+  (concat "gen=" (if (numberp grep-fallback-gen) (number-to-string grep-fallback-gen) "nil")
+    " pid=" (if (numberp grep-fallback-pid) (number-to-string grep-fallback-pid) "nil")
+    " done=" (number-to-string grep-fallback-done-files)
+    "/" (number-to-string grep-fallback-total)
+    " matched=" (number-to-string grep-fallback-matched-files)
+    " binskip=" (number-to-string grep-fallback-binary-skipped)
+    " i-ok=" (if grep-fallback-i-ok "t" "nil")))
+
+(defun grep-fallback-executable-set! (v)
+  (setq grep-fallback-executable v)
+  ;; A different grep binary → re-probe -I.
+  (setq grep-fallback-i-probed nil)
+  (setq grep-fallback-i-ok nil)
+  v)
+
+(defun grep-fallback-state! (i-probed i-ok)
+  "A test seam: force the -I detection state directly (module
+defvars are not setq-able across the boundary)."
+  (setq grep-fallback-i-probed i-probed)
+  (setq grep-fallback-i-ok i-ok)
+  t)
 
 (provide "editor/commands/grep")
 )
