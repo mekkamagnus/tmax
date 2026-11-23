@@ -5,15 +5,15 @@
           fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
           fikra-revert-confirm-table fikra-revert-confirm-accept
           fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed fikra-last-completed-turn fikra-turn-diff-for
-          fikra-diff-turn-cmd-next fikra-diff-turn-cmd-prev fikra-diff-facelines fikra-diff-render fikra-diff-render-parts)
+          fikra-diff-turn-cmd-next fikra-diff-turn-cmd-prev fikra-diff-facelines fikra-diff-render fikra-diff-render-parts fikra-diff-render-raw)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
 ;; working tree): the paths changed since the stored turn-begin baseline
 ;; drive the diff — `git diff HEAD -- <paths>` for tracked changes plus
-;; full content for new untracked files — COLOR-PRESERVED (git
-;; --color=always; the chat established buffers carry ANSI) in a
-;; read-only *Fikra-Diff* buffer.
+;; full content for new untracked files — SHARED-FACE (git
+;; --no-color + the #313 grammar helper) in a read-only
+;; *Fikra-Diff* buffer.
 
 (require-module editor/fikra/diff-face)
 
@@ -393,11 +393,36 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
 (defun when-string (s)
   (if (and (stringp s) (> (length s) 0)) s ""))
 
+(defun fikra-diff-render-raw (content)
+  "The viewer's buffer lifecycle WITHOUT the facelines wrap —
+render-parts drives this (its parts are already verbatim /
+pre-faced; re-wrapping would strip the summary's own palette and
+re-face it — the gate-r2 decisive finding)."
+  (if (not (member fikra-diff-buffer-name (buffer-list)))
+    (buffer-create fikra-diff-buffer-name))
+  (buffer-switch fikra-diff-buffer-name)
+  (buffer-set-read-only nil)
+  (condition-case nil
+    (let ((count (buffer-line-count)))
+      (if (> count 1)
+        (buffer-delete-range 0 0 count 0)
+        (let ((l (buffer-line 0)))
+          (if (> (length l) 0)
+            (buffer-delete-range 0 0 0 (length l))))))
+    (error () nil))
+  (if (> (length content) 0)
+    (buffer-append content))
+  (buffer-set-read-only t)
+  (editor-set-mode "normal")
+  (fikra-diff-ensure-keymap)
+  (editor-set-status "Fikra: turn diff"))
+
 (defun fikra-diff-render-parts (summary patch footer)
-  "gate r1: the viewer's OWN summary/footer blocks pass through
-VERBATIM (their palette survives); only the GIT PATCH strips +
-faces through the shared grammar."
-  (fikra-diff-render
+  "gate r1+r2: the viewer's OWN summary/footer blocks pass through
+VERBATIM (their palette survives — the parts bypass the facelines
+wrap); only the GIT PATCH strips + faces (the callers call
+facelines on the raw patch BEFORE composing)."
+  (fikra-diff-render-raw
     (concat (when-string summary) (when-string patch) (when-string footer))))
 
 (defun fikra-diff-render (content)

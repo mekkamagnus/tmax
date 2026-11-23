@@ -144,10 +144,12 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
     // then append into a scratch buffer — avoids the render path's
     // read-only lifecycle entirely.
     const hdr = Buffer.from("\u001b[1;36mmy header\u001b[0m\n", "utf8").toString("hex");
-    e(editor, `(condition-case nil (fikra/diff/fikra-diff-render-parts (hex-decode "${hdr}") "+added" "") (error (m) (concat "THREW:" m)))`);
+    e(editor, `(condition-case nil (fikra/diff/fikra-diff-render-parts (hex-decode "${hdr}") (fikra/diff/fikra-diff-facelines "+added") "") (error (m) (concat "THREW:" m)))`);
     e(editor, '(buffer-switch "*Fikra-Diff*")');
     const txt = String(bufferText(editor));
-    expect(txt).toContain("my header\u001b[0m"); // the summary's OWN face survived
+    // gate r2: pin the PALETTE BYTES (the face-agnostic pin passed
+    // under the re-face defect).
+    expect(txt).toContain("\u001b[1;36mmy header"); // the summary's OWN face — not dimmed
     expect(txt).toContain("\u001b[32m+added"); // the patch faced
   });
 });
