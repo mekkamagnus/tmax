@@ -123,7 +123,9 @@ outside a class, an EMPTY class [], or an unterminated class → nil
           (if (string-prefix-p tail "]")
             nil
             (grep-consult-glob-scan tail (concat acc "[") t)))
-        ((or (string= c "^") (string= c "\\"))
+        ((or (string= c "^") (string= c "\\") (string= c "]"))
+          ;; valve r4: a bare ] outside a class too — Annex-B-literal
+          ;; was non-fnmatch; untranslatable (ignored + noted).
           nil)
         ((or (string= c ".") (string= c "$") (string= c "+") (string= c "(")
              (string= c ")") (string= c "{") (string= c "}") (string= c "|"))
@@ -263,14 +265,44 @@ backend preflight, then the debounced live prompt."
 (defun grep-consult-style-filter (input candidates)
   "The consult category's completion style (valve r3): components
 match against the PATTERN side only — the glob side would zero the
-candidate list (no display contains a literal '#*.lisp'). An empty
+candidate list (no display contains a literal '#*.lisp'). valve r4:
+components are rewritten LITERAL ('='-prefixed, orderless operator
+chars stripped) — a grep pattern like '^foo' used to hit orderless's
+PREFIX OPERATOR and show no candidates for a hit it found. An empty
 pattern keeps everything (glob-only queries navigate all hits).
 No-match returns the EMPTY LIST, never nil (the nil convention
 means 'try the next style' — this category has none, and a nil
 matches list breaks the session length reads)."
   (let ((r (editor/completion/orderless/orderless-filter
-             (grep-consult-pattern-of input) candidates)))
+             (grep-consult-literal-pattern (grep-consult-pattern-of input))
+             candidates)))
     (if (null r) (list) r)))
+
+(defun grep-consult-literal-pattern (pattern)
+  ;; Every space-separated component: strip leading orderless
+  ;; operator chars (= ^ ~ , & !), then '='-prefix for LITERAL
+  ;; substring matching — the candidate list narrows by what the
+  ;; user typed, nothing more.
+  (if (= (length pattern) 0)
+    pattern
+    (string-join " "
+      (grep-consult-literal-components (string-split pattern " ") (list)))))
+
+(defun grep-consult-literal-components (components acc)
+  (if (null components)
+    (reverse-of acc)
+    (grep-consult-literal-components (cdr components)
+      (cons (concat "=" (grep-consult-strip-operators (car components)))
+        acc))))
+
+(defun grep-consult-strip-operators (component)
+  (if (= (length component) 0)
+    component
+    (let ((c (substring component 0 1)))
+      (if (or (string= c "=") (string= c "^") (string= c "~")
+              (string= c ",") (string= c "&") (string= c "!"))
+        (substring component 1 (length component))
+        component))))
 
 (defun grep-consult-table (input action)
   "valve r2: the prompt's candidates ARE the current generation's
@@ -411,16 +443,31 @@ no-op; the newer generation already completed (snapshot moved on)
 
 (defun grep-consult-files-in (scope)
   "Enumerate the tracked+untracked files under SCOPE (the glob side
-matches against full relative path strings). valve r3:
-core.quotepath=false — git quotes non-ASCII paths ('é.lisp' came
-back escaped and the glob missed it)."
+matches against full relative path strings). valve r4: NUL-DELIMITED
+(-z) — git still QUOTES names with tabs/newlines/quotes/backslashes
+under core.quotepath=false, and the reader cannot express a literal
+NUL, so the delimiter comes from (hex-decode \"00\")."
   (condition-case nil
-    (grep-consult-split-lines
+    (grep-consult-split-nul
       (nth 0 (shell-exec-argv
-                (list "git" "-c" "core.quotepath=false" "-C" scope "ls-files"
+                (list "git" "-C" scope "ls-files" "-z"
                       "--others" "--exclude-standard" "--cached")
                 scope)))
     (error () (list))))
+
+(defun grep-consult-split-nul (s)
+  (if (or (not (stringp s)) (= (length s) 0))
+    (list)
+    (grep-consult-drop-trailing-nul (string-split s (hex-decode "00")))))
+
+(defun grep-consult-drop-trailing-nul (files)
+  ;; -z terminates EVERY entry (a trailing empty after the last NUL).
+  (if (null files)
+    (list)
+    (let ((rev (reverse-of files)))
+      (if (and (= (length (car rev)) 0) (> (length files) 1))
+        (reverse-of (cdr rev))
+        files))))
 
 (defun grep-consult-split-lines (s)
   (if (or (not (stringp s)) (= (length s) 0)
@@ -439,6 +486,16 @@ back escaped and the glob missed it)."
     (if (editor/commands/grep-consult/grep-consult-glob-match-p (car files) entries)
       (grep-consult-filter-scan (cdr files) entries (cons (car files) acc))
       (grep-consult-filter-scan (cdr files) entries acc))))
+
+(defun grep-consult-note! (msg)
+  "Set the status AND record it in the session ('lastNote') — the
+status is transient (a completion overwrites it within
+milliseconds); the record is assertable after the fact."
+  (editor-set-status msg)
+  (if (not (null grep-consult-state))
+    (setq grep-consult-state
+      (hashmap-set grep-consult-state "lastNote" msg)))
+  msg)
 
 (defun grep-consult-fire ()
   "The debounce fired: run the parsed query through the #308
@@ -460,10 +517,12 @@ glob-only queries DO run (the empty pattern registers per #307)."
               ;; whenever ANY entry was ignored (a valid entry
               ;; alongside a bare '!' or an untranslatable filters
               ;; SILENTLY otherwise), not only in the all-ignored
-              ;; case.
+              ;; case. valve r4: also RECORDED in the session state
+              ;; (lastNote) — the status is transient (the completion
+              ;; overwrites it); tests and callers read the record.
               (if (and (nth 2 parsed)
                        (not (string= (nth 2 parsed) "empty")))
-                (editor-set-status "glob entry ignored — filtering with the rest")
+                (grep-consult-note! "glob entry ignored — filtering with the rest")
                 nil)
               (let ((files
                       (if (and (= (length (nth 0 parsed)) 0)
@@ -474,7 +533,7 @@ glob-only queries DO run (the empty pattern registers per #307)."
                         ;; + the note. A valid negative + an ignored entry
                         ;; ('!*.txt,!') is NOT this case — it filters.
                         (progn
-                          (editor-set-status "glob entries ignored — searching all files")
+                          (grep-consult-note! "glob entries ignored — searching all files")
                           (grep-consult-files-in grep-consult-scope))
                         (grep-consult-filtered-files grep-consult-scope parsed))))
                 (if (= (length files) 0)

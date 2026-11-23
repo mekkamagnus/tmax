@@ -312,17 +312,19 @@ describe("#311 — the on-input state machine", () => {
     expect(st(editor)).toContain("2 hits");
     // The candidates ARE the hits: the prompt shows rows (valve r2
     // found the table always empty — Up/Down selected nothing).
-    const rows0 = (editor.getState() as unknown as { minibufferView?: { rows?: { selected?: boolean }[] } }).minibufferView?.rows ?? [];
+    const rows0 = (editor.getState() as unknown as { minibufferView?: { rows?: { selected?: boolean; segments?: { text?: string }[] }[] } }).minibufferView?.rows ?? [];
     expect(rows0.length).toBe(2);
-    // Down ×2: from the raw-prompt selection (-1) the FIRST Down
-    // selects the top hit, the SECOND the b.lisp hit; the echo
-    // names it.
-    await editor.handleKey("Down");
-    await editor.handleKey("Down");
+    // valve r4: ORDER-AGNOSTIC — find the b.lisp row's index (rg's
+    // file order is not contractual), press Down until IT is
+    // selected (from the raw-prompt selection -1: idx+1 presses).
+    const rowText = (r: { segments?: { text?: string }[] }) => (r.segments ?? []).map((s) => s.text ?? "").join("");
+    const bIdx = rows0.findIndex((r) => rowText(r).includes("b.lisp"));
+    expect(bIdx).toBeGreaterThanOrEqual(0);
+    for (let i = 0; i < bIdx + 1; i++) await editor.handleKey("Down");
     const rows1 = (editor.getState() as unknown as { minibufferView?: { rows?: { selected?: boolean }[] } }).minibufferView?.rows ?? [];
-    expect(rows1[1]?.selected).toBe(true);
+    expect(rows1[bIdx]?.selected).toBe(true);
     expect(st(editor)).toContain("b.lisp");
-    // RET jumps to the SELECTED hit (b.lisp — not the top a.txt).
+    // RET jumps to the SELECTED hit (b.lisp — not the top hit).
     await editor.handleKey("Enter");
     expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
     const cur = String(e(editor, "(buffer-current)").value);
@@ -382,7 +384,9 @@ describe("#311 — the on-input state machine", () => {
     }
     expect(sawHits).toBe(true);
     expect(st(editor)).toContain("1 hits"); // the valid entry still filters
-    expect(sawNote).toBe(true); // …and the note fired (was: all-ignored only)
+    // …and the note fired (was: all-ignored only) — asserted via the
+    // durable lastNote record (the status poll was flaky under load).
+    expect(String(e(editor, '(hashmap-get (editor/commands/grep-consult/grep-consult-state-get) "lastNote")').value)).toContain("glob entry ignored");
   });
 
   test("ACCEPT during a pending generation (valve r3): the selected candidate resolves against the RESTORED completed hits", async () => {
@@ -394,6 +398,11 @@ describe("#311 — the on-input state machine", () => {
       await new Promise((r) => setTimeout(r, 25));
     }
     expect(st(editor)).toContain("2 hits");
+    // valve r4: ORDER-AGNOSTIC — the expected target is whatever the
+    // TOP hit's file is (rg's file order is not contractual).
+    // Captured NOW (the pending generation below empties the list).
+    const topFile = String(e(editor, "(nth 0 (nth 0 (editor/commands/grep/grep-hits-get)))").value).split("/").pop() ?? "";
+    expect(topFile.length).toBeGreaterThan(0);
     // Extend the query ('consul' still matches both displays) and
     // stall the next fire — a pending gen2 that never completes…
     const shim = join(process.cwd(), "stalled-rg.sh");
@@ -414,7 +423,7 @@ describe("#311 — the on-input state machine", () => {
     await editor.handleKey("Enter");
     expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
     const cur = String(e(editor, "(buffer-current)").value);
-    expect(cur).toContain("a.txt");
+    expect(cur).toContain(topFile);
   });
 
   test("ESCAPE after a completed fire (gate r2): the cancel path RUNS — state cleared, *grep* STAYS (snapshot)", async () => {
@@ -501,7 +510,9 @@ describe("#311 — the on-input state machine", () => {
     // BOTH files searched (the inverted zero-files behavior is gone).
     expect(sawHits).toBe(true);
     expect(st(editor)).toContain("2 hits");
-    // The status note flashed at fire time.
+    // valve r4: the note is RECORDED (lastNote) — the transient
+    // status poll was timing-flaky under load; the record is not.
+    expect(String(e(editor, '(hashmap-get (editor/commands/grep-consult/grep-consult-state-get) "lastNote")').value)).toContain("glob entries ignored");
     expect(sawNote).toBe(true);
   });
 

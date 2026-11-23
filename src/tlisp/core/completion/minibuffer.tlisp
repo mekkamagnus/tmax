@@ -185,14 +185,15 @@ loop instead of one interpreter round-trip per candidate (~6µs each)."
 (defun minibuffer-refresh-after-input (session)
   (progn
     (minibuffer-state-set (hashmap-set session "scroll" 0))
-    (minibuffer-refresh)
-    ;; #311: the per-keystroke hook — registered at prompt open,
-    ;; torn down on close; LATE callbacks (after teardown) drop
-    ;; silently (the guard).
+    ;; valve r4 (#311): the OWNER hook runs BEFORE the refresh — the
+    ;; owner may kill a pending search and roll the producer back to
+    ;; the completed generation; the refresh then reads the RESTORED
+    ;; table instead of the discarded generation's stale hits.
     (condition-case nil
       (if minibuffer-on-input-hook
         (funcall minibuffer-on-input-hook (hashmap-get session "input")))
-      (error () nil))))
+      (error () nil))
+    (minibuffer-refresh)))
 
 (defun minibuffer-insert-character (character)
   (let ((session (minibuffer-state-get)))
