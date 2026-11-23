@@ -71,7 +71,6 @@
       (condition-case nil
         (progn
           (require-module fikra/transient)
-          (require-module editor/fikra/diff-line-index)
           (fikra/transient/fikra-transient-note-chunks id n streamed))
         (error () nil))
       nil)))
@@ -555,7 +554,8 @@ bumps the revision the TUI poll consumes."
   (fikra-event-batch-has-final-p events))
 
 (defun fikra-event-emit-batch-for (id events)
-  (require-module fikra/thread)
+  (require-module editor/fikra/diff-line-index)
+(require-module fikra/thread)
   (let ((target-root (fikra/thread/fikra-thread-field-root-of id))
         (target-buffer (fikra/thread/fikra-thread-buffer-name-of id)))
     ;; Gate round-2: unknown id (nil root) → DROP, never guess.
@@ -800,6 +800,9 @@ what the render emits."
         (let ((l (buffer-line 0)))
           (if (> (length l) 0)
             (buffer-delete-range 0 0 0 (length l))))))
+    ;; gate r1: REPLAY repopulates FROM SCRATCH (the spec's normative
+    ;; clause) — the stale slot clears before the re-scan.
+    (editor/fikra/diff-line-index/diff-line-index-clear-buffer (buffer-current))
     (let ((rbase (buffer-line-count)))
       (if (> (length text) 0)
         (buffer-append text))
@@ -1030,9 +1033,14 @@ id-less completed thoughts too).")
 ;; (after face-stripping): "± <path> +<adds> -<dels>" — the path is
 ;; recorded AS EMITTED (resolved against the thread root at RET).
 (defun fikra-event-index-scan (buffer-name base-line text)
+  ;; gate r1 OFF-BY-ONE: base-line is the PRE-APPEND
+  ;; (buffer-line-count), whose last line is the (empty) line the
+  ;; append STARTS on — the first appended line's VISIBLE index is
+  ;; base-line - 1. An empty buffer counts 1; appending "row\n"
+  ;; makes the count 2 with the row visible at line 0.
   (condition-case nil
     (fikra-event-index-scan-lines
-      (string-split text "\n") buffer-name base-line 0)
+      (string-split text "\n") buffer-name (- base-line 1) 0)
     (error () nil)))
 
 (defun fikra-event-index-scan-lines (lines buffer-name base-line i)
@@ -1051,8 +1059,27 @@ id-less completed thoughts too).")
   ;; at the LAST " +" before the trailing " -<dels>" — char-scanned
   ;; (the reader strips backslashes; no regex).
   (if (and (> (length line) 2) (string= (substring line 0 2) "± "))
-    (fikra-event-index-path-scan (substring line 2 (length line)) "")
+    (fikra-event-index-trim
+      (fikra-event-index-path-scan (substring line 2 (length line)) ""))
     nil))
+
+(defun fikra-event-index-trim (s)
+  ;; gate r1 parser edges: a double space after '± ' or a trailing
+  ;; space must not poison the path.
+  (if (not (stringp s))
+    s
+    (fikra-event-index-trim-tail (fikra-event-index-trim-head s))))
+
+(defun fikra-event-index-trim-head (s)
+  (if (and (> (length s) 0) (string= (substring s 0 1) " "))
+    (substring s 1 (length s))
+    s))
+
+(defun fikra-event-index-trim-tail (s)
+  (if (and (> (length s) 0)
+           (string= (substring s (- (length s) 1) (length s)) " "))
+    (substring s 0 (- (length s) 1))
+    s))
 
 (defun fikra-event-index-path-scan (rest acc)
   ;; The boundary: " +<digits> -<digits>" to EOL (OUR renderer's

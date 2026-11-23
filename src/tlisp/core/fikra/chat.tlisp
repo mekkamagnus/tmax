@@ -285,10 +285,16 @@ contain the line) and say so."
 ;; ^ closes: if-arg self, progn(1) t-clause(2) cond(3) resolved-let(4) outer-let(5) defun(6)
 
 (defun fikra-file-line-count (path)
-  "The file's line count (old-side landing viability)."
+  "The file's line count (old-side landing viability). gate r1:
+drop the trailing-newline phantom (string-split of \"l0..l4\\n\"
+counts 6; the file has 5 lines)."
   (condition-case nil
-    (length (string-split
-              (read-file-content path) "\n"))
+    (let ((parts (string-split
+                   (read-file-content path) "\n")))
+      (if (and (> (length parts) 0)
+               (= (length (last parts)) 0))
+        (- (length parts) 1)
+        (length parts)))
     (error () 0)))
 
 (defun fikra-file-path-in-line-p (line)

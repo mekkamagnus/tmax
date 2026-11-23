@@ -171,13 +171,19 @@ describe("#312 — the FAEP emit-side recording (population-chat)", () => {
     e(editor, `(fikra/event/fikra-event-index-scan "*Fikra*" ${base} (hex-decode "${hex}"))`);
     // The recorded line = the buffer's pre-append line count (an
     // empty buffer counts 1) + the ± row's offset (0).
-    const recLine = Number(e(editor, '(nth 0 (editor/fikra/diff-line-index/diff-line-index-lines "*Fikra*"))').value);
-    expect(Number.isFinite(recLine)).toBe(true);
+        let visLine = -1;
+    const total = Number(e(editor, "(buffer-line-count)").value);
+    for (let li = 0; li < total; li++) {
+      if (String(e(editor, `(buffer-line ${li})`).value).includes("\u00b1")) { visLine = li; break; }
+    }
+    expect(visLine).toBeGreaterThanOrEqual(0);
+const recLine = Number(e(editor, '(nth 0 (editor/fikra/diff-line-index/diff-line-index-lines "*Fikra*"))').value);
+    expect(recLine).toBe(visLine);
     const hit = e(editor, `(hashmap-get (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" ${recLine}) "path")`);
     expect(String(hit.value)).toContain("real2.ts");
     // RET follows the recorded row.
     writeFileSync(join(process.cwd(), "real2.ts"), "x\n");
-    e(editor, `(cursor-move ${recLine} 0)`);
+    e(editor, `(cursor-move ${visLine} 0)`);
     e(editor, "(fikra/chat/fikra-follow-link)");
     expect(String(e(editor, "(buffer-current)").value)).toContain("real2.ts");
   });
