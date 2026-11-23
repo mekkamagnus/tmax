@@ -24,7 +24,6 @@ const setup = async (): Promise<Editor> => {
   const ed = await createStartedEditor("");
   ed.setClientLaunchDir(dir);
   e(ed, "(require-module editor/fikra/diff-line-index)");
-  const cr = ed.executeTlisp ? null : null;
   e(ed, "(require-module fikra/chat)");
   idx(ed, "diff-line-index-reset");
   // The registry's LAZY INVALIDATION drops slots for buffers that
