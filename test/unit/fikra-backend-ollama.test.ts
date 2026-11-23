@@ -3729,6 +3729,34 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(await untilStatus(ed, "idle", 80)).toBe("idle");
   });
 
+  // Codex gate r156 round 4 (P2): my limit said no path under .tmax (root
+  // or nested) is named. Untrue twice over — the walk excluded only the
+  // ROOT .tmax, and more basically: a hard-linked inode shares one ctime,
+  // so every alias is scanned, and an alias under a nested .tmax lies in
+  // NO tree — the first pass reports it, correctly, because its mode
+  // really did change and no checkpoint holds that path. The walk now
+  // excludes .tmax at any depth; this pins the true behaviour.
+  tt("a hard link under a NESTED .tmax shares the inode's change — reported as a path no tree holds (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "target"), "t\n");
+    mkdirSync(join(process.cwd(), "nested", ".tmax"), { recursive: true });
+    execFileSync("ln", ["target", "nested/.tmax/alias"]);
+    e(ed, '(fikra/chat/fikra-turn-send "lock it")');
+    call(ed, 555, "chmod 600 target && chmod 600 base.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("555");
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('"reason":"3 path(s) the checkpoint cannot hold changed — not revertable: '),
+    ]);
+    expect(errorRows(ed)[0]).toContain("nested/.tmax/alias");
+    expect(errorRows(ed)[0]).toContain("target");
+    expect(errorRows(ed)[0]).toContain("base.txt");
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "locked");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
   // …nor a rewrite that leaves everything as it was, mtime included.
   tt("a preserved-mtime copy over an IDENTICAL tracked file is not reported (r156)", async () => {
     const ed = await armed();

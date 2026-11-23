@@ -747,7 +747,10 @@ with its post-exit capture.")
             ;; see the declared limit.
             "awk 'NR==FNR {b[$1 \" \" $2]=$0; next} (($1 \" \" $2) in b) && b[$1 \" \" $2]!=$0 {print $2}' " modes " " cand " | sort -u | head -100 > " inodes " ; "
             "if [ -s " inodes " ] ; then "
-            "find . -not -type d -not -path '*/.git/*' -not -path './.tmax/*' "
+            ;; r156f (codex gate round 4, reproduced): .tmax at ANY depth —
+            ;; the root-only exclusion named a hard link placed under a
+            ;; NESTED .tmax. The changed file carries other names.
+            "find . -not -type d -not -path '*/.git/*' -not -path '*/.tmax/*' "
             (hex-decode "5c") "( $(sed -e 's/^/-inum /' -e '$!s/$/ -o/' " inodes " | xargs) " (hex-decode "5c") ") -print0 > " meta " ; "
             "fi ; fi ; rm -f " modes " " cand " " inodes " ; "
             ;; r155d: ignored entries that appeared or vanished (the scan
