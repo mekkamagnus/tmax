@@ -719,9 +719,11 @@ as ours). The STDERR stash replays the same way (valve r1)."
   nil)
 
 (defun grep-rg-run (pattern scope)
-  "The rg search: provisional registration, spawn, streaming."
+  "The rg search: provisional registration, spawn, streaming.
+Valve r2 (#309): kill-on-refusal here too (the rerun closure
+bypasses grep-search)."
   (if (not (grep-backend-available-p))
-    nil
+    (progn (grep-rg-kill-prior) (grep-fallback-kill-prior) nil)
     (progn
       ;; 0. Kill the prior process FIRST (re-runs and new searches
       ;;    alike; BOTH backends' — #309), and close the pid guard
@@ -992,8 +994,11 @@ documented limitation): head -n 1, NUL via (hex-decode \"00\")."
 DEFAULT_IGNORES applies), register, chain one grep per file.
 Empty enumeration completes no-matches WITHOUT spawning. Gate r1:
 a MISSING scope errors honestly (rg exits 2 'No such file' — the
-walk's [] used to complete no-matches silently)."
-  (if (not (grep-backend-available-p)) nil
+walk's [] used to complete no-matches silently). Valve r2: the
+kill-on-refusal lives HERE (not only in grep-search) — 'g'-rerun
+calls the registered closure directly."
+  (if (not (grep-backend-available-p))
+    (progn (grep-rg-kill-prior) (grep-fallback-kill-prior) nil)
     (progn
       (grep-fallback-kill-prior)
       (grep-rg-kill-prior)
@@ -1015,47 +1020,46 @@ walk's [] used to complete no-matches silently)."
         ;; an OS pid-reuse collision).
         (setq grep-fallback-stderr-pending nil)
         (setq grep-fallback-stderr "")
-        (if (not (= 0 (condition-case nil
-                          (nth 2 (shell-exec-argv (list "test" "-e" scope)))
-                          (error () 1))))
+        ;; valve r2: NATIVE guards first (file-exists-p, the stat
+        ;; plist's isDirectory at index 7 (6 is the symbol)) — ZERO processes for the
+        ;; missing/file cases; the ONE test(1) spawn happens only
+        ;; when the walk returned nothing (disambiguating a
+        ;; GENUINELY empty dir from an unreadable one).
+        (if (not (file-exists-p scope))
           (progn
             (setq grep-fallback-queue nil)
             (setq grep-fallback-total 0)
             (grep-buffer-complete gen "error"
               (concat "no such directory: " scope)))
-        (if (not (= 0 (condition-case nil
-                          (nth 2 (shell-exec-argv (list "test" "-d" scope)))
-                          (error () 1))))
+        (if (not (condition-case nil (nth 7 (file-stat scope)) (error () nil)))
           (progn
-            ;; gate r3: a READABLE FILE as scope passed -e/-r but
-            ;; the walk's readdirSync throws ENOTDIR (swallowed to
-            ;; []) — silent no-matches where rg searches the file.
+            ;; gate r3: a READABLE FILE as scope — the walk's
+            ;; readdirSync throws ENOTDIR (swallowed to []) —
+            ;; silent no-matches where rg searches the file.
             (setq grep-fallback-queue nil)
             (setq grep-fallback-total 0)
             (grep-buffer-complete gen "error"
               (concat "not a directory: " scope
                 " (the fallback searches directories; rg handles single files)")))
-          (if (not (= 0 (condition-case nil
-                          (nth 2 (shell-exec-argv (list "test" "-r" scope)))
-                          (error () 1))))
-            (progn
-              (setq grep-fallback-queue nil)
-              (setq grep-fallback-total 0)
-              (grep-buffer-complete gen "error"
-                (concat "unreadable directory: " scope)))
-            (let ((files (condition-case nil
-                            (project-files-walk scope)
-                            (error () (list)))))
-              (setq grep-fallback-queue files)
-              (setq grep-fallback-total (length files))
-              (if (= grep-fallback-total 0)
-                (grep-buffer-complete gen "no-matches" nil)
+          (let ((files (condition-case nil
+                          (project-files-walk scope)
+                          (error () (list)))))
+            (setq grep-fallback-queue files)
+            (setq grep-fallback-total (length files))
+            (if (= grep-fallback-total 0)
+              (if (not (= 0 (condition-case nil
+                                (nth 2 (shell-exec-argv (list "test" "-r" scope)))
+                                (error () 1))))
                 (progn
-                  ;; valve r1: the -I probe DEFERRED until files
-                  ;; exist — an empty scope spawns NOTHING (the
-                  ;; no-spawn rule covers the probe).
-                  (grep-fallback-detect-i)
-                  (grep-fallback-next)))))))))))
+                  (setq grep-fallback-total 0)
+                  (grep-buffer-complete gen "error"
+                    (concat "unreadable directory: " scope)))
+                (grep-buffer-complete gen "no-matches" nil))
+              (progn
+                ;; valve r1: the -I probe DEFERRED until files
+                ;; exist — an empty scope spawns NOTHING.
+                (grep-fallback-detect-i)
+                (grep-fallback-next))))))))))
 
 (defun grep-fallback-pending-as-list ()
   (if (null grep-fallback-pending) (list) grep-fallback-pending))
