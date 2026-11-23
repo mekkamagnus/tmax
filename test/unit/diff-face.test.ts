@@ -96,19 +96,18 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
     const preview = rows.map(([, s]) => s).join("\\n");
     const rendered = String(e(editor, `(condition-case nil (fikra/event/fikra-event-render-line (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "edited f.ts") (list "preview" "${preview}"))) (error (m) (concat "THREW:" m)))`).value);
     expect(rendered).not.toContain("THREW");
-    const norm = (cls: string, s: string) => `${cls}|${s.replace(/^[\s+-]+/, "")}`;
+    const cls = (l: string) => String(e(editor, `(condition-case nil (editor/fikra/diff-face/diff-classify-line "${l}") (error (m) "?"))`).value);
+    const norm = (c: string, s: string) => `${c}|${s.replace(/^[\s+-]+/, "")}`;
     const chatPairs: string[] = [];
     for (const l of strip(rendered).split("\n")) {
       const t = l.replace(/^ {4}/, "");
-      if (t.startsWith("+")) chatPairs.push(norm("add", t));
-      else if (t.startsWith("-")) chatPairs.push(norm("remove", t));
+      if (t.startsWith("+") || t.startsWith("-")) chatPairs.push(norm(cls(t), t));
     }
     const viewer = String(e(editor, `(condition-case nil (fikra/diff/fikra-diff-facelines "${preview}") (error (m) (concat "THREW:" m)))`).value);
     expect(viewer).not.toContain("THREW");
     const viewerPairs: string[] = [];
     for (const l of strip(viewer).split("\n")) {
-      if (l.startsWith("+")) viewerPairs.push(norm("add", l));
-      else if (l.startsWith("-")) viewerPairs.push(norm("remove", l));
+      if (l.startsWith("+") || l.startsWith("-")) viewerPairs.push(norm(cls(l), l));
     }
     expect(chatPairs).toEqual(["add|added line", "remove|removed line", "add|второй added ünïcode"]);
     expect(viewerPairs).toEqual(chatPairs);
@@ -125,9 +124,16 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
     const kmap = e(editor, '(editor/keymaps/buffer-keymap "*Fikra-Diff*")');
     expect(String(kmap.value)).not.toBe("nil");
     // gate r1: pin the actual bindings (n/N/r/[/]), not just non-nil.
-    for (const k of ["n", "N", "r", "]", "["]) {
+    const expected: Record<string, string> = {
+      n: "(fikra/diff/fikra-diff-next)",
+      N: "(fikra/diff/fikra-diff-prev)",
+      r: "(fikra/diff/fikra-diff-revert-turn)",
+      "]": "(fikra/diff/fikra-diff-turn-next)",
+      "[": "(fikra/diff/fikra-diff-turn-prev)",
+    };
+    for (const [k, want] of Object.entries(expected)) {
       const cmd = String(e(editor, `(hashmap-get (hashmap-get (editor/keymaps/buffer-keymap "*Fikra-Diff*") "bindings") "${k}")`).value);
-      expect(cmd).toContain("fikra/diff/");
+      expect(cmd).toBe(want); // exact — swapped bindings fail (valve r1)
     }
   });
 
@@ -150,5 +156,15 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
     // under the re-face defect).
     expect(txt).toContain("\u001b[1;36mmy header"); // the summary's OWN face — not dimmed
     expect(txt).toContain("\u001b[32m+added"); // the patch faced
+  });
+});
+describe("#313 valve r1", () => {
+  test("join PRESERVES leading empty lines (valve r1's probe: '\\n+a' keeps the blank)", async () => {
+    editor = await setup();
+    e(editor, "(require-module fikra/diff)");
+    const r = e(editor, '(condition-case nil (fikra/diff/fikra-diff-facelines "\\n+a") (error (m) (concat "THREW:" m)))');
+    const v = String(r.value);
+    expect(v.startsWith("\n")).toBe(true); // the leading blank survives
+    expect(v).toContain("+a");
   });
 });

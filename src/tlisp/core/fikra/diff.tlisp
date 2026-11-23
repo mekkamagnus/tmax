@@ -380,15 +380,19 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
 
 (defun fikra-diff-join-lines (lines)
   ;; between-lines separators only (reverse already applied by scan).
-  (fikra-diff-join-scan lines ""))
+  ;; valve r1: an explicit FIRST flag — the empty-acc check dropped
+  ;; LEADING empty lines (a leading "" is a real blank line, not
+  ;; 'nothing yet').
+  (fikra-diff-join-scan lines "" t))
 
-(defun fikra-diff-join-scan (lines acc)
+(defun fikra-diff-join-scan (lines acc first)
   (if (null lines)
     acc
     (fikra-diff-join-scan (cdr lines)
-      (if (= (length acc) 0)
+      (if first
         (car lines)
-        (concat acc "\n" (car lines))))))
+        (concat acc "\n" (car lines)))
+      nil)))
 
 (defun when-string (s)
   (if (and (stringp s) (> (length s) 0)) s ""))
