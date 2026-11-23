@@ -3318,6 +3318,11 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     // A regular file NAMED .tmax below the root is the user's — kept.
     expect(tree).toContain("tools/.tmax");
     expect(existsSync(join(process.cwd(), ".tmax", "fikra", "ckpt-index-main"))).toBe(true);
+    // r156: the mode listings live under that unignored .tmax too — their
+    // own coming and going is never a "cannot hold" row.
+    expect(logText(ed)).not.toContain("cannot hold");
+    expect(existsSync(join(process.cwd(), ".tmax", "fikra", "ckpt-modes-main"))).toBe(false);
+    expect(existsSync(join(process.cwd(), ".tmax", "fikra", "ckpt-modes-after-main"))).toBe(false);
   });
 
   // Codex gate round 3: with core.fileMode=false git records every file
@@ -3463,9 +3468,12 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
   // was no longer reported — a REPORTING REGRESSION from r155f's "neither
   // tree" rule (it used to be reported, by accident, as "not in the
   // diff") — and a retargeted ignored symlink never was (the scan was
-  // `-type f`). The discriminator: `touch` moves a file's mtime AND ctime,
-  // `chmod` only the ctime. "ctime past the stamp, mtime not" = status
-  // changed without a write — reported unless the tree diff covers it.
+  // `-type f`). The child lists "mode:uid:gid<TAB>path" for the
+  // snapshot's files before and after the command; a path whose line
+  // changed is reported unless the tree diff already covers it. A RECORD,
+  // not a timestamp rule: the first cut inferred the change from ctime,
+  // which floods on Linux (a no-op chmod moves the ctime there) and
+  // misses a chmod after a touch everywhere.
   const errorRows = (ed: Editor) => logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
 
   tt("`chmod 600` on a TRACKED file is reported — git records the executable bit and nothing else (r156)", async () => {
@@ -3516,8 +3524,7 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(actionRefs()).toEqual(["refs/fikra/main/1-a1", "refs/fikra/main/1-a2"]);
   });
 
-  // The discriminator's own false-positive class: a file written with its
-  // mtime PRESERVED looks like a status-only change. Its content covers it.
+  // A new file appears in the after-listing only — the tree diff covers it.
   tt("a new file with a PRESERVED mtime is covered by its content — not reported (r156)", async () => {
     const ed = await armed();
     execFileSync("touch", ["-t", "202001010000", "old-source.txt"]);
@@ -3582,6 +3589,58 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
     expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
     expect(execFileSync("readlink", ["trk-link"], { encoding: "utf8" }).trim()).toBe("base.txt");
+  });
+
+  // Codex gate r156 round 1 (P2): a touch earlier in the same call hid a
+  // later chmod from a timestamp rule. A record of the modes cannot be
+  // hidden by one.
+  tt("a chmod AFTER a touch in the same call is reported (r156)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "freshen and lock")');
+    call(ed, 547, "touch base.txt && chmod 600 base.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('"reason":"1 path(s) the checkpoint cannot hold changed — not revertable: base.txt"'),
+    ]);
+    expect(statSync(join(process.cwd(), "base.txt")).mode & 0o777).toBe(0o600);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "locked");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // The Linux flood, pinned where it can be seen: `chmod` moves a file's
+  // ctime on Linux even when the mode is unchanged, so a ctime rule
+  // reports a whole tree after `chmod -R`. Nothing changed here.
+  tt("a chmod that changes NOTHING is not reported (r156)", async () => {
+    const ed = await armed();
+    mkdirSync(join(process.cwd(), "sub"));
+    writeFileSync(join(process.cwd(), "sub", "a.txt"), "a\n");
+    writeFileSync(join(process.cwd(), "sub", "b.txt"), "b\n");
+    e(ed, '(fikra/chat/fikra-turn-send "normalize permissions")');
+    call(ed, 548, "chmod 644 sub/a.txt sub/b.txt base.txt .gitignore");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("548");
+    await settleRefireFrom(ed, seeded, "normalized");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(logText(ed)).not.toContain("cannot hold");
+    expect(actionRefs()).toEqual([]);
+  });
+
+  // …nor a rewrite that leaves everything as it was, mtime included.
+  tt("a preserved-mtime copy over an IDENTICAL tracked file is not reported (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "same.txt"), "base\n");
+    execFileSync("git", ["add", "same.txt"]);
+    execFileSync("git", ["commit", "-qm", "add same"]);
+    e(ed, '(fikra/chat/fikra-turn-send "refresh the copy")');
+    call(ed, 549, "cp -p base.txt same.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("549");
+    await settleRefireFrom(ed, seeded, "refreshed");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(logText(ed)).not.toContain("cannot hold");
+    expect(actionRefs()).toEqual([]);
   });
 
   // Codex gate r154 round 5 (P2): the counters ran BEFORE the append — a
