@@ -410,7 +410,13 @@ round-12 approvals catch)."
                               ;; r159: the qualifier is the event's own.
                               (concat " — " (fikra-event-get-str event "ckpt-err") "]")
                               " ✓]"))))
-                  "")
+                  ;; r161: the action's post capture failed — there is no
+                  ;; ref to show, and the row says so itself rather than
+                  ;; leaving a bare command above an easy-to-miss error
+                  ;; row.
+                  (if (fikra-event-get event "ckpt-err")
+                    (concat " " (fikra-face "\e[36m" "[no checkpoint — not revertable]"))
+                    ""))
                 "\n"
                 (fikra-event-render-preview event)))
       ((string= kind "tool-result")
@@ -1219,8 +1225,14 @@ id-less completed thoughts too).")
     (let* ((e (car events))
            (k (fikra-event-get-str e "kind")))
       (if (string= k "checkpoint-ready")
-        (let ((act (fikra-event-get-str e "act")))
-          (if (and act (> (length act) 0))
+        (let ((act (fikra-event-get-str e "act"))
+              (stage (fikra-event-get-str e "stage")))
+          ;; r161: a PRE-stage ref is the revert TARGET, never the
+          ;; checkpoint shown on the action's row — a post that failed
+          ;; used to leave the pre standing in for it. (A ready without
+          ;; a stage is from an older log: last one wins, as before.)
+          (if (and act (> (length act) 0)
+                   (not (and stage (> (length stage) 0) (string= stage "pre"))))
             (fikra-event-inline-act-refs (cdr events)
               (editor/keymaps/keymap-mutable-set! refs act
                 (fikra-event-get-str e "ref"))
@@ -1302,12 +1314,20 @@ id-less completed thoughts too).")
                             nil))
                  (row-has-action (and row-has-ckpt
                                  (> (length row-has-ckpt) 0)
-                                 (fikra-inline-action-ref-p row-has-ckpt))))
+                                 (fikra-inline-action-ref-p row-has-ckpt)))
+                 ;; r161: nor is a row that carries a FAILURE qualifier —
+                 ;; it has just said "no checkpoint — not revertable", and
+                 ;; the turn's completion ref must not read as the
+                 ;; action's own. (A post that failed left the row
+                 ;; without a marker, and the completion ref attached.)
+                 (row-failed (if call-idx
+                           (fikra-event-get (nth call-idx out) "ckpt-err")
+                           nil)))
             ;; Full identity: "<thread>/<turn>" on BOTH sides, and NO
             ;; attach when either is unparseable (r67: a missing side
             ;; used to attach — no identity, no marker).
             (if (and call-idx ckpt-id call-id (string= ckpt-id call-id)
-                     (not row-has-action))
+                     (not row-has-action) (not row-failed))
               (fikra-event-inline-ckpt-merge (cdr events)
                 (fikra-inline-replace out call-idx
                   (fikra-event-with-ckpt (nth call-idx out)
@@ -1445,11 +1465,16 @@ id-less completed thoughts too).")
             (let ((q (fikra-event-get-str e "qual")))
               ;; r159: the row shows the event's OWN qualifier ("not
               ;; held" when a path is named, "coverage not established"
-              ;; when only the scan's limits are known); an event without
-              ;; one (older logs, other emitters) reads "not held".
+              ;; when only the scan's limits are known). r161: an event
+              ;; without one is a CAPTURE failure for this action — the
+              ;; row reads "not revertable" — and it never displaces a
+              ;; coverage qualifier already recorded (either order).
               (fikra-event-inline-act-errors (cdr events)
-                (editor/keymaps/keymap-mutable-set! errs act
-                  (if (and q (> (length q) 0)) q "not held"))))
+                (if (and q (> (length q) 0))
+                  (editor/keymaps/keymap-mutable-set! errs act q)
+                  (if (hashmap-get errs act)
+                    errs
+                    (editor/keymaps/keymap-mutable-set! errs act "not revertable")))))
             (fikra-event-inline-act-errors (cdr events) errs)))
         (fikra-event-inline-act-errors (cdr events) errs)))))
 

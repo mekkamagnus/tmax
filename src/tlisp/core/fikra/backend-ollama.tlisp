@@ -901,6 +901,17 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
       (append (list (list "kind" "tool-call") (list "tool" "bash")
                     (list "summary" cmd))
               (list (list "act" act))))
+    ;; r161: the mediated PRE capture failed before this row existed —
+    ;; said now that the action has an identity.
+    (if fikra-ollama-pre-failed
+      (progn
+        (setq fikra-ollama-pre-failed nil)
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "checkpoint-error")
+                (list "reason" "the action's pre-action capture failed — this change is not revertable on its own")
+                (list "stage" "pre")
+                (list "act" act))))
+      nil)
     (fikra-ollama-run-bash-now-1 cmd dir act)))
 
 (defun fikra-ollama-run-bash-now-1 (cmd dir act)
@@ -971,6 +982,52 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
 ;; mockup's contract is a checkpoint per mutating action, so a snapshot
 ;; that could not run or a pair that could not be sealed must never pass
 ;; for a quiet success.
+;; r161: THE action capture — the one place for every capture that
+;; belongs to an action. OWNER is the thread the event goes to when the
+;; caller is a callback context (nil: the pointer emit); ACT is the
+;; action's identity (nil before it is minted); STAGE is "pre" or
+;; "post". Returns the ref NAME, or nil when the capture failed — and a
+;; failure always leaves an event naming the action and the stage: the
+;; capture's own error when git failed, fikra-ollama-capture-threw when
+;; it threw. All three carriers clear on EVERY path: the inline captures
+;; cleared them inside the very body that could throw, and a throw
+;; leaked the owner and the act onto later turn-level captures.
+(defun fikra-ollama-action-capture (owner act stage)
+  (condition-case nil (require-module fikra/checkpoint) (error () nil))
+  (fikra/checkpoint/fikra-checkpoint-set-emit-owner owner)
+  (fikra/checkpoint/fikra-checkpoint-set-emit-act act)
+  (fikra/checkpoint/fikra-checkpoint-set-emit-stage stage)
+  (let ((name (condition-case nil
+                  (if (fikra/checkpoint/fikra-checkpoint-capture "action")
+                    (fikra/checkpoint/fikra-checkpoint-last-ref-name-get)
+                    nil)
+                  (error (m)
+                    (fikra-ollama-capture-threw owner act stage m)
+                    nil))))
+    (fikra/checkpoint/fikra-checkpoint-set-emit-stage nil)
+    (fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
+    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+    name))
+
+(defun fikra-ollama-capture-threw (owner act stage m)
+  (condition-case nil
+    (let ((ev (append (list (list "kind" "checkpoint-error")
+                            (list "reason"
+                              (concat "the action's " stage "-action capture threw ("
+                                      (if (stringp m) m "capture error")
+                                      ") — this change is not revertable on its own")))
+                      (if act (list (list "act" act)) (list))
+                      (if stage (list (list "stage" stage)) (list)))))
+      (if owner
+        (fikra/event/fikra-event-emit-batch-for owner (list ev))
+        (fikra/event/fikra-event-emit ev)))
+    (error () nil)))
+
+;; r161: the mediated PRE capture fails before its action has an identity
+;; (the act is minted when the approved command spawns) — the failure is
+;; remembered here and stamped onto the row's act by run-bash-now.
+(defvar fikra-ollama-pre-failed nil)
+
 (defun fikra-ollama-checkpoint-failed (reason)
   (condition-case nil
     (fikra/event/fikra-event-emit-batch-for (fikra/thread/fikra-thread-current)
@@ -1098,6 +1155,11 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
          ;; git runs at all (the sentinel blocks the editor meanwhile).
          (none (and (or (null changed) (= (length changed) 0))
                     (or (null meta) (= (length meta) 0))))
+         ;; r161: a failed capture leaves no ref — git gets "" (an
+         ;; error, an empty diff), never a nil that concat would throw
+         ;; on.
+         (pre-s (if (stringp pre) pre ""))
+         (post-s (if (stringp post) post ""))
          ;; r160: what the tree RECORDED — the paths whose tree MODE
          ;; differs between the two trees. It used to be every path the
          ;; diff NAMED, which dropped a permission change on a path that
@@ -1110,7 +1172,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                    (fikra-ollama-mode-changed-paths
                      (fikra-ollama-split-paths
                        (shell-command
-                         (concat "git -C " rq " diff --raw -z --no-renames " pre " " post)))
+                         (concat "git -C " rq " diff --raw -z --no-renames " pre-s " " post-s)))
                      (list))))
          ;; Every path either tree holds — what the checkpoint CAN revert.
          ;; (Identical trees name the same paths: one listing.)
@@ -1118,11 +1180,11 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                  (list)
                  (append
                    (fikra-ollama-split-paths
-                     (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " pre)))
-                   (if (string= pre post)
+                     (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " pre-s)))
+                   (if (string= pre-s post-s)
                      (list)
                      (fikra-ollama-split-paths
-                       (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " post)))))))
+                       (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " post-s)))))))
          ;; In NEITHER tree: ignored, under a nested .tmax, inside a nested
          ;; repository.
          ;; r159: membership is a hash LOOKUP, not a list scan. The old
@@ -1196,7 +1258,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
           (error () nil))
         ;; r159: "0 path(s) … not revertable" is not a thing to say —
         ;; a cap-only report speaks in the transcript row.
-        (if (and (> n 0) (string= pre post))
+        (if (and (> n 0) (string= pre-s post-s))
           (editor-set-status
             (concat "Fikra: " (number-to-string n)
                     " path(s) changed outside the checkpoint — not revertable"))
@@ -1489,20 +1551,18 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                                           ;; ref). r134e: this runs in the
                                           ;; SENTINEL context — the event
                                           ;; emits owner-bound (the pointer
-                                          ;; reads nil here).
-                                          (post (progn
-                                                  (fikra/checkpoint/fikra-checkpoint-set-emit-owner
-                                                    (if home home (fikra/thread/fikra-thread-current)))
-                                                  ;; r157: the row's action
-                                                  ;; identity rides the entry.
-                                                  (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
-                                                    (hashmap-get entry "act"))
-                                                  (let ((r (fikra/checkpoint/fikra-checkpoint-capture "action")))
-                                                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
-                                                    (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
-                                                    r))))
-                                     ;; r142: the post→pre pair.
-                                     (fikra-ollama-record-action-pair fikra-ollama-last-pre-name)
+                                          ;; reads nil here). r157: the row's
+                                          ;; action identity rides the entry;
+                                          ;; r161: one throw-safe capture.
+                                          (act (hashmap-get entry "act"))
+                                          (post-name (fikra-ollama-action-capture
+                                                       (if home home (fikra/thread/fikra-thread-current))
+                                                       act "post")))
+                                     ;; r142: the post→pre pair — only when
+                                     ;; BOTH captures succeeded.
+                                     (if post-name
+                                       (fikra-ollama-record-action-pair fikra-ollama-last-pre-name)
+                                       nil)
                                      ;; r158: the per-action coverage report —
                                      ;; the ordinary path's report, diffed
                                      ;; pre..post by sha, stamped with the
@@ -1511,8 +1571,8 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                                      ;; for an uncovered mutation).
                                      (fikra-ollama-report-outside-checkpoint
                                        (nth 0 scan) (nth 1 scan) (nth 2 scan)
-                                       fikra-ollama-last-pre-sha post
-                                       (hashmap-get entry "act") (nth 3 scan)
+                                       fikra-ollama-last-pre-sha (if post-name post-name "")
+                                       act (nth 3 scan)
                                        (nth 4 scan) (nth 5 scan))
                                      (setq fikra-ollama-last-pre-name nil)
                                      (setq fikra-ollama-last-pre-sha nil)))
@@ -1757,22 +1817,13 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
         ;; overwrote this row's marker).
         (let ((act (fikra-ollama-act-mint))
               (pre-name nil))
-          ;; r157b: the carrier is set TIGHTLY around each capture (an
-          ;; exception between set and clear would stamp a later capture
-          ;; with a stale act id).
-          (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
- act)
-          (condition-case nil
-            (let ((sha (progn (require-module fikra/checkpoint)
-                              (fikra/checkpoint/fikra-checkpoint-capture "action")))
-                  (n (fikra/checkpoint/fikra-checkpoint-last-ref-name-get)))
-              (setq pre-name n)
-              (if (not sha)
-                (editor-set-status "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref")))
-            (error (m)
-              (editor-set-status
-                (concat "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref ("
-                        (if (stringp m) m "capture error") ")"))))
+          ;; r161: the PRE capture — the revert target. One throw-safe
+          ;; call; a failure leaves an event naming this action and the
+          ;; stage, so the row can never show an unqualified ✓ for an
+          ;; edit that is not revertable.
+          (setq pre-name (fikra-ollama-action-capture nil act "pre"))
+          (if (not pre-name)
+            (editor-set-status "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref"))
           (let ((written (condition-case nil
                           (progn (write-file-content abs content) t)
                           (error () nil))))
@@ -1792,21 +1843,17 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                 (fikra/event/fikra-event-emit
                   (list (list "kind" "tool-result") (list "ok" nil)
                         (list "summary" (concat "WRITE FAILED: " path))))
-                (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
- nil)
                 (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "write failed: " path)) "},"))
               (progn
                 ;; The POST-write ref (evidence + inline marker). r142:
                 ;; the post→pre pair (the action-level revert).
-                (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
- act)
-                (condition-case nil
-                  (progn (require-module fikra/checkpoint)
-                         (fikra/checkpoint/fikra-checkpoint-capture "action")
-                         (fikra-ollama-record-action-pair pre-name))
-                  (error () nil))
-                (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
- nil)
+                (let ((post-name (fikra-ollama-action-capture nil act "post")))
+                  ;; r161: the pair only when BOTH captures succeeded —
+                  ;; a failed post left the pre's name in the stash, and
+                  ;; the pair recorded the pre with itself.
+                  (if post-name
+                    (fikra-ollama-record-action-pair pre-name)
+                    nil))
                 (fikra/event/fikra-event-emit
                   (list (list "kind" "tool-result") (list "ok" t)
                         (list "summary" (concat "wrote " path))))
@@ -3267,44 +3314,28 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
               (let ((capture-prev (fikra/thread/fikra-thread-current)))
                 (if (and home-thread (not (string= home-thread capture-prev)))
                   (fikra/thread/fikra-thread-focus home-thread))
-              (condition-case nil
-                (let ((sha (progn (require-module fikra/checkpoint)
-                                  (fikra/checkpoint/fikra-checkpoint-set-emit-owner
-                                    (if home-thread home-thread (fikra/thread/fikra-thread-current)))
-                                  ;; r157d (gate round 3, reading-only): this PRE
-                                  ;; capture runs BEFORE the row's act is minted -
-                                  ;; clear the carrier so it cannot inherit the
-                                  ;; PREVIOUS action's act and misattribute the
-                                  ;; new pre ref to that older row.
-                                  (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
-                                  (let ((r (fikra/checkpoint/fikra-checkpoint-capture "action")))
-                                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
-                                    ;; r158: the sha the per-action coverage
-                                    ;; report diffs against (the sentinel
-                                    ;; consumes it with the pre name).
-                                    (setq fikra-ollama-last-pre-sha r)
-                                    r))))
-                  (if (not sha)
-                    (editor-set-status
-                      "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref")))
-                (error (m)
-                  ;; r141c (codex r141b catch): the owner flag clears on
-                  ;; the THROW path too (a leaked owner routed later sync
-                  ;; captures through the stale owner emitter).
-                  (condition-case nil
-                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
-                    (error () nil))
-                  (editor-set-status
-                    (concat "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref ("
-                            (if (stringp m) m "capture error") ")"))))
+              ;; r161: one throw-safe action capture (r157d's stale-act
+              ;; clear and r141c's throw-path owner clear live inside
+              ;; it). This PRE runs BEFORE the row's act is minted, so it
+              ;; carries none: a failure is remembered here and stamped
+              ;; onto the row's act when the command spawns.
+              (setq fikra-ollama-pre-failed nil)
+              (setq fikra-ollama-last-pre-name
+                (let ((name (fikra-ollama-action-capture
+                              (if home-thread home-thread (fikra/thread/fikra-thread-current))
+                              nil "pre")))
+                  (if name
+                    name
+                    (progn (setq fikra-ollama-pre-failed t) nil))))
+              ;; r158: what the per-action coverage report diffs against
+              ;; (the sentinel consumes it with the pre name).
+              (setq fikra-ollama-last-pre-sha fikra-ollama-last-pre-name)
+              (if (not fikra-ollama-last-pre-name)
+                (editor-set-status
+                  "Fikra: pre-action checkpoint FAILED — the command proceeds without a revert ref"))
               ;; r144: restore the away focus (the capture borrowed HOME).
               (if (and home-thread (not (string= home-thread capture-prev)))
                 (condition-case nil (fikra/thread/fikra-thread-focus capture-prev) (error () nil)))
-              ;; r142: the pre-name for the sentinel's pair record.
-              (setq fikra-ollama-last-pre-name
-                (condition-case nil
-                  (progn (fikra/checkpoint/fikra-checkpoint-last-ref-name-get))
-                  (error () nil)))
               (setq fikra-ollama-next-mediated t)
               (let ((approved (fikra-ollama-run-bash-now cmd dir)))
                 ;; r131: an async spawn returns the PID — the result

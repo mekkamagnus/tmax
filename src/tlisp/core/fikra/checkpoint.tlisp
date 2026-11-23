@@ -6,6 +6,7 @@
           fikra-checkpoint-filter fikra-checkpoint-sentinel
           fikra-checkpoint-capture-with-path fikra-checkpoint-set-emit-owner
           fikra-checkpoint-set-emit-act fikra-checkpoint-emit-act-get
+          fikra-checkpoint-set-emit-stage
           fikra-checkpoint-last-ref-name-get fikra-checkpoint-pair-trees)
 
 ;; #217 (RFC-027 §D6, Phase 2): non-invasive git checkpoints. Every turn
@@ -129,6 +130,21 @@ coverage report reads the carrier instead of threading a parameter
 (the zero-arity action-checkpoint is called directly by the tests)."
   fikra-checkpoint-emit-act)
 
+(defvar fikra-checkpoint-emit-stage nil
+  "r161: the STAGE of the action being captured (\"pre\" or \"post\"),
+set by the caller around the capture. A replay attaches a row's
+POST-stage ref and never its pre: the pre is the revert target, and a
+post that failed used to leave the pre standing in on the row.")
+(defun fikra-checkpoint-set-emit-stage (stage)
+  (setq fikra-checkpoint-emit-stage stage))
+
+;; r161: the identity fields a capture event carries when the caller set
+;; them — the action's act id and the capture's stage.
+(defun fikra-checkpoint-stamp-fields ()
+  (append
+    (if fikra-checkpoint-emit-act (list (list "act" fikra-checkpoint-emit-act)) (list))
+    (if fikra-checkpoint-emit-stage (list (list "stage" fikra-checkpoint-emit-stage)) (list))))
+
 (defun fikra-checkpoint-set-emit-owner (owner)
   "r134e: callback contexts (the mediated bash's sync capture runs in
 the bash sentinel) route the sync capture's event through the
@@ -231,27 +247,23 @@ events; nil when disabled or failed. Never touches turn state."
         ;; emit when a CALLBACK context set fikra-checkpoint-emit-owner
         ;; (the mediated bash's sync capture runs inside the bash
         ;; sentinel, where the pointer reads nil and the event drops).
-        (if fikra-checkpoint-emit-owner
-          (fikra/event/fikra-event-emit-batch-for fikra-checkpoint-emit-owner
-            (list (if sha
-                    (append (list (list "kind" "checkpoint-ready")
-                                  (list "ref" ref)
-                                  (list "sha" sha))
-                            (if fikra-checkpoint-emit-act
-                              (list (list "act" fikra-checkpoint-emit-act))
-                              (list)))
-                    (list (list "kind" "checkpoint-error")
-                          (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))
-          (fikra/event/fikra-event-emit
-            (if sha
-              (append (list (list "kind" "checkpoint-ready")
-                            (list "ref" ref)
-                            (list "sha" sha))
-                      (if fikra-checkpoint-emit-act
-                        (list (list "act" fikra-checkpoint-emit-act))
-                        (list)))
-              (list (list "kind" "checkpoint-error")
-                    (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))
+        ;; r161: ONE event, built once — the ready and the error both
+        ;; carry the action's identity and the capture's stage. The
+        ;; error used to be anonymous: nothing tied it to the row it
+        ;; belonged to, so an action whose first capture failed still
+        ;; showed an unqualified ✓.
+        (let ((ev
+                (if sha
+                  (append (list (list "kind" "checkpoint-ready")
+                                (list "ref" ref)
+                                (list "sha" sha))
+                          (fikra-checkpoint-stamp-fields))
+                  (append (list (list "kind" "checkpoint-error")
+                                (list "reason" (string-trim (substring out 0 (min 200 (length out))))))
+                          (fikra-checkpoint-stamp-fields)))))
+          (if fikra-checkpoint-emit-owner
+            (fikra/event/fikra-event-emit-batch-for fikra-checkpoint-emit-owner (list ev))
+            (fikra/event/fikra-event-emit ev)))
         sha))))
 
 ;; r155: an EXISTING tree object as a checkpoint ref (commit-tree +

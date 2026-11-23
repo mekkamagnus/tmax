@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -4256,6 +4256,243 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     buf = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
     expect(buf.split("\n").filter((l) => l.includes("checkpoint-error")).length).toBe(before);
     expect(buf.split("\n").find((l) => l.includes("EXECBIT-ROW"))).toContain("[ckpt main/8-a4 ✓]");
+  }, 90000);
+
+  // ── r161: A FAILED OR PARTIAL CAPTURE NEVER SHOWS AN UNQUALIFIED ✓ ─
+  // The capture's error event carried no action id and run-edit's
+  // pre-failure path only set the status line, so an action whose FIRST
+  // capture failed still showed "[ckpt <post> ✓]" — though nothing could
+  // revert it. And when the SECOND capture failed, "last ref wins" put
+  // the PRE ref on the row as if it were the result.
+  const emitEv = (ed2: Editor, pairs: string) => {
+    e(ed2, `(fikra/event/fikra-event-emit (list ${pairs}))`);
+  };
+  const rowOf = (ed2: Editor, needle: string) =>
+    strip(String(e(ed2, "(fikra/event/fikra-event-replay)").value)).split("\n").find((l) => l.includes(needle)) ?? "";
+  const carriersClear = (ed2: Editor) =>
+    String(e(ed2, '(if (fikra/checkpoint/fikra-checkpoint-emit-act-get) "SET" "CLEAR")').value);
+  const noPairRecorded = () => {
+    const pairsFile = join(process.cwd(), ".tmax/fikra/threads/main/actions.jsonl");
+    return existsSync(pairsFile) ? readFileSync(pairsFile, "utf8").trim() : "";
+  };
+
+  test("a POST that failed leaves NO checkpoint marker — the pre ref is not a stand-in (r161)", async () => {
+    const ed = await armed();
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "PREONLY-ROW") (list "act" "7-1")');
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/7-a1") (list "sha" "x") (list "act" "7-1") (list "stage" "pre")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "fatal: not a git repository") (list "act" "7-1") (list "stage" "post")');
+    const row = rowOf(ed, "PREONLY-ROW");
+    expect(row).not.toContain("✓]");
+    // The PRE ref is the revert target — never the action's checkpoint.
+    expect(row).not.toContain("7-a1");
+    expect(row).toContain("[no checkpoint — not revertable]");
+    // The error itself still stands in the transcript.
+    expect(String(e(ed, "(fikra/event/fikra-event-replay)").value)).toContain("fatal: not a git repository");
+  }, 90000);
+
+  test("a PRE that failed leaves the post ref, qualified (r161)", async () => {
+    const ed = await armed();
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "POSTONLY-ROW") (list "act" "7-2")');
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/7-a4") (list "sha" "x") (list "act" "7-2") (list "stage" "post")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "fatal: not a git repository") (list "act" "7-2") (list "stage" "pre")');
+    const row = rowOf(ed, "POSTONLY-ROW");
+    expect(row).toContain("[ckpt main/7-a4 — not revertable]");
+    expect(row).not.toContain("✓]");
+  }, 90000);
+
+  test("a ready from an older log (no stage) keeps its marker (r161)", async () => {
+    const ed = await armed();
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "LEGACY-ROW") (list "act" "7-3")');
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/7-a6") (list "sha" "x") (list "act" "7-3")');
+    expect(rowOf(ed, "LEGACY-ROW")).toContain("[ckpt main/7-a6 ✓]");
+  }, 90000);
+
+  test("a coverage qualifier is not displaced by a capture failure, in either order (r161)", async () => {
+    const ed = await armed();
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "bash") (list "summary" "NAMED-FIRST") (list "act" "7-4")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "1 path(s) the checkpoint cannot hold changed") (list "qual" "not held") (list "act" "7-4")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "capture failed") (list "act" "7-4") (list "stage" "pre")');
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/7-a8") (list "sha" "x") (list "act" "7-4") (list "stage" "post")');
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "bash") (list "summary" "NAMED-LAST") (list "act" "7-5")');
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/7-a10") (list "sha" "x") (list "act" "7-5") (list "stage" "post")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "capture failed") (list "act" "7-5") (list "stage" "pre")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "1 path(s) the checkpoint cannot hold changed") (list "qual" "not held") (list "act" "7-5")');
+    expect(rowOf(ed, "NAMED-FIRST")).toContain("[ckpt main/7-a8 — not held]");
+    expect(rowOf(ed, "NAMED-LAST")).toContain("[ckpt main/7-a10 — not held]");
+  }, 90000);
+
+  // ONE capture is made to fail from inside git: a reference-transaction
+  // hook in the fixture repo refuses one ref, so that capture's
+  // `git update-ref` fails and the capture reports CAPTURE-FAILED. (A
+  // `git` shim placed first on PATH does NOT work here: the editor's
+  // shell-command does not resolve through a PATH changed by the test —
+  // the first cut of these witnesses never failed a capture at all.)
+  // The turn's baseline ref is never touched.
+  const withRefusedRef = async (suffix: string, body: () => Promise<void>) => {
+    const hooks = join(process.cwd(), ".git", "r161-hooks");
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, "reference-transaction"), [
+      "#!/bin/sh",
+      "while read old new ref; do",
+      `  case "$ref" in "refs/fikra/main/${suffix}") echo "r161: refused \${ref}" >&2; exit 1 ;; esac`,
+      "done",
+      "exit 0",
+      "",
+    ].join("\n"));
+    chmodSync(join(hooks, "reference-transaction"), 0o755);
+    execFileSync("git", ["config", "core.hooksPath", hooks]);
+    try {
+      await body();
+    } finally {
+      rmSync(hooks, { recursive: true, force: true });
+      execFileSync("git", ["config", "--unset", "core.hooksPath"]);
+    }
+  };
+  const fireEdit = (ed2: Editor, id: number, path: string, content: string) => {
+    const callSpec = { function: { name: "buffer_edit", arguments: { path, content } } };
+    e(ed2, `(fikra/backend-ollama/fikra-backend-ollama-seed ${id} "live")`);
+    e(ed2, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${id} "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [callSpec] } }))}")`);
+    e(ed2, `(fikra-http-complete ${id} 200 "${hex("{}")}")`);
+  };
+
+  test("an edit whose PRE capture fails shows a qualified row and records no pair (r161)", async () => {
+    // The FIRST action capture of the turn: the edit's pre.
+    await withRefusedRef("1-a1", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "edit without a pre ref")');
+      fireEdit(ed, 780, "e161.txt", "EDITED\n");
+      await until(ed, "(buffer-text)", "not revertable]", 120);
+      await settleRefireFrom(ed, "780", "done");
+      expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+      expect(readFileSync(join(process.cwd(), "e161.txt"), "utf8")).toContain("EDITED");
+      const row = rowOf(ed, "e161.txt");
+      expect(row).toContain("[ckpt main/");
+      expect(row).toContain("— not revertable]");
+      expect(row).not.toContain("✓]");
+      // The failure is ON THE RECORD, tied to the action and its stage.
+      const errs = logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+
+      expect(errs.join("\n")).toContain('"stage":"pre"');
+      // Nothing is revertable: no pair was recorded.
+      expect(noPairRecorded()).toBe("");
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("no action");
+      // The carriers did not leak past the failure.
+      expect(carriersClear(ed)).toBe("CLEAR");
+    });
+  }, 90000);
+
+  test("an edit whose POST capture fails shows no success marker and records no pair (r161)", async () => {
+    // The SECOND: the edit's post.
+    await withRefusedRef("1-a2", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "edit without a post ref")');
+      fireEdit(ed, 781, "f161.txt", "EDITED\n");
+      await until(ed, "(buffer-text)", "no checkpoint", 120);
+      await settleRefireFrom(ed, "781", "done");
+      expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+      expect(readFileSync(join(process.cwd(), "f161.txt"), "utf8")).toContain("EDITED");
+      const row = rowOf(ed, "f161.txt");
+      expect(row).toContain("[no checkpoint — not revertable]");
+      expect(row).not.toContain("✓]");
+      // The pre ref does not stand in for the result — and neither does
+      // the TURN's completion ref: that marker stands on its own row.
+      expect(row).not.toContain("[ckpt ");
+      const all = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+      expect(all).toContain("[ckpt main/1 ✓]");
+      const errs = logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+      expect(errs.join("\n")).toContain('"stage":"post"');
+      expect(noPairRecorded()).toBe("");
+      expect(carriersClear(ed)).toBe("CLEAR");
+    });
+  }, 90000);
+
+  test("a mediated bash whose PRE capture fails shows a qualified row (r161)", async () => {
+    // The mediated command's pre (captured at approval).
+    await withRefusedRef("1-a1", async () => {
+      const ed = await armed();
+      mkdirSync(join(process.cwd(), "med161dir"));
+      writeFileSync(join(process.cwd(), "med161dir/old.txt"), "BEFORE\n");
+      e(ed, '(fikra/chat/fikra-turn-send "remove it without a pre ref")');
+      call(ed, 782, "rm -rf med161dir/");
+      expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+      e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+      await until(ed, "(buffer-text)", "not revertable]", 180);
+      await settleRefireFrom(ed, "782", "done");
+      expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+      expect(existsSync(join(process.cwd(), "med161dir/old.txt"))).toBe(false);
+      const row = rowOf(ed, "⚙ bash");
+      expect(row).toContain("[ckpt main/");
+      expect(row).toContain("— not revertable]");
+      expect(row).not.toContain("✓]");
+      const errs = logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+      expect(errs.join("\n")).toContain('"stage":"pre"');
+      expect(noPairRecorded()).toBe("");
+      expect(carriersClear(ed)).toBe("CLEAR");
+    });
+  }, 90000);
+
+  // ── FOR_9 item 2: every DISPLAYED action ref is checked against its
+  // own git tree — DELAYED (an async bash holds the round between two
+  // edits, so its marker lands after the first edit's and before the
+  // second's) and after a RESTART (a fresh editor has only the log).
+  const treeOf = (ed2: Editor, ref: string) =>
+    String(e(ed2, `(shell-command "git ls-tree -r --name-only refs/fikra/main/${ref}")`).value);
+  const blobOf = (ed2: Editor, ref: string, path: string) =>
+    String(e(ed2, `(shell-command "git show refs/fikra/main/${ref}:${path}")`).value);
+
+  test("delayed: a bash between two edits — each row's displayed ref is its OWN tree (r161b)", async () => {
+    const ed = await armed();
+    const edit = (path: string, content: string) => ({ function: { name: "buffer_edit", arguments: { path, content } } });
+    e(ed, '(fikra/chat/fikra-turn-send "edit, run, edit")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 800 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 800 "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      edit("a162.txt", "EDIT-A\n"),
+      { function: { name: "bash", arguments: { command: "echo BASH-RAN >> d162.txt" } } },
+      edit("b162.txt", "EDIT-B\n"),
+    ] } }))}")`);
+    e(ed, `(fikra-http-complete 800 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "[ckpt main/1-a6", 180);
+    await settleRefireFrom(ed, "800", "done");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+    const lines = strip(String(e(ed, "(buffer-text)").value)).split("\n");
+    const rowOf = (needle: string) => lines.find((l) => l.includes(needle)) ?? "";
+    expect(rowOf("a162.txt")).toContain("[ckpt main/1-a2 ✓]");
+    expect(rowOf("⚙ bash")).toContain("[ckpt main/1-a4 ✓]");
+    expect(rowOf("b162.txt")).toContain("[ckpt main/1-a6 ✓]");
+    // The trees say the same thing — each in BOTH directions.
+    expect(treeOf(ed, "1-a2")).toContain("a162.txt");
+    expect(treeOf(ed, "1-a2")).not.toContain("d162.txt");
+    expect(treeOf(ed, "1-a2")).not.toContain("b162.txt");
+    expect(treeOf(ed, "1-a4")).toContain("d162.txt");
+    expect(treeOf(ed, "1-a4")).not.toContain("b162.txt");
+    expect(treeOf(ed, "1-a6")).toContain("b162.txt");
+    expect(blobOf(ed, "1-a4", "d162.txt")).toContain("BASH-RAN");
+    expect(blobOf(ed, "1-a6", "b162.txt")).toContain("EDIT-B");
+  }, 90000);
+
+  test("restart: a fresh editor replays the log and every displayed ref still matches its tree (r161b)", async () => {
+    const ed = await armed();
+    const edit = (path: string, content: string) => ({ function: { name: "buffer_edit", arguments: { path, content } } });
+    e(ed, '(fikra/chat/fikra-turn-send "two edits before a restart")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 801 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 801 "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [edit("c162.txt", "EDIT-C\n"), edit("e162.txt", "EDIT-E\n")] } }))}")`);
+    e(ed, `(fikra-http-complete 801 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "[ckpt main/1-a4", 180);
+    await settleRefireFrom(ed, "801", "done");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+    // A fresh editor on the same thread root: the persisted log is all
+    // it has (no in-memory pairs, no live events).
+    const ed2 = await armed();
+    const lines = strip(String(e(ed2, "(fikra/event/fikra-event-replay)").value)).split("\n");
+    const rowOf = (needle: string) => lines.find((l) => l.includes(needle)) ?? "";
+    expect(rowOf("c162.txt")).toContain("[ckpt main/1-a2 ✓]");
+    expect(rowOf("e162.txt")).toContain("[ckpt main/1-a4 ✓]");
+    expect(treeOf(ed2, "1-a2")).toContain("c162.txt");
+    expect(treeOf(ed2, "1-a2")).not.toContain("e162.txt");
+    expect(treeOf(ed2, "1-a4")).toContain("e162.txt");
+    expect(blobOf(ed2, "1-a2", "c162.txt")).toContain("EDIT-C");
+    expect(blobOf(ed2, "1-a4", "e162.txt")).toContain("EDIT-E");
   }, 90000);
 
   tt("a held batch counts its chunks ONCE", async () => {
