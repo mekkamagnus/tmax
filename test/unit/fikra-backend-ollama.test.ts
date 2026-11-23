@@ -4041,8 +4041,9 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     const NUL = '(hex-decode "00")';
     // éa + NUL is 4 UTF-8 bytes but 3 string units: a 4-BYTE cap is hit.
     expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "éa" ${NUL}) 4))`).value)).toBe(1);
-    // One byte short of the cap: no flag.
-    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "a" ${NUL}) 4))`).value)).toBe(0);
+    // One BYTE short of the cap (é + NUL is 3 bytes): no flag. (Gate
+    // round 2's NIT: this probe used "a" + NUL — two bytes short.)
+    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "é" ${NUL}) 4))`).value)).toBe(0);
   });
 
   tt("a held batch counts its chunks ONCE", async () => {
