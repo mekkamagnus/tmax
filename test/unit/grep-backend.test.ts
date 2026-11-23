@@ -97,15 +97,17 @@ describe("#308 — the backend", () => {
     expect(strip(bufferText(editor))).toContain(prior.slice(0, 20));
   });
 
-  test("THE MATRIX rows exercisable with rg PRESENT: rg-explicit t; grep → #309 pending; garbage → auto", async () => {
+  test("THE MATRIX rows exercisable with rg PRESENT: rg-explicit t; grep (#309 LANDED) t; garbage → auto", async () => {
     // rg-explicit with rg ON PATH → available (the missing-rg row's
     // named error is the same branch — unreachable while rg exists).
     e(editor, '(editor/commands/grep/grep-backend-set! "rg")');
     const r1 = e(editor, '(editor/commands/grep/grep-backend-available-p)');
     expect(String(r1.value)).toContain("t");
+    // #309 landed: grep-explicit with grep ON PATH → available (the
+    // old 'pending #309' refusal is the new backend).
     e(editor, '(editor/commands/grep/grep-backend-set! "grep")');
-    e(editor, '(editor/commands/grep/grep-backend-available-p)');
-    expect(st(editor)).toContain("pending");
+    const r2 = e(editor, '(editor/commands/grep/grep-backend-available-p)');
+    expect(String(r2.value)).toContain("t");
     // An unrecognized value falls through to AUTO (detected → t).
     e(editor, '(editor/commands/grep/grep-backend-set! "nonexistent-binary-xyz")');
     const r3 = e(editor, '(editor/commands/grep/grep-backend-available-p)');
@@ -217,13 +219,19 @@ describe("#308 — the backend", () => {
 
   // ── gate r2: the two unasserted matrix ERROR rows ──────────────────
 
-  test("MATRIX auto + rg MISSING → the named no-backend error", () => {
+  test("MATRIX auto + rg MISSING → FALLS THROUGH to grep (#309); both missing → the named error", () => {
     e(editor, '(editor/commands/grep/grep-backend-set! "auto")');
     e(editor, '(editor/commands/grep/grep-rg-detected-set! nil)');
     e(editor, '(editor/commands/grep/grep-rg-executable-set! "/nonexistent/rg-missing-308")');
+    // rg missing but grep PRESENT → the fallback answers (#309).
     const r = e(editor, '(editor/commands/grep/grep-backend-available-p)');
-    expect(String(r.value)).not.toContain("true"); // unavailable
-    expect(st(editor)).toContain("rg missing (grep fallback pending #309)");
+    expect(String(r.value)).toContain("t");
+    // BOTH missing → the named no-backend error.
+    e(editor, '(editor/commands/grep/grep-fallback-executable-set! "/nonexistent/grep-missing-309")');
+    const r2 = e(editor, '(editor/commands/grep/grep-backend-available-p)');
+    expect(String(r2.value)).not.toContain("true");
+    expect(st(editor)).toContain("no search backend: rg and grep both missing");
+    e(editor, '(editor/commands/grep/grep-fallback-executable-set! "grep")');
   });
 
   test("MATRIX rg-explicit + rg MISSING → the named not-on-PATH error", () => {

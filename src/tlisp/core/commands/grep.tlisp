@@ -9,7 +9,7 @@
           grep-fallback-run grep-fallback-kill-prior grep-fallback-dump
           grep-fallback-executable-set! grep-fallback-state!
           grep-fallback-detect-i grep-fallback-filter
-          grep-fallback-stderr grep-fallback-sentinel
+          grep-fallback-stderr-filter grep-fallback-sentinel
           grep-fallback-case-args grep-fallback-handle)
 
 ;; #307 — the *grep* HIT-BUFFER subsystem (RFC-031 §2.1; SPEC-291).
@@ -897,15 +897,20 @@ status, gate r1: done/no-matches used to drop it)."
   "The search entry (SPC s s / M-x): run the backend (#309: rg |
 grep-fallback — the matrix's explicit AND auto dispatch). The
 runners kill the prior process (BOTH backends') BEFORE spawning
-(the kill-first rule covers new searches AND g-reruns)."
+(the kill-first rule covers new searches AND g-reruns). Gate r1:
+the auto branch runs the DETECTION first — the cache is empty on a
+fresh session, so the first search used to wrongly dispatch to the
+fallback (available-p's detection side effect had not run yet)."
   (interactive)
-  (let ((b (if (stringp grep-backend) grep-backend "auto")))
-    (cond
-      ((string= b "grep") (grep-fallback-run pattern scope))
-      ((string= b "rg") (grep-rg-run pattern scope))
-      (t (if grep-rg-detected
-           (grep-rg-run pattern scope)
-           (grep-fallback-run pattern scope))))))
+  (let ((ok (grep-backend-available-p)))
+    (if (not ok) nil
+      (let ((b (if (stringp grep-backend) grep-backend "auto")))
+        (cond
+          ((string= b "grep") (grep-fallback-run pattern scope))
+          ((string= b "rg") (grep-rg-run pattern scope))
+          (t (if grep-rg-detected
+               (grep-rg-run pattern scope)
+               (grep-fallback-run pattern scope))))))))
 
 ;; ── #309: the standard-grep fallback backend ────────────────────────
 (defvar grep-fallback-gen nil "The running fallback search's generation.")
@@ -980,33 +985,41 @@ documented limitation): head -n 1, NUL via (hex-decode \"00\")."
 (defun grep-fallback-run (pattern scope)
   "The fallback search (#309): enumerate (project-files-walk,
 DEFAULT_IGNORES applies), register, chain one grep per file.
-Empty enumeration completes no-matches WITHOUT spawning."
+Empty enumeration completes no-matches WITHOUT spawning. Gate r1:
+a MISSING scope errors honestly (rg exits 2 'No such file' — the
+walk's [] used to complete no-matches silently)."
   (if (not (grep-backend-available-p)) nil
     (progn
       (grep-fallback-kill-prior)
       (grep-rg-kill-prior)
       (grep-fallback-detect-i)
-      (let ((files (condition-case nil
-                      (project-files-walk scope)
-                      (error () (list)))))
-        (let ((gen (grep-buffer-register
-                     (hashmap "backend" "grep" "pattern" pattern "scope" scope
-                       "rerun" (lambda () (grep-fallback-run pattern scope))))))
-          (setq grep-fallback-gen gen)
-          (setq grep-fallback-pattern pattern)
-          (setq grep-fallback-queue files)
-          (setq grep-fallback-total (length files))
-          (setq grep-fallback-done-files 0)
-          (setq grep-fallback-matched-files 0)
-          (setq grep-fallback-binary-skipped 0)
-          (setq grep-fallback-partial "")
-          (setq grep-fallback-since-progress 25)
-          (setq grep-fallback-stopped nil)
-          (setq grep-fallback-file nil)
-          (setq grep-fallback-pending nil)
-          (if (= grep-fallback-total 0)
-            (grep-buffer-complete gen "no-matches" nil)
-            (grep-fallback-next)))))))
+      (let ((gen (grep-buffer-register
+                   (hashmap "backend" "grep" "pattern" pattern "scope" scope
+                     "rerun" (lambda () (grep-fallback-run pattern scope))))))
+        (setq grep-fallback-gen gen)
+        (setq grep-fallback-pattern pattern)
+        (setq grep-fallback-done-files 0)
+        (setq grep-fallback-matched-files 0)
+        (setq grep-fallback-binary-skipped 0)
+        (setq grep-fallback-partial "")
+        (setq grep-fallback-since-progress 25)
+        (setq grep-fallback-stopped nil)
+        (setq grep-fallback-file nil)
+        (setq grep-fallback-pending nil)
+        (if (not (file-exists-p scope))
+          (progn
+            (setq grep-fallback-queue nil)
+            (setq grep-fallback-total 0)
+            (grep-buffer-complete gen "error"
+              (concat "no such directory: " scope)))
+          (let ((files (condition-case nil
+                          (project-files-walk scope)
+                          (error () (list)))))
+            (setq grep-fallback-queue files)
+            (setq grep-fallback-total (length files))
+            (if (= grep-fallback-total 0)
+              (grep-buffer-complete gen "no-matches" nil)
+              (grep-fallback-next))))))))
 
 (defun grep-fallback-pending-as-list ()
   (if (null grep-fallback-pending) (list) grep-fallback-pending))
@@ -1030,6 +1043,7 @@ Empty enumeration completes no-matches WITHOUT spawning."
       (setq grep-fallback-queue (cdr grep-fallback-queue))
       (setq grep-fallback-file file)
       (setq grep-fallback-partial "")
+      (setq grep-fallback-stderr "")
       ;; The -I-unsupported binary check (first line only).
       (if (and (not grep-fallback-i-ok) (grep-fallback-first-line-has-nul-p file))
         (progn
@@ -1045,7 +1059,7 @@ Empty enumeration completes no-matches WITHOUT spawning."
                           :command argv
                           :cwd "."
                           :filter "editor/commands/grep/grep-fallback-filter"
-                          :stderr-filter "editor/commands/grep/grep-fallback-stderr"
+                          :stderr-filter "editor/commands/grep/grep-fallback-stderr-filter"
                           :sentinel "editor/commands/grep/grep-fallback-sentinel")
                         (error (m) (concat "spawn error: " m)))))
             (cond
@@ -1083,9 +1097,13 @@ PID-ATTRIBUTED (the #308 race pattern)."
       (cons (list pid output) (grep-fallback-pending-as-list))))
   nil)
 
-(defun grep-fallback-stderr (pid _output)
-  "stderr is unused by the aggregation (per-file exit codes carry
-it); present for make-process parity."
+(defvar grep-fallback-stderr "" "The current file's buffered stderr (gate r1: the exit-2 error message carries it, rg-parity).")
+
+(defun grep-fallback-stderr-filter (pid output)
+  "Buffer the CURRENT file's stderr (gate r1: the ≥2 error message
+carries grep's actual message, rg-parity)."
+  (if (and (numberp grep-fallback-pid) (= pid grep-fallback-pid))
+    (setq grep-fallback-stderr (concat grep-fallback-stderr output)))
   nil)
 
 (defun grep-fallback-handle (ln)
@@ -1145,7 +1163,10 @@ stopped flag) drops silently — a NEW run owns a new pid/gen."
               (grep-buffer-complete grep-fallback-gen "error"
                 (concat "grep exited "
                   (number-to-string exit-code) " on "
-                  grep-fallback-file))))))))
+                  grep-fallback-file
+                  (if (> (length (grep-chomp grep-fallback-stderr)) 0)
+                    (concat ": " (grep-chomp grep-fallback-stderr))
+                    "")))))))))
   nil)
 
 (defun grep-fallback-finish ()
@@ -1162,21 +1183,27 @@ when K < N); none → no-matches."
   nil)
 
 (defun grep-fallback-progress ()
-  "Rewrite the searching placeholder every 25 files (the streamed
-hits re-appended from the structural list)."
-  (if (member (grep-buffer-name) (buffer-list))
-    (progn
-      (grep-switch-in)
-      (buffer-set-read-only nil)
-      (grep-clear-buffer)
-      (buffer-append
-        (concat "grep " (hashmap-get grep-meta "pattern") " — searching… "
-          (number-to-string grep-fallback-done-files) "/"
-          (number-to-string grep-fallback-total) "\n"))
-      (dolist (h (grep-hits-get))
-        (buffer-append (concat (grep-hit-line h) "\n")))
-      (buffer-set-read-only t)
-      (grep-switch-out)))
+  "Progress every 25 files. Gate r1: the header ONLY while NO hits
+have streamed yet (render-append n=1 CLEARS the placeholder — re-
+adding a header after hits would shift every row and break the
+cursor-line==hit-index mapping). Once hits exist the STATUS line
+carries the counter (visible, zero buffer desync)."
+  (let ((label (concat "grep: " (number-to-string grep-fallback-done-files)
+                 "/" (number-to-string grep-fallback-total) " files")))
+    (if (> (length (grep-hits-get)) 0)
+      (editor-set-status label)
+      (if (member (grep-buffer-name) (buffer-list))
+        (progn
+          (grep-switch-in)
+          (buffer-set-read-only nil)
+          (grep-clear-buffer)
+          (buffer-append
+            (concat "grep " (hashmap-get grep-meta "pattern") " — searching… "
+              (number-to-string grep-fallback-done-files) "/"
+              (number-to-string grep-fallback-total) "\n"))
+          (buffer-set-read-only t)
+          (grep-switch-out))
+        nil)))
   nil)
 
 (defun grep-fallback-dump ()

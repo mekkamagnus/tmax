@@ -236,3 +236,85 @@ describe("#309 — case semantics + -I + exposure", () => {
     expect(grepFlavor.length).toBeGreaterThan(0);
   });
 });
+describe("#309 — gate r1 coverage additions", () => {
+  test("AUTO dispatch: rg MISSING (PATH-stubbed) → the fallback answers on the FIRST search", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "autopath needle\n");
+    e(editor, '(editor/commands/grep/grep-backend-set! "auto")');
+    e(editor, '(editor/commands/grep/grep-rg-detected-set! nil)');
+    e(editor, '(editor/commands/grep/grep-rg-executable-set! "/nonexistent/rg-missing-309")');
+    // The FIRST search on a fresh auto session must run the FALLBACK
+    // (the detection side effect precedes dispatch — gate r1's
+    // first-search-went-to-fallback bug).
+    e(editor, '(editor/commands/grep/grep-search "autopath")');
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    expect(dump(editor)).toContain("matched=1");
+    e(editor, '(editor/commands/grep/grep-rg-executable-set! "rg")');
+  });
+
+  test("AUTO dispatch: rg PRESENT → rg on the FIRST search (the inverse)", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "rgfirst needle\n");
+    e(editor, '(editor/commands/grep/grep-backend-set! "auto")');
+    e(editor, '(editor/commands/grep/grep-rg-detected-set! nil)');
+    e(editor, '(editor/commands/grep/grep-rg-executable-set! "rg")');
+    e(editor, '(editor/commands/grep/grep-search "rgfirst")');
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    // rg ran (the rg generation counter moved; the fallback's did not).
+    const rgGen = Number(e(editor, "(editor/commands/grep/grep-generation-get)").value);
+    expect(rgGen).toBeGreaterThanOrEqual(1);
+  });
+
+  test("SPAWN FAILURE mid-sequence → #308 rollback (prior content restored)", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "keepme needle\n");
+    e(editor, '(editor/commands/grep/grep-search "keepme")');
+    let s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    e(editor, '(buffer-switch "*grep*")');
+    const prior = strip(bufferText(editor));
+    // A BAD-SHEBANG stub: exec-lookup passes (exists + exec bit)
+    // but the spawn itself throws ENOENT → rollback restores the
+    // prior generation's content.
+    const bad = join(process.cwd(), "grep-badshebang-309.sh");
+    writeFileSync(bad, "#!/nonexistent/interpreter-309\nexit 0\n");
+    execFileSync("chmod", ["+x", bad]);
+    e(editor, `(editor/commands/grep/grep-fallback-executable-set! "${bad}")`);
+    e(editor, '(editor/commands/grep/grep-search "anything")');
+    s = await waitStatus(["hits", "no matches", "error", "failed"]);
+    expect(st(editor)).toContain("spawn failed");
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toBe(prior);
+    e(editor, '(editor/commands/grep/grep-fallback-executable-set! "grep")');
+  });
+
+  test("STRANGER-PID sentinel drops silently (no state change)", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "stranger needle\n");
+    e(editor, '(editor/commands/grep/grep-search "stranger")');
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    const d0 = dump(editor);
+    e(editor, "(editor/commands/grep/grep-fallback-sentinel 999999 0)");
+    expect(dump(editor)).toBe(d0);
+  });
+
+  test("g-RERUN mid-availability: the fallback's rerun closure re-runs it", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "rerun needle\n");
+    e(editor, '(editor/commands/grep/grep-search "rerun")');
+    let s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    const gen1 = Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value);
+    e(editor, "(editor/commands/grep/grep-rerun)");
+    s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    expect(Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value)).toBeGreaterThan(gen1);
+  });
+
+  test("MISSING SCOPE errors honestly (no silent no-matches — gate r1)", async () => {
+    e(editor, '(editor/commands/grep/grep-search "x" "/nonexistent/scope-309")');
+    const s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("error");
+    e(editor, '(buffer-switch "*grep*")');
+    expect(strip(bufferText(editor))).toContain("no such directory");
+    expect(dump(editor)).toContain("/0");
+  });
+});
