@@ -738,6 +738,27 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
           "xargs -0 stat -f '%d %i %Lp %u %g' -- 2>/dev/null < " scan " | sort -u > " out " ; "
           "fi ; "))
 
+;; r160: the mode/owner join — the inodes whose tuple differs from the
+;; before-table, its first 100 kept, and a MARKER when the cap hit. The
+;; report says so: "100 path(s)" must not read as the whole change
+;; (codex gate r159 round 1, reproduced: chmod on 101 files). (sort -u
+;; first — every path of a hard-linked inode carries the same tuple.)
+(defun fikra-ollama-mode-join-cmd (modes cand inodes all cap)
+  (concat
+    "awk 'NR==FNR {b[$1 \" \" $2]=$0; next} (($1 \" \" $2) in b) && b[$1 \" \" $2]!=$0 {print $2}' " modes " " cand " | sort -u > " all " ; "
+    "head -100 " all " > " inodes " ; "
+    "tail -n +101 " all " | grep -q . && touch " cap " ; "
+    "rm -f " all " ; "))
+
+;; r155d: ignored entries that appeared or vanished (the stamp scan
+;; cannot see a deletion). r160: the first 100 kept, a MARKER on a cap hit.
+(defun fikra-ollama-ignored-diff-cmd (ign-a ign-b ignored all cap)
+  (concat
+    "diff " ign-a " " ign-b " | grep '^[<>]' | cut -c3- > " all " ; "
+    "head -100 " all " > " ignored " ; "
+    "tail -n +101 " all " | grep -q . && touch " cap " ; "
+    "rm -f " all " ; "))
+
 (defun fikra-ollama-snapshot-wrap (cmd dir)
   (let* ((d (concat dir "/.tmax/fikra"))
          (tid (fikra/thread/fikra-thread-current))
@@ -751,10 +772,16 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
          (cand (fikra/thread/fikra-thread-shq (concat d "/ckpt-cand-" tid)))
          (inodes (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-" tid)))
          (ignored (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-" tid)))
+         ;; r160: the join's full output and its cap markers (the reader
+         ;; consumes the markers and the report says when one was hit).
+         (inodes-all (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-all-" tid)))
+         (ignored-all (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-all-" tid)))
+         (inodes-cap (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-cap-" tid)))
+         (ignored-cap (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-cap-" tid)))
          (ign-a (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-" tid)))
          (ign-b (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-after-" tid))))
     ;; The caller has cd'ed into the working dir.
-    (concat "mkdir -p " dq " ; rm -f " f " " changed " " meta " " modes " " cand " " inodes " " ignored " ; "
+    (concat "mkdir -p " dq " ; rm -f " f " " changed " " meta " " modes " " cand " " inodes " " ignored " " inodes-all " " ignored-all " " inodes-cap " " ignored-cap " ; "
             (fikra-ollama-ignored-listing-cmd ign-a)
             (fikra-ollama-snapshot-cmd idx "__p")
             ;; r156: what each file's mode and owner are BEFORE the
@@ -799,7 +826,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
             ;; reading-only): two filesystems mounted under the working
             ;; dir can reuse an inode number. find names by inode alone —
             ;; see the declared limit.
-            "awk 'NR==FNR {b[$1 \" \" $2]=$0; next} (($1 \" \" $2) in b) && b[$1 \" \" $2]!=$0 {print $2}' " modes " " cand " | sort -u | head -100 > " inodes " ; "
+            (fikra-ollama-mode-join-cmd modes cand inodes inodes-all inodes-cap)
             "if [ -s " inodes " ] ; then "
             ;; r156f (codex gate round 4, reproduced): .tmax at ANY depth —
             ;; the root-only exclusion named a hard link placed under a
@@ -810,7 +837,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
             ;; r155d: ignored entries that appeared or vanished (the scan
             ;; above cannot see a deletion).
             (fikra-ollama-ignored-listing-cmd ign-b)
-            "diff " ign-a " " ign-b " | grep '^[<>]' | cut -c3- | head -100 > " ignored " ; "
+            (fikra-ollama-ignored-diff-cmd ign-a ign-b ignored ignored-all ignored-cap)
             "echo \"$__p $__q\" > " f)))
 
 ;; r158: the MEDIATED command's scan — the ordinary wrap's changed-entry
@@ -831,12 +858,18 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
          (cand (fikra/thread/fikra-thread-shq (concat d "/ckpt-cand-" tid)))
          (inodes (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-" tid)))
          (ignored (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-" tid)))
+         ;; r160: the join's full output and its cap markers (the reader
+         ;; consumes the markers and the report says when one was hit).
+         (inodes-all (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-all-" tid)))
+         (ignored-all (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-all-" tid)))
+         (inodes-cap (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-cap-" tid)))
+         (ignored-cap (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-cap-" tid)))
          (ign-a (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-" tid)))
          (ign-b (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-after-" tid))))
     ;; The caller has cd'ed into the working dir. File names mirror the
     ;; ordinary wrap's (the reader is shared); rm -f at the start keeps
     ;; a stale run's listing out of this one.
-    (concat "mkdir -p " dq " ; rm -f " changed " " meta " " modes " " cand " " inodes " " ignored " ; "
+    (concat "mkdir -p " dq " ; rm -f " changed " " meta " " modes " " cand " " inodes " " ignored " " inodes-all " " ignored-all " " inodes-cap " " ignored-cap " ; "
             (fikra-ollama-ignored-listing-cmd ign-a)
             (fikra-ollama-mode-table-cmd modes)
             "touch " stamp " ; "
@@ -845,13 +878,13 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
             "find . -cnewer " stamp " -not -type d -not -path '*/.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
             "rm -f " meta " ; if [ -s " changed " ] ; then "
             (fikra-ollama-mode-candidates-cmd changed cand)
-            "awk 'NR==FNR {b[$1 \" \" $2]=$0; next} (($1 \" \" $2) in b) && b[$1 \" \" $2]!=$0 {print $2}' " modes " " cand " | sort -u | head -100 > " inodes " ; "
+            (fikra-ollama-mode-join-cmd modes cand inodes inodes-all inodes-cap)
             "if [ -s " inodes " ] ; then "
             "find . -not -type d -not -path '*/.git/*' -not -path '*/.tmax/*' "
             (hex-decode "5c") "( $(sed -e 's/^/-inum /' -e '$!s/$/ -o/' " inodes " | xargs) " (hex-decode "5c") ") -print0 > " meta " ; "
             "fi ; fi ; rm -f " modes " " cand " " inodes " ; "
             (fikra-ollama-ignored-listing-cmd ign-b)
-            "diff " ign-a " " ign-b " | grep '^[<>]' | cut -c3- | head -100 > " ignored " ; "
+            (fikra-ollama-ignored-diff-cmd ign-a ign-b ignored ignored-all ignored-cap)
             ;; The mediated captures see the WHOLE disk state (no .tmax
             ;; exclusion) — every scratch file this wrap leaves would ride
             ;; into the action's post tree and the pair's diff. The scan
@@ -985,7 +1018,9 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
            (changed-lines (nth 0 scan))
            (meta-lines (nth 1 scan))
            (ignored-lines (nth 2 scan))
-           (scan-truncated (nth 3 scan)))
+           (scan-truncated (nth 3 scan))
+           (meta-capped (nth 4 scan))
+           (ignored-capped (nth 5 scan)))
       ;; The trees marker is consumed whatever it held — a stale or
       ;; useless one must not be reported again by an unrelated later
       ;; call (the scan files are consumed by the reader).
@@ -1002,7 +1037,8 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
           ;; cannot record. r158: the report carries the action's
           ;; identity and the cap flag.
           (fikra-ollama-report-outside-checkpoint changed-lines meta-lines ignored-lines pre post
-            (funcall 'fikra/checkpoint/fikra-checkpoint-emit-act-get) scan-truncated)
+            (funcall 'fikra/checkpoint/fikra-checkpoint-emit-act-get) scan-truncated
+            meta-capped ignored-capped)
           (if (string= pre post)
             nil
             ;; r134e: this runs in the SENTINEL's eval context — the event
@@ -1054,7 +1090,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
 ;; A META entry is reported when the tree diff does not already cover it
 ;; — an executable bit, a link's target, a new or deleted file are
 ;; covered and stay silent.
-(defun fikra-ollama-report-outside-checkpoint (changed meta ignored pre post act truncated)
+(defun fikra-ollama-report-outside-checkpoint (changed meta ignored pre post act truncated meta-capped ignored-capped)
   (let* ((root (fikra/thread/fikra-thread-working-dir))
          (rq (fikra/thread/fikra-thread-shq root))
          ;; Nothing scanned (a command that wrote no file the scan can
@@ -1062,11 +1098,20 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
          ;; git runs at all (the sentinel blocks the editor meanwhile).
          (none (and (or (null changed) (= (length changed) 0))
                     (or (null meta) (= (length meta) 0))))
+         ;; r160: what the tree RECORDED — the paths whose tree MODE
+         ;; differs between the two trees. It used to be every path the
+         ;; diff NAMED, which dropped a permission change on a path that
+         ;; also carried a content edit: git keeps the content and the
+         ;; executable bit, nothing else (codex gate r159 round 1,
+         ;; reproduced). Only the mode/owner pass is affected — a scan
+         ;; or ignored entry is in neither tree, so no diff names it.
          (covered (if none
                    (list)
-                   (fikra-ollama-split-paths
-                     (shell-command
-                       (concat "git -C " rq " diff --name-only -z " pre " " post)))))
+                   (fikra-ollama-mode-changed-paths
+                     (fikra-ollama-split-paths
+                       (shell-command
+                         (concat "git -C " rq " diff --raw -z --no-renames " pre " " post)))
+                     (list))))
          ;; Every path either tree holds — what the checkpoint CAN revert.
          ;; (Identical trees name the same paths: one listing.)
          (held (if none
@@ -1108,14 +1153,21 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
          ;; were never looked at, so coverage beyond it is NOT ESTABLISHED
          ;; (a statement about the scan, true whatever was found).
          (unexamined (> (+ (nth 1 r-scan) (nth 1 r-meta) (nth 1 r-ign)) 0))
-         ;; What the scan could not see, said in one clause.
-         (limits (concat
-                   (if (= truncated 1) "the change scan hit its 60 KB cap" "")
-                   (if (and (= truncated 1) unexamined) " and " "")
-                   (if unexamined
-                     (concat "the change scan examined only its first "
-                             (number-to-string fikra-ollama-examine-cap) " entries")
-                     ""))))
+         ;; What the scan could not see, each limit in its own clause.
+         ;; r160: the child's 100-inode cap on the mode/owner join and
+         ;; its 100-line cap on the ignored listing join the 60 KB and
+         ;; examination caps — a hit is never silent.
+         (limits (fikra-ollama-join-take
+                   (fikra-ollama-nonempty
+                     (list
+                       (if (= truncated 1) "the change scan hit its 60 KB cap" "")
+                       (if unexamined
+                         (concat "the change scan examined only its first "
+                                 (number-to-string fikra-ollama-examine-cap) " entries")
+                         "")
+                       (if (= meta-capped 1) "the mode/owner scan kept only its first 100 changed inodes" "")
+                       (if (= ignored-capped 1) "the ignored-entry listing kept only its first 100 lines" "")))
+                   99 "; ")))
     ;; r158: a scan capped at 60 KB reports too — whole records beyond
     ;; the cap were lost, so "no outside path found" is not proof the
     ;; command changed nothing the checkpoint cannot hold. The event
@@ -1150,6 +1202,33 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                     " path(s) changed outside the checkpoint — not revertable"))
           nil))
       nil)))
+
+;; r160: the paths whose tree MODE differs between two trees — what git
+;; actually RECORDS of a file's mode (the executable bit, the type).
+;; TOKENS are `git diff --raw -z --no-renames` split at NUL: a header
+;; ":<old> <new> <sha> <sha> <status>", then its one path. A content-only
+;; change keeps both modes; an addition or a deletion has 000000 on one
+;; side (recorded — the whole path is in the trees' diff).
+(defun fikra-ollama-mode-changed-paths (tokens acc)
+  (if (or (null tokens) (null (cdr tokens)))
+    (reverse acc)
+    (let ((h (car tokens)))
+      (if (and (stringp h) (> (length h) 14) (string= (substring h 0 1) ":"))
+        (fikra-ollama-mode-changed-paths (cdr (cdr tokens))
+          (if (string= (substring h 1 7) (substring h 8 14))
+            acc
+            (cons (car (cdr tokens)) acc)))
+        (fikra-ollama-mode-changed-paths (cdr tokens) acc)))))
+
+;; r160: the non-empty strings of a list, in order (the report's limit
+;; clauses are built as "" when a limit was not hit).
+(defun fikra-ollama-nonempty (items)
+  (if (null items)
+    (list)
+    (let ((rest (fikra-ollama-nonempty (cdr items))))
+      (if (and (stringp (car items)) (> (length (car items)) 0))
+        (cons (car items) rest)
+        rest))))
 
 ;; r159: a list of paths -> a membership hash (value t).
 (defun fikra-ollama-list-hash (items h)
@@ -1233,13 +1312,18 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
 ;; the report examines each class in its own pass, with its own
 ;; examination budget, so a crowd in one cannot crowd another out (the
 ;; gate's reproduced P1: 401 held changes hid the ignored deletion).
-;; Returns (list <scan-lines> <meta-lines> <ignored-lines> <truncated 1|0>).
+;; Returns (list <scan-lines> <meta-lines> <ignored-lines> <truncated 1|0>
+;; <inodes-capped 1|0> <ignored-capped 1|0>). r160: the child leaves a
+;; marker file when one of its 100-entry caps hit; it is read here and
+;; consumed with the rest.
 (defun fikra-ollama-take-scan-files ()
   (let* ((base (concat (fikra/thread/fikra-thread-working-dir) "/.tmax/fikra/ckpt-"))
          (tid (fikra/thread/fikra-thread-current))
          (changed (concat base "changed-" tid))
          (meta (concat base "meta-" tid))
          (ignored (concat base "ignored-" tid))
+         (inodes-cap (concat base "inodes-cap-" tid))
+         (ignored-cap (concat base "ignored-cap-" tid))
          (scanned (fikra-ollama-scan-paths
                     (if (file-exists-p changed) (read-file-content changed) "") 60000))
          (meta-lines
@@ -1252,11 +1336,16 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
              ;; own child cap is 100 lines.
              (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
              (list))))
-    (shell-command (concat "rm -f "
-                      (fikra/thread/fikra-thread-shq changed) " "
-                      (fikra/thread/fikra-thread-shq meta) " "
-                      (fikra/thread/fikra-thread-shq ignored)))
-    (list (car scanned) meta-lines ignored-lines (nth 1 scanned))))
+    (let ((inodes-capped (if (file-exists-p inodes-cap) 1 0))
+          (ignored-capped (if (file-exists-p ignored-cap) 1 0)))
+      (shell-command (concat "rm -f "
+                        (fikra/thread/fikra-thread-shq changed) " "
+                        (fikra/thread/fikra-thread-shq meta) " "
+                        (fikra/thread/fikra-thread-shq ignored) " "
+                        (fikra/thread/fikra-thread-shq inodes-cap) " "
+                        (fikra/thread/fikra-thread-shq ignored-cap)))
+      (list (car scanned) meta-lines ignored-lines (nth 1 scanned)
+        inodes-capped ignored-capped))))
 
 (defun fikra-ollama-split-paths (text)
   (if (or (not (stringp text)) (= (length text) 0))
@@ -1423,7 +1512,8 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                                      (fikra-ollama-report-outside-checkpoint
                                        (nth 0 scan) (nth 1 scan) (nth 2 scan)
                                        fikra-ollama-last-pre-sha post
-                                       (hashmap-get entry "act") (nth 3 scan))
+                                       (hashmap-get entry "act") (nth 3 scan)
+                                       (nth 4 scan) (nth 5 scan))
                                      (setq fikra-ollama-last-pre-name nil)
                                      (setq fikra-ollama-last-pre-sha nil)))
                             (error () nil)))

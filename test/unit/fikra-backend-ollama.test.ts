@@ -4096,7 +4096,7 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     const changed = Array.from({ length: 4001 }, () => '"./base.txt"').join(" ");
     e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "CAPPED-ROW") (list "act" "9-1")))');
     e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/9-a2") (list "act" "9-1")))');
-    e(ed, `(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list ${changed}) (list) (list) "HEAD" "HEAD" "9-1" 0)`);
+    e(ed, `(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list ${changed}) (list) (list) "HEAD" "HEAD" "9-1" 0 0 0)`);
     // (No turn ran here, so read the replay's own render.)
     const buf = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
     const row = buf.split("\n").find((l) => l.includes("CAPPED-ROW"));
@@ -4107,7 +4107,7 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     // A named path keeps its own qualifier.
     e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "NAMED-ROW") (list "act" "9-2")))');
     e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/9-a4") (list "act" "9-2")))');
-    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list "./lost159.txt") (list) (list) "HEAD" "HEAD" "9-2" 0)');
+    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list "./lost159.txt") (list) (list) "HEAD" "HEAD" "9-2" 0 0 0)');
     const buf2 = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
     expect(buf2.split("\n").find((l) => l.includes("CAPPED-ROW"))).toContain("coverage not established");
     const named = buf2.split("\n").find((l) => l.includes("NAMED-ROW"));
@@ -4119,10 +4119,143 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     // and every permission report went silent.)
     e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "MODE-ROW") (list "act" "9-3")))');
     e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/9-a6") (list "act" "9-3")))');
-    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list) (list "./base.txt") (list) "HEAD" "HEAD" "9-3" 0)');
+    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list) (list "./base.txt") (list) "HEAD" "HEAD" "9-3" 0 0 0)');
     const buf3 = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
     expect(buf3.split("\n").find((l) => l.includes("MODE-ROW"))).toContain("[ckpt main/9-a6 — not held]");
     expect(buf3).toContain("1 path(s) the checkpoint cannot hold changed — not revertable: base.txt");
+  }, 90000);
+
+  // ── r160: THE MODE PASS EXCLUDES ONLY WHAT THE TREE RECORDED ────────
+  // The r159 gate's two reproduced pre-existing P2s. (a) The mode/owner
+  // pass dropped an entry whenever the tree diff NAMED its path — but a
+  // path can carry a content edit (recorded) AND a permission change
+  // (git keeps the executable bit and nothing else). (b) The child's
+  // 100-inode cap on that join, and the ignored listing's 100-line cap,
+  // said nothing when they hit.
+  test("a content edit AND a permission change on ONE file is still reported (r160)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "append to base and lock it down")');
+    call(ed, 770, "echo more >> base.txt; chmod 600 base.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    const rows = logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+    expect(rows.join("\n")).toContain("not revertable: base.txt");
+    await settleRefireFrom(ed, seeded, "done");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    // The CONTENT is held (a pair was sealed) — the warning is about
+    // the permission, and it qualifies the row.
+    expect(actionRefs().length).toBeGreaterThan(0);
+    const lines = strip(String(e(ed, "(buffer-text)").value)).split("\n");
+    const at = lines.findIndex((l) => l.includes("⚙ bash"));
+    expect(at).toBeGreaterThanOrEqual(0);
+    const row = lines.slice(at, at + 3).join("\n");
+    expect(row).toContain("[ckpt main/");
+    expect(row).toContain("— not held]");
+    expect(row).not.toContain("✓]");
+  }, 90000);
+
+  test("the mode/owner scan's 100-inode cap is flagged — 101 changes do not read as 100 (r160)", async () => {
+    const ed = await armed();
+    mkdirSync(join(process.cwd(), "mode160"));
+    for (let i = 0; i < 101; i++) writeFileSync(join(process.cwd(), `mode160/f${i}.txt`), "data\n");
+    e(ed, '(fikra/chat/fikra-turn-send "lock down the directory")');
+    call(ed, 771, "chmod 600 mode160/*");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 240);
+    const errors = () => logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+    expect(errors().join("\n")).toContain("the mode/owner scan kept only its first 100 changed inodes");
+    expect(errors().join("\n")).toContain("more changed paths may be unreported");
+    await settleRefireFrom(ed, seeded, "done");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+    // THE BOUNDARY: exactly 100 changed inodes is the whole change —
+    // "100 path(s)" with no cap clause.
+    mkdirSync(join(process.cwd(), "mode160b"));
+    for (let i = 0; i < 100; i++) writeFileSync(join(process.cwd(), `mode160b/f${i}.txt`), "data\n");
+    e(ed, '(fikra/chat/fikra-turn-send "lock down the other directory")');
+    call(ed, 773, "chmod 600 mode160b/*");
+    // (The id is read right after the call — before the sentinel's
+    // re-fire lands, as in the first turn.)
+    const seeded2 = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    for (let i = 0; i < 240 && errors().length < 2; i++) await new Promise((r) => setTimeout(r, 100));
+    expect(errors().length).toBeGreaterThanOrEqual(2);
+    const second = errors()[1]!;
+    expect(second).toContain("100 path(s) the checkpoint cannot hold changed");
+    expect(second).not.toContain("kept only");
+    await settleRefireFrom(ed, seeded2, "done");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+  }, 90000);
+
+  test("the ignored-entry listing's 100-line cap is flagged (r160)", async () => {
+    const ed = await armed();
+    const giPath = join(process.cwd(), ".gitignore");
+    const gi = existsSync(giPath) ? readFileSync(giPath, "utf8") : "";
+    writeFileSync(giPath, gi + (gi.length > 0 && !gi.endsWith("\n") ? "\n" : "") + "mix160/g*\n");
+    mkdirSync(join(process.cwd(), "mix160"));
+    // A non-ignored sibling: git lists a directory of ONLY untracked
+    // entries as one line, which would defeat the count.
+    writeFileSync(join(process.cwd(), "mix160/keep.txt"), "keep\n");
+    const gone = Array.from({ length: 101 }, (_, i) => `mix160/g${i}.txt`);
+    // DELETED ignored entries: the listing is the only scan that can
+    // see a deletion (a created one also shows up in the ctime scan).
+    for (const g of gone) writeFileSync(join(process.cwd(), g), "x\n");
+    e(ed, '(fikra/chat/fikra-turn-send "remove a crowd of ignored files")');
+    call(ed, 772, `rm ${gone.join(" ")}`);
+    if (String(e(ed, "(fikra/thread/fikra-thread-status)").value) === "confirming") {
+      e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    }
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 240);
+    const errors = () => logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+    expect(errors().join("\n")).toContain("the ignored-entry listing kept only its first 100 lines");
+    await settleRefireFrom(ed, seeded, "done");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+    // THE BOUNDARY: exactly 100 deleted entries is the whole change.
+    writeFileSync(giPath, readFileSync(giPath, "utf8") + "mix160b/g*\n");
+    mkdirSync(join(process.cwd(), "mix160b"));
+    writeFileSync(join(process.cwd(), "mix160b/keep.txt"), "keep\n");
+    const hundred = Array.from({ length: 100 }, (_, i) => `mix160b/g${i}.txt`);
+    for (const g of hundred) writeFileSync(join(process.cwd(), g), "x\n");
+    e(ed, '(fikra/chat/fikra-turn-send "remove exactly one hundred ignored files")');
+    call(ed, 774, `rm ${hundred.join(" ")}`);
+    if (String(e(ed, "(fikra/thread/fikra-thread-status)").value) === "confirming") {
+      e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    }
+    const seeded2 = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    for (let i = 0; i < 240 && errors().length < 2; i++) await new Promise((r) => setTimeout(r, 100));
+    expect(errors().length).toBeGreaterThanOrEqual(2);
+    const second = errors()[1]!;
+    expect(second).toContain("100 path(s) the checkpoint cannot hold changed");
+    expect(second).not.toContain("kept only");
+    await settleRefireFrom(ed, seeded2, "done");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+  }, 90000);
+
+  // The rule itself, at the report's own level: a meta entry is excluded
+  // only when the tree RECORDED a mode change for its path.
+  test("the mode pass excludes only what the tree recorded (r160)", async () => {
+    const ed = await armed();
+    const gc = ["-c", "user.name=t", "-c", "user.email=t@t"];
+    // A content edit: the tree records it, and its tree mode is unchanged.
+    writeFileSync(join(process.cwd(), "base.txt"), "changed by a commit\n");
+    execFileSync("git", ["add", "base.txt"]);
+    execFileSync("git", [...gc, "commit", "-q", "-m", "r160 content"]);
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "CONTENT-ROW") (list "act" "8-1")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/8-a2") (list "act" "8-1")))');
+    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list) (list "./base.txt") (list) "HEAD~1" "HEAD" "8-1" 0 0 0)');
+    let buf = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    expect(buf).toContain("not revertable: base.txt");
+    expect(buf.split("\n").find((l) => l.includes("CONTENT-ROW"))).toContain("[ckpt main/8-a2 — not held]");
+    // An executable-bit change: the tree records THAT — not a candidate.
+    execFileSync("chmod", ["755", join(process.cwd(), "base.txt")]);
+    execFileSync("git", ["add", "base.txt"]);
+    execFileSync("git", [...gc, "commit", "-q", "-m", "r160 exec bit"]);
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "EXECBIT-ROW") (list "act" "8-2")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/8-a4") (list "act" "8-2")))');
+    const before = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value)).split("\n").filter((l) => l.includes("checkpoint-error")).length;
+    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list) (list "./base.txt") (list) "HEAD~1" "HEAD" "8-2" 0 0 0)');
+    buf = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    expect(buf.split("\n").filter((l) => l.includes("checkpoint-error")).length).toBe(before);
+    expect(buf.split("\n").find((l) => l.includes("EXECBIT-ROW"))).toContain("[ckpt main/8-a4 ✓]");
   }, 90000);
 
   tt("a held batch counts its chunks ONCE", async () => {
