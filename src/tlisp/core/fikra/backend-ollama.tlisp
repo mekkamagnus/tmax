@@ -135,9 +135,10 @@ pre-state when earlier actions changed the tree.")
   "r142b: the last action revert's stash patch (the action's own
 pre-to-post change — git-apply restores it).")
 (defvar fikra-ollama-revert-preserved-count 0
-  "r155d: staged entries a finished revert left in place — a revert
-  NEVER writes the index (who staged what cannot be told apart after
-  the fact: an action that ran its own `git add` for one path must not
+  "r155d: staged entries a finished revert left that a COMMIT would
+  record (which ones: fikra-ollama-restore-paths) — a revert NEVER
+  writes the index (who staged what cannot be told apart after the
+  fact: an action that ran its own `git add` for one path must not
   cost the user an entry they staged for another).")
 (defvar fikra-ollama-action-posts (list)
   "r142: the action post-refs newest-first (the revert target picker).")
@@ -667,7 +668,11 @@ with its post-exit capture.")
             ;; mtime but cannot keep a file's ctime (a new inode, or any
             ;; write, sets it to now). NUL-separated: a name may contain
             ;; a newline.
-            "find . -cnewer " stamp " -type f -not -path './.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
+            ;; r155f: EVERY .git directory is git's own state, a nested
+            ;; repository's included — the snapshot's own `git add -A`
+            ;; rewrites a nested repo's index, which the scan then listed
+            ;; as a path it could not hold.
+            "find . -cnewer " stamp " -type f -not -path '*/.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
             ;; r155d: ignored entries that appeared or vanished (the scan
             ;; above cannot see a deletion).
             (fikra-ollama-ignored-listing-cmd ign-b)
@@ -838,18 +843,41 @@ with its post-exit capture.")
         (if (> (length tok) 0) (setq out (cons tok out)) nil))
       (reverse out))))
 
-;; r155c: the files the command changed that lie OUTSIDE the checkpoint's
-;; view — ignored by git, under a nested .tmax, or simply not in the
-;; pre→post diff — are named in the transcript: they are real mutations
-;; a revert will not undo. (The diff is read NUL-separated: git quotes
-;; paths with spaces or quotes in its line output.)
+;; r155c: a file the command changed that the checkpoint's view cannot
+;; hold is named in the transcript: it is a real mutation a revert will
+;; not undo.
+;; r155f (codex gate): OUTSIDE means exactly that — the path is in
+;; NEITHER snapshot's tree (ignored by git, under a nested .tmax, inside
+;; a nested repository). It used to be "changed but absent from the
+;; pre→post diff", which also caught every file the command merely
+;; TOUCHED: `touch base.txt` was reported as "cannot hold" although its
+;; tracked content and mode were unchanged. (The diff is read
+;; NUL-separated: git quotes paths with spaces or quotes in its line
+;; output.)
 (defun fikra-ollama-report-outside-checkpoint (changed pre post)
   (let* ((root (fikra/thread/fikra-thread-working-dir))
-         (covered (fikra-ollama-split-paths
-                    (shell-command
-                      (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                              " diff --name-only -z " pre " " post))))
-         (outside (fikra-ollama-outside-scan changed (list) covered 0)))
+         (rq (fikra/thread/fikra-thread-shq root))
+         ;; Nothing scanned (a command that wrote no file the scan can
+         ;; see — the common read-only call): nothing to compare, so no
+         ;; git runs at all (the sentinel blocks the editor meanwhile).
+         (none (or (null changed) (= (length changed) 0)))
+         (covered (if none
+                   (list)
+                   (fikra-ollama-split-paths
+                     (shell-command
+                       (concat "git -C " rq " diff --name-only -z " pre " " post)))))
+         ;; Every path either tree holds — what the checkpoint CAN revert.
+         ;; (Identical trees name the same paths: one listing.)
+         (held (if none
+                 (list)
+                 (append
+                   (fikra-ollama-split-paths
+                     (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " pre)))
+                   (if (string= pre post)
+                     (list)
+                     (fikra-ollama-split-paths
+                       (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " post)))))))
+         (outside (fikra-ollama-outside-scan changed (list) covered held 0)))
     (if (> (length outside) 0)
       (let ((n (length outside)))
         (condition-case nil
@@ -867,9 +895,10 @@ with its post-exit capture.")
           nil))
       nil)))
 
-;; Changed files (./x, one per line) minus the covered ones; empty
-;; entries dropped, "./" stripped; the first 400 (the list's own cap).
-(defun fikra-ollama-outside-scan (lines acc covered i)
+;; Changed entries (the scan's ./x, the listing's git names) minus the
+;; covered ones and the ones the trees hold; empty entries dropped, "./"
+;; stripped; the first 400 (the list's own cap).
+(defun fikra-ollama-outside-scan (lines acc covered held i)
   (if (or (null lines) (> i 400))
     (reverse acc)
     (let ((l (car lines)))
@@ -879,10 +908,11 @@ with its post-exit capture.")
         ;; r155d: the time scan and the ignored-entry listing can both
         ;; name one path — it is reported once.
         (fikra-ollama-outside-scan (cdr lines)
-          (if (and (> (length p) 0) (not (member p covered)) (not (member p acc)))
+          (if (and (> (length p) 0) (not (member p covered)) (not (member p held))
+                   (not (member p acc)))
             (cons p acc)
             acc)
-          covered (+ i 1))))))
+          covered held (+ i 1))))))
 
 ;; NUL-separated path list (git -z) → its paths, verbatim: no trimming
 ;; (a path may begin or end with a space), no newline splitting (a path
@@ -896,11 +926,15 @@ with its post-exit capture.")
       (reverse out))))
 
 ;; The first N of a list, joined by SEP.
+;; r155f: "another element?" is asked with NULL — the tail past the last
+;; element is an empty-list VALUE, which is truthy to `if`/`and` (only
+;; `null` sees it as empty). A bare `(cdr items)` recursed once past the
+;; end and left a trailing separator on every "cannot hold" row.
 (defun fikra-ollama-join-take (items n sep)
   (if (or (null items) (<= n 0))
     ""
     (concat (car items)
-            (if (and (cdr items) (> n 1))
+            (if (and (not (null (cdr items))) (> n 1))
               (concat sep (fikra-ollama-join-take (cdr items) (- n 1) sep))
               ""))))
 
@@ -1675,17 +1709,22 @@ with its post-exit capture.")
                           (setq fikra-ollama-action-posts (cdr fikra-ollama-action-posts))
                           (keymap-mutable-set! fikra-ollama-action-pairs post nil)
                           (fikra-ollama-tombstone-action post)
-                          ;; r155d: staged entries left in place are said
-                          ;; out loud, in the status AND in the transcript
-                          ;; — they would bring their files back at the
-                          ;; next commit.
+                          ;; r155d/r155e: staged entries left in place are
+                          ;; said out loud, in the status AND in the
+                          ;; transcript — a commit would record them. Which
+                          ;; entries qualify: fikra-ollama-restore-paths.
+                          ;; r155f (codex gate): the note states the
+                          ;; consequence and the review command — never
+                          ;; what to do about it (the staged content may
+                          ;; be the user's own earlier work: unstaging it
+                          ;; would lose that, and nothing is "gone").
                           (if (> fikra-ollama-revert-preserved-count 0)
                             (condition-case nil
                               (fikra/event/fikra-event-emit-batch-for (fikra/thread/fikra-thread-current)
                                 (list (list (list "kind" "checkpoint-error")
                                             (list "reason" (concat "note: "
                                                                     (number-to-string fikra-ollama-revert-preserved-count)
-                                                                    " staged path(s) left staged by the revert — their worktree files are gone; unstage (git restore --staged) to drop them for good")))))
+                                                                    " path(s) still staged with the content the action left — a commit would record that content, not what the revert restored (review: git diff --cached)")))))
                               (error () nil))
                             nil)
                           (editor-set-status
@@ -1693,7 +1732,7 @@ with its post-exit capture.")
                                     (if (> fikra-ollama-revert-preserved-count 0)
                                       (concat " — "
                                               (number-to-string fikra-ollama-revert-preserved-count)
-                                              " path(s) left staged (unstage to drop them for good)")
+                                              " path(s) still staged: a commit would record the action's content (review: git diff --cached)")
                                       "")))
                           'ok))))))))))))))
 
@@ -1745,43 +1784,34 @@ with its post-exit capture.")
                            " 2>/dev/null && echo RESTORED || echo FAILED"))) "RESTORED")
                  ;; Removal (a path the action ADDED): the WORKTREE file
                  ;; goes; the removal is verified (the path must be gone).
-                 ;; r155d (codex gate P0): the index is never written. Who
-                 ;; staged an entry cannot be told apart after the fact —
-                 ;; an action that ran its own `git add` for one path must
-                 ;; not cost the user an entry they staged for another —
-                 ;; so a staged entry stays and is counted for the note
-                 ;; (it would bring the file back at commit).
-                 (let ((__out (shell-command
+                 ;; r155d (codex gate P0): the index is never written — a
+                 ;; staged entry stays (it is announced below).
+                 (string= (string-trim (shell-command
                    (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p)) " 2>/dev/null; "
                            "test ! -e " (fikra/thread/fikra-thread-shq (concat root "/" p))
-                           " && echo RESTORED || echo FAILED"))))
-                   (let ((__ok (string= (string-trim __out) "RESTORED")))
-                     (if (and __ok
-                              (> (length (string-trim (shell-command
-                                      (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                                              " ls-files -- " (fikra/thread/fikra-thread-shq p) " 2>/dev/null")))) 0))
-                       (setq fikra-ollama-revert-preserved-count
-                         (+ 1 fikra-ollama-revert-preserved-count))
-                       nil)
-                     __ok)))))
+                           " && echo RESTORED || echo FAILED"))) "RESTORED"))))
       (if (and ok has keep-x was-x)
         (shell-command (concat "chmod +x "
                       (fikra/thread/fikra-thread-shq (concat root "/" p))))
         nil)
-      ;; r155e (codex gate P0): a RESTORED path can leave staging behind
-      ;; too — the user staged the action's result, the worktree went back
-      ;; to the pre-action content, and the index still holds what the
-      ;; action wrote: a later commit would silently bring it back. Any
-      ;; staged entry that no longer matches the restored content is
-      ;; counted for the status and the transcript note.
-      (let ((__ix (fikra-ollama-index-state root p)))
-        ;; Only an entry that EXISTS is staging (an untracked path has
-        ;; none — its restored content is simply untracked again), and
-        ;; only one holding the ACTION's result: an index still at HEAD
-        ;; under a pre ref that was the user's own unstaged work is not
-        ;; staging at all (a commit there records HEAD, not the action).
-        (if (and ok has __ix
-                 (fikra-ollama-state-eq __ix (fikra-ollama-path-state root post p)))
+      ;; r155e (codex gate P0): a staged entry can outlive the revert
+      ;; holding the ACTION's result — the worktree went back to the
+      ;; pre-action content, the index still holds what the action wrote,
+      ;; and a later commit would silently bring it back.
+      ;; r155f (codex gate): ONE rule, for a restored and a removed path
+      ;; alike. An entry is announced when it holds the action's result
+      ;; (index state == post state) AND differs from HEAD — only then
+      ;; would a commit record something other than the pre-action state.
+      ;; Not announced: an entry at HEAD (nothing is staged — an action
+      ;; that ran `git restore`), and the user's own staging that equals
+      ;; the restored file (index and worktree agree again).
+      ;; WHO staged an announced entry cannot be known — the content may
+      ;; be the user's own earlier staging — so the note states the
+      ;; consequence and the review command, never what to do about it.
+      (let ((__ix (if ok (fikra-ollama-index-state root p) nil)))
+        (if (and __ix
+                 (fikra-ollama-state-eq __ix (fikra-ollama-path-state root post p))
+                 (not (fikra-ollama-state-eq __ix (fikra-ollama-path-state root "HEAD" p))))
           (setq fikra-ollama-revert-preserved-count
             (+ 1 fikra-ollama-revert-preserved-count))
           nil))
