@@ -11,7 +11,7 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseFooter, scrapeOnce, runPoller } from '../../scripts/ledger-scrape.ts';
+import { parseFooter, resolvePaneForTab, scrapeOnce, runPoller } from '../../scripts/ledger-scrape.ts';
 import { validateLedgerLine } from '../../scripts/ledger-schema.ts';
 import { computeScorecard, type LedgerEvent } from '../../scripts/ledger-report.ts';
 
@@ -227,6 +227,124 @@ describe('runPoller (injected clock + reader)', () => {
 // ---------------------------------------------------------------------------
 // The mismatch alarm (report side) — doctored self-report fixture
 // ---------------------------------------------------------------------------
+
+describe('runPoller with a tab-label resolver (survives pane-id compaction)', () => {
+  test('with resolvePane: every scrape reads the CURRENTLY resolved pane, never the launch id', () => {
+    const ledger = ledgerWith([
+      { event: 'run-start', ts: '2026-11-20T08:38:00Z', label: 'l', goal: 'g', model: 'm', 'order-file-ref': 'o' },
+    ]);
+    try {
+      let t = 1_000_000;
+      let current: string | null = 'w2:p1';
+      const seen: string[] = [];
+      const scrapes = runPoller('w2:pSTALE', ledger, {
+        intervalMs: 60_000,
+        checkMs: 15_000,
+        maxMinutes: 10,
+        maxIterations: 1_000,
+        resolvePane: () => current,
+        // the id compacts right after the first scrape (a tab closed elsewhere)
+        readPane: (pane) => { seen.push(pane); current = 'w2:p7'; return WORKING_PANE; },
+        now: () => new Date(t).toISOString(),
+        nowMs: () => t,
+        sleep: (ms) => { t += ms; },
+      });
+      expect(scrapes).toBeGreaterThanOrEqual(2);
+      expect(seen[0]).toBe('w2:p1');
+      expect(seen.slice(1).length).toBeGreaterThan(0);
+      expect(seen.slice(1).every((p) => p === 'w2:p7')).toBe(true);
+    } finally {
+      rmSync(join(ledger, '..'), { recursive: true, force: true });
+    }
+  });
+
+  test('a transient unresolved tab is retried on the next check, not fatal', () => {
+    const ledger = ledgerWith([
+      { event: 'run-start', ts: '2026-11-20T08:38:00Z', label: 'l', goal: 'g', model: 'm', 'order-file-ref': 'o' },
+    ]);
+    try {
+      let t = 1_000_000;
+      const t0 = t;
+      const seen: string[] = [];
+      const scrapes = runPoller('w2:pSTALE', ledger, {
+        intervalMs: 60_000,
+        checkMs: 15_000,
+        maxMinutes: 5,
+        maxIterations: 1_000,
+        resolvePane: () => (t < t0 + 15_000 ? null : 'w2:p5'), // herdr unreachable for one check
+        readPane: (pane) => { seen.push(pane); return WORKING_PANE; },
+        now: () => new Date(t).toISOString(),
+        nowMs: () => t,
+        sleep: (ms) => { t += ms; },
+      });
+      expect(scrapes).toBeGreaterThanOrEqual(1);
+      expect(seen.length).toBe(scrapes);
+      expect(seen.every((p) => p === 'w2:p5')).toBe(true);
+    } finally {
+      rmSync(join(ledger, '..'), { recursive: true, force: true });
+    }
+  });
+
+  test('tab gone: retries without scraping, then records ONE absence event and stops', () => {
+    const ledger = ledgerWith([
+      { event: 'run-start', ts: '2026-11-20T08:38:00Z', label: 'l', goal: 'g', model: 'm', 'order-file-ref': 'o' },
+    ]);
+    try {
+      let t = 1_000_000;
+      let reads = 0;
+      const scrapes = runPoller('w2:p1', ledger, {
+        intervalMs: 60_000,
+        checkMs: 15_000,
+        maxIterations: 1_000,
+        resolvePane: () => null,
+        tabLabel: 'issue-burn-down',
+        readPane: () => { reads++; return null; },
+        now: () => new Date(t).toISOString(),
+        nowMs: () => t,
+        sleep: (ms) => { t += ms; },
+      });
+      expect(scrapes).toBe(0);
+      expect(reads).toBe(1); // the single read attempt that records the absence
+      const lines = readFileSync(ledger, 'utf8').trim().split('\n');
+      expect(lines).toHaveLength(2); // run-start + the one absence event
+      const e = JSON.parse(lines[1] as string);
+      expect(e['source']).toBe('scraped');
+      expect(e['pane']).toBe('tab-not-found:issue-burn-down');
+      expect(e['ctx-remaining-pct']).toBeNull();
+      expect(validateLedgerLine(lines[1] as string).ok).toBe(true);
+    } finally {
+      rmSync(join(ledger, '..'), { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolvePaneForTab (tab label → pane, safe across id compaction)', () => {
+  const herdr =
+    (tabs: unknown[], panes: unknown[]) =>
+    (cmd: string[]): { exitCode: number | null; stdout: string } => ({
+      exitCode: 0,
+      stdout: JSON.stringify({ result: cmd[1] === 'tab' ? { tabs } : { panes } }),
+    });
+  const TABS = [{ tab_id: 'w2:tA', label: 'issue-burn-down' }, { tab_id: 'w2:tB', label: 'task: fikra' }];
+  const PANES = [{ pane_id: 'w2:p9', tab_id: 'w2:tB' }, { pane_id: 'w2:p4', tab_id: 'w2:tA' }];
+
+  test('finds the pane showing the labelled tab', () => {
+    expect(resolvePaneForTab('w2', 'issue-burn-down', herdr(TABS, PANES))).toBe('w2:p4');
+    expect(resolvePaneForTab('w2', 'task: fikra', herdr(TABS, PANES))).toBe('w2:p9');
+  });
+
+  test('the same label resolves to the NEW id after a compaction', () => {
+    const compacted = [{ pane_id: 'w2:p2', tab_id: 'w2:tA' }, { pane_id: 'w2:p3', tab_id: 'w2:tB' }];
+    expect(resolvePaneForTab('w2', 'issue-burn-down', herdr(TABS, compacted))).toBe('w2:p2');
+  });
+
+  test('null when the tab is gone, its pane is gone, or herdr fails', () => {
+    expect(resolvePaneForTab('w2', 'no-such-tab', herdr(TABS, PANES))).toBeNull();
+    expect(resolvePaneForTab('w2', 'issue-burn-down', herdr(TABS, [PANES[0]]))).toBeNull();
+    expect(resolvePaneForTab('w2', 'issue-burn-down', () => ({ exitCode: 1, stdout: '' }))).toBeNull();
+    expect(resolvePaneForTab('w2', 'issue-burn-down', () => ({ exitCode: 0, stdout: 'not json' }))).toBeNull();
+  });
+});
 
 describe('telemetry cross-check alarm', () => {
   const ev = (event: string, ts: string, fields: Record<string, unknown>): LedgerEvent =>
