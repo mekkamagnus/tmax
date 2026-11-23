@@ -4345,7 +4345,15 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
       await body();
     } finally {
       rmSync(hooks, { recursive: true, force: true });
-      execFileSync("git", ["config", "--unset", "core.hooksPath"]);
+      // Idempotent: a witness that times out under load finishes its
+      // cleanup late — after a later witness has already unset the
+      // section — and `--unset` then exits 5 (an unhandled error in the
+      // gate's full run).
+      try {
+        execFileSync("git", ["config", "--unset", "core.hooksPath"], { stdio: "ignore" });
+      } catch {
+        /* already unset */
+      }
     }
   };
   const fireEdit = (ed2: Editor, id: number, path: string, content: string) => {
@@ -4499,11 +4507,30 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     // It changed nothing: no checkpoint marker at all — and above all
     // not the next command's pre ref.
     expect(look).not.toContain("[ckpt");
+    // r161c (the r161 gate's round 2): the pre-state must not stand
+    // ALONE either — it rendered "⌘ [ckpt main/1-a1 ✓]", a success-looking
+    // row for a pre-state (and an edit never showed its own).
+    expect(text).not.toContain("main/1-a1");
     // The mediated command keeps its own.
     // (The approval panel quotes the command too: take the TOOL row.)
     const row = text.split("\n").find((l) => l.includes("⚙ bash") && l.includes("rm -rf med161c/")) ?? "";
     expect(row).toContain("[ckpt main/1-a2 ✓]");
     expect(row).not.toContain("1-a1");
+  }, 90000);
+
+  test("a staged ready with no action id is not shown at all — a pre-state never stands alone (r161c)", async () => {
+    const ed = await armed();
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer_edit") (list "summary" "NOACT-STAGED-ROW")');
+    for (const [stage, ref] of [["pre", "5-a1"], ["future", "5-a2"], ["post", "5-a3"]]) {
+      emitEv(ed, `(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/${ref}") (list "sha" "x") (list "stage" "${stage}")`);
+    }
+    const text = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    expect(text).toContain("NOACT-STAGED-ROW");
+    for (const ref of ["5-a1", "5-a2", "5-a3"]) expect(text).not.toContain(ref);
+    // The turn's own checkpoints carry no stage: they keep their rows.
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/5") (list "sha" "x")');
+    const after = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    expect(after).toContain("⌘ [ckpt main/5 ✓]");
   }, 90000);
 
   test("a coverage qualifier other than 'not held' survives a capture failure too (r161b)", async () => {

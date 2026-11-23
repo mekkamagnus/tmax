@@ -1266,10 +1266,21 @@ id-less completed thoughts too).")
     (reverse out)
     (let* ((e (car events))
            (k (fikra-event-get-str e "kind"))
-           (act (fikra-event-get-str e "act")))
+           (act (fikra-event-get-str e "act"))
+           (stage (fikra-event-get-str e "stage")))
       (cond
         ((string= k "checkpoint-ready")
-          (if (and act (> (length act) 0))
+          (if (or (and act (> (length act) 0))
+                  ;; r161c (codex gate r161 round 2): a ready that carries
+                  ;; a STAGE is identity-managed even without an act — the
+                  ;; mediated command's PRE is emitted before its act is
+                  ;; minted. It must not stand ALONE either: it rendered as
+                  ;; "⌘ [ckpt <pre> ✓]", a success-looking row for a
+                  ;; pre-state (and an edit never showed its own). Its ref
+                  ;; is the revert target and rides nothing. Unstaged
+                  ;; readies — a turn's baseline and completion, an older
+                  ;; log's action refs — keep their standalone rows.
+                  (> (length stage) 0))
             ;; its ref rides the row; the marker event itself drops
             (fikra-event-inline-act-apply (cdr events) refs errs out)
             (fikra-event-inline-act-apply (cdr events) refs errs (cons e out))))
