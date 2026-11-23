@@ -124,6 +124,31 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
     const viewerPairs = pairs(viewer, false);
     expect(chatPairs).toEqual(["add|added line", "remove|removed line", "add|второй added ünïcode"]);
     expect(viewerPairs).toEqual(chatPairs);
+
+    // valve r3: the FULL logical diff through the viewer path — every
+    // class exercises its span (plain = context DERIVED, not skipped;
+    // the chat grammar only carries sign rows, so this is the full-
+    // grammar leg of the parity).
+    const full = ["diff --git a/f.ts b/f.ts", "--- a/f.ts", "+++ b/f.ts", "@@ -1,2 +1,3 @@", " ctx line", "+added line", "-removed line", "index abc..def"];
+    const fullOut = String(e(editor, `(condition-case nil (fikra/diff/fikra-diff-facelines "${full.join("\\n")}") (error (m) (concat "THREW:" m)))`).value);
+    expect(fullOut).not.toContain("THREW");
+    // EVERY line maps (spanClass | plain→context, raw stripped text) —
+    // no sign filter, no prefix stripping (the +/- normalization is
+    // for the chat-vs-viewer sign-row leg above).
+    const fullPairs = fullOut.split("\n").map((l) => {
+      const c = spanCls(l) ?? "context";
+      return `${c}|${strip(l)}`;
+    });
+    expect(fullPairs).toEqual([
+      "file-header|diff --git a/f.ts b/f.ts",
+      "file-header|--- a/f.ts",
+      "file-header|+++ b/f.ts",
+      "hunk-header|@@ -1,2 +1,3 @@",
+      "context| ctx line",
+      "add|+added line",
+      "remove|-removed line",
+      "meta|index abc..def",
+    ]);
   });
 
   test("the viewer renders git content THROUGH the helper (keymap regression)", async () => {
