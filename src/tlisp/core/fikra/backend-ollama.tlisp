@@ -103,8 +103,14 @@ redirect the execution).")
 ;; mislabel their refs — the association was by proximity).
 (defvar fikra-ollama-act-seq 0)
 (defun fikra-ollama-act-mint ()
+  ;; r157b: the id is TURN-SCOPED ("<turn>-<n>") — the gate's restart
+  ;; collision: a plain counter restarts when the editor restarts, and
+  ;; the replay maps act ids across the WHOLE log, so turn 2's "1" reached
+  ;; turn 1's rows. The turn count persists in state.json, so the scoped
+  ;; id is unique within its turn AND across restarts.
   (setq fikra-ollama-act-seq (+ 1 fikra-ollama-act-seq))
-  (number-to-string fikra-ollama-act-seq))
+  (concat (number-to-string (fikra/thread/fikra-thread-turn-count))
+          "-" (number-to-string fikra-ollama-act-seq)))
 
 (defvar fikra-ollama-parked-call nil
   "The tool_call PARKED at the L2 gate awaiting the user's a/r/A (the
@@ -305,8 +311,9 @@ availability gate must be synchronous; the turn itself is async)."
       (fikra/event/fikra-event-emit
         (list (list "kind" "guidance")
               (list "text" (concat (number-to-string n)
-                                   " action(s) checkpointed this turn — SPC a d diff · SPC a R revert the turn · SPC a C-r revert the last action · covers "
-                                   (fikra/thread/fikra-thread-working-dir))))))))
+                                   " action(s) checkpointed this turn — SPC a d diff · SPC a R revert the turn · SPC a C-r revert the last action · holds the worktree under "
+                                   (fikra/thread/fikra-thread-working-dir)
+                                   " (ignored paths and outside-root writes are NOT held)")))))))
 
 (defvar fikra-ollama-pending-message nil
   "The message awaiting its reply (the land-time guard).")
@@ -456,8 +463,12 @@ availability gate must be synchronous; the turn itself is async)."
               (list (list "kind" "text-delta")
                     (list "speaker" "assistant")
                     (list "text" "(tool round cap reached — stopping the loop)")))
-            (fikra-ollama-turn-guidance)
-            (fikra/thread/fikra-thread-turn-end "completed"))
+            (condition-case (m)
+            (progn (fikra-ollama-turn-guidance)
+                   (fikra/thread/fikra-thread-turn-end "completed"))
+            (error (m)
+              (append-file ".tmax/fikra/dbg157.log"
+                (concat "TURNEND-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a"))))))
           (fikra-ollama-chat fikra-ollama-pending-message))))))
 
 ;; The tool_calls array re-embedded as JSON (the raw arguments string
@@ -1284,8 +1295,12 @@ with its post-exit capture.")
                 (list (list "kind" "text-delta")
                       (list "speaker" "assistant")
                       (list "text" "(tool round cap reached — stopping the loop)")))
-              (fikra-ollama-turn-guidance)
-            (fikra/thread/fikra-thread-turn-end "completed"))
+              (condition-case (m)
+            (progn (fikra-ollama-turn-guidance)
+                   (fikra/thread/fikra-thread-turn-end "completed"))
+            (error (m)
+              (append-file ".tmax/fikra/dbg157.log"
+                (concat "TURNEND-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a"))))))
             (fikra-ollama-chat fikra-ollama-pending-message))))))))
 
 ;; The trailing EXIT:N line's N.
@@ -1460,6 +1475,9 @@ with its post-exit capture.")
         ;; overwrote this row's marker).
         (let ((act (fikra-ollama-act-mint))
               (pre-name nil))
+          ;; r157b: the carrier is set TIGHTLY around each capture (an
+          ;; exception between set and clear would stamp a later capture
+          ;; with a stale act id).
           (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
  act)
           (condition-case nil
@@ -1472,7 +1490,8 @@ with its post-exit capture.")
             (error (m)
               (editor-set-status
                 (concat "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref ("
-                        (if (stringp m) m "capture error") ")"))))
+                        (if (stringp m) m "capture error") ")")))
+            (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil))
           (let ((written (condition-case nil
                           (progn (write-file-content abs content) t)
                           (error () nil))))
@@ -1498,6 +1517,8 @@ with its post-exit capture.")
               (progn
                 ;; The POST-write ref (evidence + inline marker). r142:
                 ;; the post→pre pair (the action-level revert).
+                (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
+ act)
                 (condition-case nil
                   (progn (require-module fikra/checkpoint)
                          (fikra/checkpoint/fikra-checkpoint-capture "action")
@@ -2821,8 +2842,12 @@ with its post-exit capture.")
                 ;; reply: everything).
                 (let ((held (fikra-ollama-held-p (fikra-ollama-render-rest content entry))))
                   ;; The thread state machine settles the turn (emits turn-end).
-                  (fikra-ollama-turn-guidance)
-            (fikra/thread/fikra-thread-turn-end "completed")
+                  (condition-case (m)
+            (progn (fikra-ollama-turn-guidance)
+                   (fikra/thread/fikra-thread-turn-end "completed"))
+            (error (m)
+              (append-file ".tmax/fikra/dbg157.log"
+                (concat "TURNEND-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))))
                   (editor-set-status
                     (if held
                       fikra-ollama-held-status
@@ -3073,8 +3098,12 @@ with its post-exit capture.")
           (list (list "kind" "text-delta")
                 (list "speaker" "assistant")
                 (list "text" "(tool round cap reached — stopping the loop)")))
-        (fikra-ollama-turn-guidance)
-            (fikra/thread/fikra-thread-turn-end "completed")
+        (condition-case (m)
+            (progn (fikra-ollama-turn-guidance)
+                   (fikra/thread/fikra-thread-turn-end "completed"))
+            (error (m)
+              (append-file ".tmax/fikra/dbg157.log"
+                (concat "TURNEND-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))))
         'capped)
       (progn (fikra-ollama-chat fikra-ollama-pending-message) 'fired))
     'held))

@@ -8,7 +8,8 @@
           fikra-event-tombstone-ranges fikra-event-in-range-p
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
           fikra-event-get-str
-          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles-get fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
+          fikra-event-inline-ckpt-merge fikra-event-inline-act-refs
+          fikra-event-inline-act-apply fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles-get fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
@@ -790,7 +791,11 @@ what the render emits."
 (defun fikra-event-rebuild-fikra-buffer ()
   (require-module fikra/thread)
   (let ((was-ro (buffer-read-only-p))
-        (text (fikra-event-replay)))
+        (text (condition-case (m) (fikra-event-replay)
+                (error (m)
+                  (progn (append-file ".tmax/fikra/repldbg.log"
+                           (concat "REPLAY-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
+                    "")))))
     (buffer-set-read-only nil)
     ;; Clear the WHOLE buffer (two in-bounds steps — the proven
     ;; fikra-buffer-clear-all shape): the marker rebuild fires MID-LINE
@@ -1421,10 +1426,21 @@ id-less completed thoughts too).")
         ;; follows (when one does); otherwise the standalone row stands.
         ;; r157: the identity pass FIRST (act-id'd markers attach to
         ;; their own row; the pre's drop), then proximity for what has
-        ;; no act id.
-        (let* ((act-pair (fikra-event-inline-act-refs deduped (hashmap) (list)))
+        ;; no act id. (The error trap is a DEBUG hook — remove before
+        ;; landing.)
+        (let* ((act-pair (condition-case (m)
+                             (fikra-event-inline-act-refs deduped (hashmap) (list))
+                           (error (m)
+                             (progn (append-file ".tmax/fikra/actdbg.log"
+                                      (concat "REFS-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
+                               (list (hashmap) (list))))))
                (merged (fikra-event-inline-ckpt-merge
-                         (fikra-event-inline-act-apply deduped (car act-pair) (list))
+                         (condition-case (m)
+                             (fikra-event-inline-act-apply deduped (car act-pair) (list))
+                           (error (m)
+                             (progn (append-file ".tmax/fikra/actdbg.log"
+                                      (concat "APPLY-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
+                               deduped)))
                          (list) nil)))
           (setq fikra-thought-run-counter 0)
           (fikra-event-render-skip (fikra-thought-merge merged (list) nil "" nil)

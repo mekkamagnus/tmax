@@ -635,6 +635,47 @@ describe("ollama L2 gate + per-action checkpoints (r116 — the 8.1 named follow
   });
 });
 
+describe("r157 DBG: the r116 flow dumped", () => {
+  const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
+  const fireTool2 = (ed: Editor, seed: number, command: string, name = "bash") => {
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed ${seed} "live")`);
+    const r = hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [
+      { function: { name, arguments: name === "bash" ? { command } : { path: "r116.txt", content: "checkpointed" } } },
+    ] } }));
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter ${seed} "${r}")`);
+    e(ed, `(fikra-http-complete ${seed} 200 "${hex("{}")}")`);
+  };
+  tt("DBG r116 flow", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "make the file")');
+    fireTool2(ed, 105, "", "buffer_edit");
+    expect(String(e(ed, '(shell-command "cat r116.txt")').value)).toContain("checkpointed");
+    let log = "";
+    for (let i = 0; i < 20; i++) {
+      e(ed, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+      const t = String(e(ed, "(buffer-text)").value);
+      log = String(e(ed, '(condition-case nil (read-file-content ".tmax/fikra/threads/main/events.jsonl") (error () ""))').value);
+      if (/r116\.txt.*ckpt|ckpt.*r116\.txt/.test(t)) break;
+      await new Promise((r2) => setTimeout(r2, 200));
+    }
+    for (const l of log.split("\n").filter(Boolean)) {
+      try { const o = JSON.parse(l); console.log("EVT", o.kind, o.ref ? o.ref.split("/").pop() : "", "act=" + (o.act ?? "-")); } catch { console.log("EVT ?", l.slice(0, 60)); }
+    }
+    const buf = strip(String(e(ed, "(buffer-text)").value));
+    for (const line of buf.split("\n")) if (line.includes("ckpt") || line.includes("buffer-edit") || line.includes("action(s)")) console.log("ROW:", JSON.stringify(line.trim()).slice(0, 170));
+    console.log("STATUS:", JSON.stringify(String(e(ed, "(editor-status)").value)));
+    console.log("ACTREFS:", String(e(ed, '(condition-case nil (fikra/event/fikra-event-inline-act-refs (fikra/event/fikra-event-events-of "main") (hashmap) (list)) (error (m) (concat "ERR: " m)))').value).slice(0, 260));
+    const evs = executeTlisp(ed, '(fikra/event/fikra-event-events-of "main")').value as { type: string; value: unknown }[];
+    console.log("EVFIELDS:", JSON.stringify(evs.slice(0, 8).map((ev) => {
+      if (ev.type !== "list") return ev.type;
+      return (ev.value as { type: string; value: unknown }[]).map((pair) => {
+        const kv = (pair.value as { type: string; value: unknown }[]) ?? [];
+        return [String(kv[0]?.value ?? "?"), String(kv[1]?.value ?? "?")];
+      });
+    })));
+  });
+});
+
 describe("ollama gate hardening (r117 — codex r116 catches)", () => {
   const hex = (s: string) => Buffer.from(s, "utf8").toString("hex");
   const fireCalls = (ed: Editor, seed: number, commands: { name: string; args: unknown }[]) => {
@@ -3832,7 +3873,8 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(hints[0]).toContain("SPC a R revert the turn");
     expect(hints[0]).toContain("SPC a C-r revert the last action");
     // The coverage boundary is honest (a bash command can write outside).
-    expect(hints[0]).toContain("covers ");
+    expect(hints[0]).toContain("holds the worktree under ");
+    expect(hints[0]).toContain("ignored paths and outside-root writes are NOT held");
   });
 
   // The read-only mirror: a turn that seals NOTHING carries no guidance.
