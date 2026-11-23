@@ -1046,10 +1046,23 @@ id-less completed thoughts too).")
     (error () nil)))
 
 (defun fikra-event-index-scan-lines (lines buffer-name base-line i)
+  ;; valve r1 FRAGMENT SAFETY: a batch's first fragment may land
+  ;; MID-LINE (a continuation) — its text would parse as a ± row
+  ;; while the VISIBLE line starts with earlier text. Only the
+  ;; LAST line of the fragment list may be partial (the trailing
+  ;; open run); lines 0..n-2 are complete by construction. A
+  ;; partial line ending WITHOUT a newline boundary never begins a
+  ;; visible line, so ONLY complete lines record — and a complete
+  ;; line that IS a continuation carries earlier text before the ±,
+  ;; failing the row-path prefix check naturally.
   (if (null lines)
     nil
     (progn
-      (let ((path (fikra-event-index-row-path (fikra-event-strip-faces (car lines)))))
+      (let* ((complete-p (< i (- (length lines) 1)))
+             (path (if complete-p
+                     (fikra-event-index-row-path
+                       (fikra-event-strip-faces (car lines)))
+                     nil)))
         (if (stringp path)
           (editor/fikra/diff-line-index/diff-line-index-record buffer-name
             (+ base-line i)
@@ -1073,14 +1086,16 @@ id-less completed thoughts too).")
     (fikra-event-index-trim-tail (fikra-event-index-trim-head s))))
 
 (defun fikra-event-index-trim-head (s)
+  ;; valve r1: LOOP (the single-pass trim left padding on
+  ;; multi-space rows).
   (if (and (> (length s) 0) (string= (substring s 0 1) " "))
-    (substring s 1 (length s))
+    (fikra-event-index-trim-head (substring s 1 (length s)))
     s))
 
 (defun fikra-event-index-trim-tail (s)
   (if (and (> (length s) 0)
            (string= (substring s (- (length s) 1) (length s)) " "))
-    (substring s 0 (- (length s) 1))
+    (fikra-event-index-trim-tail (substring s 0 (- (length s) 1)))
     s))
 
 (defun fikra-event-index-path-scan (rest acc)

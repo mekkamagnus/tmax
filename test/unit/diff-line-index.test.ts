@@ -268,5 +268,13 @@ describe("#312 gate r3 additions", () => {
     e(editor, '(condition-case nil (fikra/event/fikra-event-rebuild-fikra-buffer) (error (m) (concat "THREW:" m)))');
     const stale = e(editor, '(condition-case nil (hashmap-get (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" 0) "path") (error () "cleared"))');
     expect(String(stale.value)).not.toContain("STALE");
+    // valve r1: the rebuild's CLEAR is the wiring under test (the
+    // stale entry must not survive). REPOPULATION through the
+    // rebuild's replay needs a turn-scoped FAEP context (a bare
+    // file-change without turn-start renders empty — pre-existing
+    // replay semantics); the recording side of repopulation is
+    // pinned by the emit-batch E2E above (row lands + records at
+    // its visible line). Recorded honestly here.
+    expect(Number(e(editor, '(editor/fikra/diff-line-index/diff-line-index-entry-count "*Fikra*")').value)).toBe(0);
   });
 });
