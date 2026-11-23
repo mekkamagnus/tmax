@@ -116,13 +116,19 @@ repopulation; the empty-buffer heuristic missed both).")
             (condition-case nil (buffer-line-count-of buffer-name)
               (error () -1)))
           (wm (hashmap-get diff-line-index-watermarks buffer-name)))
-      (if (or (= count -1)
-              (and (numberp wm) (< count wm))
-              (>= line count))
-        (progn
-          (diff-line-index-drop-buffer buffer-name)
+      (cond
+        ((or (= count -1) (and (numberp wm) (< count wm)))
+          ;; The shrink case drops the slot wholesale.
+          (progn
+            (diff-line-index-drop-buffer buffer-name)
+            nil))
+        ((>= line count)
+          ;; valve r4: a line beyond the count is a MISS, not
+          ;; invalidation — a speculative probe at a high line must
+          ;; not DELETE the valid lower entries.
           nil)
-        (diff-line-index-assoc line (diff-line-index-slot buffer-name))))))
+        (t
+          (diff-line-index-assoc line (diff-line-index-slot buffer-name)))))))))
 
 (defun diff-line-index-drop-watermark (buffer-name)
   (setq diff-line-index-watermarks

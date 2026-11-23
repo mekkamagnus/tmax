@@ -305,6 +305,21 @@ describe("#312 valve r3", () => {
     expect(Number(e(editor, '(editor/fikra/diff-line-index/diff-line-index-entry-count "*Fikra*")').value)).toBe(1);
   });
 
+  test("AN OUT-OF-RANGE lookup is a MISS, not a deletion (valve r4)", async () => {
+    editor = await setup();
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(buffer-append "l0\nl1\nl2\n")');
+    e(editor, '(editor/fikra/diff-line-index/diff-line-index-record "*Fikra*" 1 (hashmap "path" "keep.ts" "line" 0 "side" "new" "hunk" nil))');
+    // A speculative probe at line 50 (beyond the count):
+    const miss = e(editor, '(editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" 50)');
+    expect(["nil", "null"].includes(String(miss.value))).toBe(true);
+    // The VALID entry at line 1 SURVIVES the probe:
+    const hit = e(editor, '(hashmap-get (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" 1) "path")');
+    expect(String(hit.value)).toBe("keep.ts");
+    expect(Number(e(editor, '(editor/fikra/diff-line-index/diff-line-index-entry-count "*Fikra*")').value)).toBe(1);
+  });
+
   test("KILL+RECREATE at line 0: the watermark catches a shrunk named buffer even after repopulation", async () => {
     editor = await setup();
     e(editor, '(buffer-switch "*Fikra*")');
