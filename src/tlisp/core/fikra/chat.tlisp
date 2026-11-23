@@ -2,7 +2,7 @@
   (export fikra-chat-open fikra-chat-close fikra-turn-send
           fikra-turn-interrupt fikra-turn-status fikra-quit
           fikra-ensure-buffer-keymap fikra-refresh-lighter
-          fikra-follow-link)
+          fikra-follow-link fikra-follow-target fikra-file-line-count))
 
 ;; #216 (RFC-027 §UI): the chat UI as a THIN layer over the Phase-1 stack —
 ;; threads own state (#213), FAEP owns rendering (#212), adapters own turns
@@ -12,6 +12,7 @@
 (require-module fikra/event)
 (require-module fikra/thread)
 (require-module fikra/adapter)
+(require-module editor/fikra/diff-line-index)
 
 (defvar fikra-chat-buffer-name "*Fikra*"
   "Name of the Fikra chat buffer.")
@@ -227,14 +228,63 @@ context flakiness)."
   t)
 
 ;; RET follows file links — paths in tool-call/file-change lines are
-;; navigable (rendered by FAEP's §D2 table).
+;; navigable (rendered by FAEP's §D2 table). #312: the line INDEX
+;; consults FIRST (recorded targets — exact landings); the regex
+;; extraction stays as the fallback.
 (defun fikra-follow-link ()
   "Follow the file path under cursor in *Fikra*."
-  (let ((line (buffer-line (cursor-line))))
-    (let ((path (fikra-extract-file-path line)))
-      (if path
-        (find-file path)
-        (editor-set-status "Fikra: no file path on this line")))))
+  (let ((target (condition-case nil
+                    (editor/fikra/diff-line-index/diff-line-index-lookup
+                      (buffer-current) (cursor-line))
+                    (error () nil))))
+    (if (hashmapp target)
+      (fikra-follow-target target)
+      (let ((line (buffer-line (cursor-line))))
+        (let ((path (fikra-extract-file-path line)))
+          (if path
+            (find-file path)
+            (editor-set-status "Fikra: no file path on this line")))))))
+
+(defun fikra-follow-target (target)
+  "Open a RECORDED index target: the path AS EMITTED resolved
+against the thread's working root (#298); deleted files refuse
+honestly; old-side landings are approximate (the file must still
+contain the line) and say so."
+  (let ((path (hashmap-get target "path"))
+        (tline (hashmap-get target "line"))
+        (side (hashmap-get target "side"))
+        (root (condition-case nil (fikra/thread/fikra-thread-working-dir)
+                 (error () nil))))
+    (let ((resolved
+            (cond
+              ((not (stringp path)) nil)
+              ((string-prefix-p "/" path) path)
+              ((stringp root) (concat root "/" path))
+              (t path))))
+      (cond
+        ((not (and (stringp resolved) (file-exists-p resolved)))
+          (editor-set-status
+            (concat "file deleted in worktree: "
+              (if (stringp path) path "?"))))
+        ((and (stringp side) (string= side "old"))
+          (if (> (fikra-file-line-count resolved) tline)
+            (progn
+              (find-file resolved)
+              (cursor-move tline 0)
+              (editor-set-status "old-side line — approximate"))
+            (editor-set-status
+              (concat "old-side line beyond EOF: " path))))
+        (t
+          (progn
+            (find-file resolved)
+            (if (numberp tline) (cursor-move tline 0) nil))))))
+
+(defun fikra-file-line-count (path)
+  "The file's line count (old-side landing viability)."
+  (condition-case nil
+    (length (string-split
+              (read-file-content path) "\n"))
+    (error () 0)))
 
 (defun fikra-file-path-in-line-p (line)
   (or (string-match-p "src/[^ \t\n]+" line)

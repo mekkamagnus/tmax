@@ -1,0 +1,131 @@
+(defmodule editor/fikra/diff-line-index
+  (export diff-line-index-record diff-line-index-lookup
+          diff-line-index-drop-buffer diff-line-index-reset
+          diff-line-index-clear-buffer diff-line-index-buffers
+          diff-line-index-entry-count diff-line-index-state-get
+          diff-line-index-lines)
+
+;; #312 (RFC-032 §3.1) — the chat line-index's shared PRIMITIVE: a
+;; per-buffer-name registry `line → target` in a mutation-shared
+;; carrier (#306's state-model rules: ONE defvar, setq-rebind via
+;; the function seams). Two writers, two buffers, one structure:
+;; the CHAT renderer records on emit (this issue); the VIEWER's
+;; rebuild (#314) records its own rows into its own slot.
+;;
+;; SLOT REPRESENTATION: an ALIST — ((line target) ...) — NOT a
+;; nested hashmap. The nested-hashmap draft hit a keys-visibility
+;; ambiguity after the second record (hashmap-get found entries;
+;; hashmap-keys on the same slot returned empty in some load
+;; orders). An alist's length/scan are structural.
+;;
+;; Line numbers are 0-BASED (buffer-line / cursor-line convention).
+;; APPEND-STABILITY: existing entries are never rewritten (a log
+;; buffer's line numbers only grow); replay repopulates from
+;; scratch (clear-buffer + record per emitted line).
+
+(defvar diff-line-index-state (hashmap)
+  "The carrier: buffer-name → ((line target) ...). A target
+carries path (string, AS EMITTED), line (number, 0-based in the
+FILE), side (\"new\" | \"old\"), hunk (number | nil).")
+
+(defun diff-line-index-state-get () diff-line-index-state)
+
+(defun diff-line-index-buffers ()
+  "The registered buffer names (test/inspection seam)."
+  (hashmap-keys diff-line-index-state))
+
+(defun diff-line-index-slot (buffer-name)
+  (if (listp (hashmap-get diff-line-index-state buffer-name))
+    (hashmap-get diff-line-index-state buffer-name)
+    (list)))
+
+(defun diff-line-index-entry-count (buffer-name)
+  "The slot's entry count (test/inspection seam)."
+  (length (diff-line-index-slot buffer-name)))
+
+(defun diff-line-index-lines (buffer-name)
+  "The slot's recorded LINE NUMBERS, ascending."
+  (diff-line-index-sort-lines
+    (diff-line-index-map-lines (diff-line-index-slot buffer-name)) (list)))
+
+(defun diff-line-index-map-lines (slot)
+  (if (null slot) (list)
+    (cons (nth 0 (car slot)) (diff-line-index-map-lines (cdr slot)))))
+
+(defun diff-line-index-sort-lines (keys acc)
+  ;; numeric insertion sort (the key set is small).
+  (if (null keys)
+    acc
+    (diff-line-index-sort-lines (cdr keys)
+      (diff-line-index-insert-line (car keys) acc))))
+
+(defun diff-line-index-insert-line (n acc)
+  (if (null acc)
+    (list n)
+    (if (<= n (car acc))
+      (cons n acc)
+      (cons (car acc) (diff-line-index-insert-line n (cdr acc))))))
+
+(defun diff-line-index-record (buffer-name line target)
+  "Record TARGET at LINE (0-based) for BUFFER-NAME. APPEND-STABLE:
+  an existing entry at LINE is NEVER rewritten (a replay that
+  overlaps old lines uses clear-buffer first)."
+  (if (diff-line-index-assoc line (diff-line-index-slot buffer-name))
+    nil ; append-stability: never rewrite
+    (setq diff-line-index-state
+      (hashmap-set diff-line-index-state buffer-name
+        (cons (list line target)
+          (diff-line-index-slot buffer-name)))))
+  t)
+
+(defun diff-line-index-assoc (line slot)
+  (if (null slot) nil
+    (if (= (nth 0 (car slot)) line)
+      (nth 1 (car slot))
+      (diff-line-index-assoc line (cdr slot)))))
+
+(defun diff-line-index-lookup (buffer-name line)
+  "The target at LINE for BUFFER-NAME, or nil. LAZY INVALIDATION:
+  a buffer that no longer exists drops its slot here (the kill
+  observation point — buffer-kill has no hook)."
+  (if (not (member buffer-name (buffer-list)))
+    (progn
+      (diff-line-index-drop-buffer buffer-name)
+      nil)
+    (diff-line-index-assoc line (diff-line-index-slot buffer-name))))
+
+(defun diff-line-index-drop-buffer (buffer-name)
+  "Remove BUFFER-NAME's slot entirely (buffer-kill / replay
+  reset) — REBUILD the carrier without the key (no hashmap-delete
+  builtin; the slot set is small)."
+  (setq diff-line-index-state
+    (diff-line-index-rw-scan
+      (hashmap-keys diff-line-index-state)
+      diff-line-index-state buffer-name (hashmap)))
+  t)
+
+(defun diff-line-index-rw-scan (keys carrier skip acc)
+  ;; CONSUMES the keys list (a draft recursed on the whole carrier
+  ;; forever — the spin the first suite run hung on).
+  (if (null keys)
+    acc
+    (diff-line-index-rw-scan (cdr keys) carrier skip
+      (if (string= (car keys) skip)
+        acc
+        (hashmap-set acc (car keys)
+          (hashmap-get carrier (car keys)))))))
+
+(defun diff-line-index-clear-buffer (buffer-name)
+  "Empty BUFFER-NAME's slot but KEEP the name registered (the
+  replay-repopulation shape: clear then record from scratch)."
+  (setq diff-line-index-state
+    (hashmap-set diff-line-index-state buffer-name (list)))
+  t)
+
+(defun diff-line-index-reset ()
+  "Drop EVERY slot (test isolation)."
+  (setq diff-line-index-state (hashmap))
+  t)
+
+(provide "editor/fikra/diff-line-index")
+)
