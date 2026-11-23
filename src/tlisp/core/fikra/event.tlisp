@@ -1217,28 +1217,50 @@ id-less completed thoughts too).")
 ;; mislabel each other's refs. Events without an "act" (the baseline,
 ;; the turn's completion, legacy logs) keep the proximity merge below.
 (defun fikra-event-inline-act-merge (events)
-  ;; act -> the LAST ref among its checkpoint-ready events (the post).
-  (fikra-event-inline-act-refs events (hashmap) (list)))
-(defun fikra-event-inline-act-refs (events refs acc)
+  ;; act -> the ref its row shows: the POST-stage one when there is one.
+  (fikra-event-inline-act-refs events (hashmap) (hashmap) (list)))
+(defun fikra-event-inline-act-refs (events refs staged acc)
+  ;; REFS: act -> the ref its row shows. STAGED: the acts whose shown ref
+  ;; came from a POST-stage ready. Returns (list refs acc).
   (if (null events)
     (list refs acc)
     (let* ((e (car events))
            (k (fikra-event-get-str e "kind")))
       (if (string= k "checkpoint-ready")
-        (let ((act (fikra-event-get-str e "act"))
-              (stage (fikra-event-get-str e "stage")))
-          ;; r161: a PRE-stage ref is the revert TARGET, never the
-          ;; checkpoint shown on the action's row — a post that failed
-          ;; used to leave the pre standing in for it. (A ready without
-          ;; a stage is from an older log: last one wins, as before.)
-          (if (and act (> (length act) 0)
-                   (not (and stage (> (length stage) 0) (string= stage "pre"))))
-            (fikra-event-inline-act-refs (cdr events)
-              (editor/keymaps/keymap-mutable-set! refs act
-                (fikra-event-get-str e "ref"))
-              (cons e acc))
-            (fikra-event-inline-act-refs (cdr events) refs acc)))
-        (fikra-event-inline-act-refs (cdr events) refs acc)))))
+        (let* ((act (fikra-event-get-str e "act"))
+               (stage (fikra-event-get-str e "stage")))
+          (cond
+            ((not (and act (> (length act) 0)))
+              ;; no identity: not this pass's to place
+              (fikra-event-inline-act-refs (cdr events) refs staged acc))
+            ((string= stage "post")
+              (fikra-event-inline-act-refs (cdr events)
+                (editor/keymaps/keymap-mutable-set! refs act
+                  (fikra-event-get-str e "ref"))
+                (editor/keymaps/keymap-mutable-set! staged act t)
+                (cons e acc)))
+            ((> (length stage) 0)
+              ;; r161: a PRE-stage ref is the revert TARGET, never the
+              ;; checkpoint shown on the action's row — a post that
+              ;; failed used to leave the pre standing in for it.
+              ;; r161b (codex gate r161 round 1): nor is a ready of any
+              ;; OTHER named stage — "pre" and "post" are the only
+              ;; stages a capture emits, so another is from a newer or a
+              ;; damaged log, and a marker must not guess.
+              (fikra-event-inline-act-refs (cdr events) refs staged acc))
+            (t
+              ;; An UNSTAGED ready is from an older log, which carries a
+              ;; pre AND a post for one action: the last one wins, as it
+              ;; always did. r161b: it never displaces a post-stage ref,
+              ;; in either order.
+              (fikra-event-inline-act-refs (cdr events)
+                (if (hashmap-get staged act)
+                  refs
+                  (editor/keymaps/keymap-mutable-set! refs act
+                    (fikra-event-get-str e "ref")))
+                staged
+                (cons e acc)))))
+        (fikra-event-inline-act-refs (cdr events) refs staged acc)))))
 (defun fikra-event-inline-act-apply (events refs errs out)
   (if (null events)
     (reverse out)
@@ -1327,7 +1349,15 @@ id-less completed thoughts too).")
             ;; attach when either is unparseable (r67: a missing side
             ;; used to attach — no identity, no marker).
             (if (and call-idx ckpt-id call-id (string= ckpt-id call-id)
-                     (not row-has-action) (not row-failed))
+                     (not row-has-action) (not row-failed)
+                     ;; r161b: only an UNSTAGED ready attaches by
+                     ;; proximity. The one act-less staged ready a real
+                     ;; log holds is a mediated command's PRE (its act is
+                     ;; minted when the command spawns). Emitted at
+                     ;; approval, BEFORE its own row, it attached to the
+                     ;; row above — a read-only command displayed the
+                     ;; next command's pre-state as its own checkpoint.
+                     (= (length (fikra-event-get-str e "stage")) 0))
               (fikra-event-inline-ckpt-merge (cdr events)
                 (fikra-inline-replace out call-idx
                   (fikra-event-with-ckpt (nth call-idx out)
@@ -1496,7 +1526,7 @@ id-less completed thoughts too).")
         ;; no act id. (The error traps DEGRADE to proximity association
         ;; if the identity pass ever throws - they stay.)
         (let* ((act-pair (condition-case (m)
-                             (fikra-event-inline-act-refs deduped (hashmap) (list))
+                             (fikra-event-inline-act-refs deduped (hashmap) (hashmap) (list))
                            (error (m)
                              (progn (append-file ".tmax/fikra/actdbg.log"
                                       (concat "REFS-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))

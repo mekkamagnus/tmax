@@ -4379,6 +4379,10 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
       expect(String(e(ed, "(editor-status)").value)).toContain("no action");
       // The carriers did not leak past the failure.
       expect(carriersClear(ed)).toBe("CLEAR");
+      // The ref the row DOES show is the edit's own result, tree-checked.
+      const shown = /\[ckpt main\/(1-a\d+)/.exec(row)?.[1];
+      expect(shown).toMatch(/^1-a\d+$/);
+      expect(blobOf(ed, shown!, "e161.txt")).toContain("EDITED");
     });
   }, 90000);
 
@@ -4432,6 +4436,92 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     });
   }, 90000);
 
+  // ── r161b (the r161 gate's round-1 P2s): THE STAGE RULE ────────────
+  // A ready that carries a stage is placed only through its act, and
+  // by precedence: a post-stage ref beats an unstaged one in EITHER
+  // order; a pre — or any stage other than "post" — attaches nowhere.
+  // An unstaged ready (an older log) is last-wins among themselves and
+  // never displaces a staged post. The legacy proximity merge attaches
+  // UNSTAGED readies only: the one act-less staged ready a real log
+  // holds is a mediated command's PRE (its act is minted later), and it
+  // used to attach to the previous command's row.
+  test("the stage rule: post beats unstaged in either order; other stages never attach (r161b)", async () => {
+    const ed = await armed();
+    const action = (act: string, name: string, readies: [stage: string, ref: string][]) => {
+      emitEv(ed, `(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "${name}") (list "act" "${act}")`);
+      for (const [stage, ref] of readies) {
+        const st = stage ? ` (list "stage" "${stage}")` : "";
+        emitEv(ed, `(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/${ref}") (list "sha" "x") (list "act" "${act}")${st}`);
+      }
+    };
+    action("6-1", "UNK-ROW", [["future", "6-a1"]]);
+    action("6-2", "POST-THEN-LEGACY", [["post", "6-a2"], ["", "6-a4"]]);
+    action("6-3", "LEGACY-THEN-POST", [["", "6-a6"], ["post", "6-a8"]]);
+    action("6-4", "REVERSED", [["post", "6-a10"], ["pre", "6-a12"]]);
+    action("6-5", "OLD-LOG", [["", "6-a14"], ["", "6-a16"]]);
+    const text = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    const line = (name: string) => text.split("\n").find((l) => l.includes(name)) ?? "";
+    expect(line("UNK-ROW")).not.toContain("[ckpt");
+    expect(line("POST-THEN-LEGACY")).toContain("[ckpt main/6-a2 ✓]");
+    expect(line("LEGACY-THEN-POST")).toContain("[ckpt main/6-a8 ✓]");
+    expect(line("REVERSED")).toContain("[ckpt main/6-a10 ✓]");
+    expect(line("REVERSED")).not.toContain("6-a12");
+    // An older log carries a pre AND a post for one action, both
+    // unstaged: the last one is the post, as it always was.
+    expect(line("OLD-LOG")).toContain("[ckpt main/6-a16 ✓]");
+  }, 90000);
+
+  // The real path. A read-only command seals nothing, so its row has no
+  // marker of its own. The NEXT command is mediated: its PRE capture is
+  // an act-less action ref emitted at approval — BEFORE its own row —
+  // and the proximity merge attached it to the row above. The command
+  // that changed nothing then displayed the next command's pre-state as
+  // its own checkpoint.
+  test("a read-only command does not borrow the NEXT command's pre ref (r161b)", async () => {
+    const ed = await armed();
+    mkdirSync(join(process.cwd(), "med161c"));
+    writeFileSync(join(process.cwd(), "med161c/old.txt"), "BEFORE\n");
+    e(ed, '(fikra/chat/fikra-turn-send "look, then remove")');
+    const read = { function: { name: "bash", arguments: { command: "echo JUST-LOOKING-161C" } } };
+    const remove = { function: { name: "bash", arguments: { command: "rm -rf med161c/" } } };
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 785 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 785 "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [read, remove] } }))}")`);
+    e(ed, `(fikra-http-complete 785 200 "${hex("{}")}")`);
+    // The first command is async: the round holds until it exits, then
+    // the second parks.
+    expect(await untilStatus(ed, "confirming", 120)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    await settleRefireFrom(ed, "785", "done");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+    expect(existsSync(join(process.cwd(), "med161c/old.txt"))).toBe(false);
+    const text = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    const look = text.split("\n").find((l) => l.includes("JUST-LOOKING-161C")) ?? "";
+    // It changed nothing: no checkpoint marker at all — and above all
+    // not the next command's pre ref.
+    expect(look).not.toContain("[ckpt");
+    // The mediated command keeps its own.
+    // (The approval panel quotes the command too: take the TOOL row.)
+    const row = text.split("\n").find((l) => l.includes("⚙ bash") && l.includes("rm -rf med161c/")) ?? "";
+    expect(row).toContain("[ckpt main/1-a2 ✓]");
+    expect(row).not.toContain("1-a1");
+  }, 90000);
+
+  test("a coverage qualifier other than 'not held' survives a capture failure too (r161b)", async () => {
+    const ed = await armed();
+    const coverage = (act: string, qual: string) =>
+      emitEv(ed, `(list "kind" "checkpoint-error") (list "reason" "the change scan examined only its first 4000 entries — coverage beyond it is not established") (list "qual" "${qual}") (list "act" "${act}")`);
+    const failure = (act: string) =>
+      emitEv(ed, `(list "kind" "checkpoint-error") (list "reason" "capture failed") (list "act" "${act}") (list "stage" "pre")`);
+    const ready = (act: string, ref: string) => {
+      emitEv(ed, `(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "${ref}-ROW") (list "act" "${act}")`);
+      emitEv(ed, `(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/${ref}") (list "sha" "x") (list "act" "${act}") (list "stage" "post")`);
+    };
+    ready("6-6", "6-a20"); coverage("6-6", "coverage not established"); failure("6-6");
+    ready("6-7", "6-a22"); failure("6-7"); coverage("6-7", "coverage not established");
+    expect(rowOf(ed, "6-a20-ROW")).toContain("[ckpt main/6-a20 — coverage not established]");
+    expect(rowOf(ed, "6-a22-ROW")).toContain("[ckpt main/6-a22 — coverage not established]");
+  }, 90000);
+
   // ── FOR_9 item 2: every DISPLAYED action ref is checked against its
   // own git tree — DELAYED (an async bash holds the round between two
   // edits, so its marker lands after the first edit's and before the
@@ -4467,6 +4557,10 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(treeOf(ed, "1-a4")).toContain("d162.txt");
     expect(treeOf(ed, "1-a4")).not.toContain("b162.txt");
     expect(treeOf(ed, "1-a6")).toContain("b162.txt");
+    // …and each LATER tree retains what came before it.
+    expect(treeOf(ed, "1-a4")).toContain("a162.txt");
+    expect(treeOf(ed, "1-a6")).toContain("a162.txt");
+    expect(treeOf(ed, "1-a6")).toContain("d162.txt");
     expect(blobOf(ed, "1-a4", "d162.txt")).toContain("BASH-RAN");
     expect(blobOf(ed, "1-a6", "b162.txt")).toContain("EDIT-B");
   }, 90000);
@@ -4491,6 +4585,7 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(treeOf(ed2, "1-a2")).toContain("c162.txt");
     expect(treeOf(ed2, "1-a2")).not.toContain("e162.txt");
     expect(treeOf(ed2, "1-a4")).toContain("e162.txt");
+    expect(treeOf(ed2, "1-a4")).toContain("c162.txt");
     expect(blobOf(ed2, "1-a2", "c162.txt")).toContain("EDIT-C");
     expect(blobOf(ed2, "1-a4", "e162.txt")).toContain("EDIT-E");
   }, 90000);
