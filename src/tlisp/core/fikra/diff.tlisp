@@ -5,7 +5,7 @@
           fikra-diff-turn-next fikra-diff-turn-prev fikra-diff-turn-step
           fikra-revert-confirm-table fikra-revert-confirm-accept
           fikra-diff-revert-completed-accept fikra-diff-revert-completed-exec fikra-diff-revert-completed fikra-last-completed-turn fikra-turn-diff-for
-          fikra-diff-turn-cmd-next fikra-diff-turn-cmd-prev)
+          fikra-diff-turn-cmd-next fikra-diff-turn-cmd-prev fikra-diff-facelines fikra-diff-render)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -73,7 +73,7 @@
     (shell-command
       (concat "git -C "
               (fikra/thread/fikra-thread-shq (fikra/thread/fikra-thread-working-dir))
-              " diff --color=always refs/fikra/" id "/" (number-to-string n) "-baseline"
+              " diff --no-color refs/fikra/" id "/" (number-to-string n) "-baseline"
               " refs/fikra/" id "/" (number-to-string n) " 2>/dev/null"))))
 
 (defun fikra-turn-diff-for (n)
@@ -349,6 +349,17 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
     out))
 
 ;; The header + patch land in the (re)created read-only buffer.
+(defun fikra-diff-facelines (content)
+  ;; #313: git's colored output is NOT trusted intake — strip ANSI,
+  ;; then face EVERY line through the shared grammar helper. The
+  ;; context/unknown classes render plain.
+  (let ((lines (string-split (editor/fikra/diff-face/diff-face-strip content) "\n"))
+        (out ""))
+    (dolist (l lines)
+      (let ((cls (editor/fikra/diff-face/diff-classify-line l)))
+        (setq out (concat out (editor/fikra/diff-face/diff-face-line cls l) "\n"))))
+    out))
+
 (defun fikra-diff-render (content)
   (if (member fikra-diff-buffer-name (buffer-list))
     (progn
@@ -367,7 +378,7 @@ git's --name-status; a path absent here renders the legacy ± prefix).")
     (buffer-create fikra-diff-buffer-name))
   (buffer-switch fikra-diff-buffer-name)
   (buffer-set-read-only nil)
-  (buffer-append content)
+  (buffer-append (fikra-diff-facelines content))
   (buffer-set-read-only t)
   (editor-set-mode "normal")
   (fikra-diff-ensure-keymap)
@@ -726,7 +737,7 @@ ambiguity)."
         (setq tracked (cons p tracked))
         (setq untracked (cons p untracked))))
     (if (> (length tracked) 0)
-      (setq out (concat out (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " diff " tree " --color=always -- "
+      (setq out (concat out (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir) " diff " tree " --no-color -- "
                                                   (fikra-join-args (reverse tracked)) " 2>/dev/null")))))
     ;; #305: untracked files render as NEW-FILE PATCHES (git's own
     ;; --no-index /dev/null form — empty → header only, binary → the

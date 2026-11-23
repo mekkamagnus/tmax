@@ -343,10 +343,14 @@ round-12 approvals catch)."
           (if (> (length l) 1)
             (let ((sign (substring l 0 1))
                   (body (substring l 2 (length l))))
+              ;; #313: the SHARED face source (behavior-preserving —
+              ;; the palette matches the old inline green/red).
               (setq out (concat out
                                 (if (string= sign "+")
-                                  (fikra-face "\e[32m" (concat "    + " body))
-                                  (fikra-face "\e[31m" (concat "    - " body)))
+                                  (editor/fikra/diff-face/diff-face-line "add"
+                                    (concat "    + " body))
+                                  (editor/fikra/diff-face/diff-face-line "remove"
+                                    (concat "    - " body)))
                                 "\n")))))
         out))))
 

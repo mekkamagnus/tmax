@@ -1,0 +1,62 @@
+(defmodule editor/fikra/diff-face
+  (export diff-face-line diff-classify-line diff-face-strip)
+
+;; #313 (RFC-032 §3.4) — the ONE face source for the diff grammar
+;; (#289's line classes): add/remove/context/hunk-header/file-header/
+;; meta. Both renderer paths consume this — the chat's tool previews
+;; (event.tlisp) and the viewer's patches (diff.tlisp) stop owning
+;; their own coloring. The ANSI mechanism is the same one event.tlisp
+;; already uses (ESC-code … ESC[0m).
+;;
+;; diff-face-line <class> <text> — explicit class (the caller knows
+;; its grammar position); diff-classify-line <text> — the git-shape
+;; classifier for intake paths.
+
+(defvar diff-face-reset "\e[0m")
+
+(defun diff-face-line (class text)
+  "Faced TEXT for the #289 class. Colors match the chat's current
+palette byte-for-byte where a palette existed (add 32 / remove 31
+— behavior-preserving for the chat path)."
+  (cond
+    ((string= class "add") (concat "\e[32m" text diff-face-reset))
+    ((string= class "remove") (concat "\e[31m" text diff-face-reset))
+    ((string= class "hunk-header") (concat "\e[36m" text diff-face-reset))
+    ((string= class "file-header") (concat "\e[1m" text diff-face-reset))
+    ((string= class "meta") (concat "\e[2m" text diff-face-reset))
+    ;; context: PLAIN (no face) — byte-identical to an unfaced line.
+    (t text)))
+
+(defun diff-classify-line (text)
+  "The git-shape classifier: add/remove/context by leading sign
+(first char '+'/'-'/' '), hunk-header by '@@', file-header by
+'diff --git', everything else meta. Empty text → context."
+  (cond
+    ((string= text "") "context")
+    ((string= (substring text 0 1) "+") "add")
+    ((string= (substring text 0 1) "-") "remove")
+    ((and (> (length text) 1) (string= (substring text 0 2) "@@")) "hunk-header")
+    ((and (> (length text) 10) (string= (substring text 0 10) "diff --git")) "file-header")
+    (t "meta")))
+
+(defun diff-face-strip (s)
+  "Drop ANSI escape sequences (ESC through m) — git's own colored
+output is NOT trusted intake (the viewer strips before facing)."
+  (diff-face-strip-scan s "" nil))
+
+(defun diff-face-strip-scan (s acc in-esc)
+  (if (= (length s) 0)
+    acc
+    (let ((c (substring s 0 1)))
+      (cond
+        (in-esc
+          (if (string= c "m")
+            (diff-face-strip-scan (substring s 1 (length s)) acc nil)
+            (diff-face-strip-scan (substring s 1 (length s)) acc t)))
+        ((string= c "\e")
+          (diff-face-strip-scan (substring s 1 (length s)) acc t))
+        (t
+          (diff-face-strip-scan (substring s 1 (length s)) (concat acc c) nil))))))
+
+(provide "editor/fikra/diff-face")
+)
