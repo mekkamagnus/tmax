@@ -27,6 +27,8 @@
 ;;
 ;; Replay is crash-tolerant: a trailing partial JSONL line is dropped.
 
+(require-module editor/fikra/diff-line-index)
+
 (defvar fikra-event-log nil
   "Active JSONL log path (set per-thread by fikra/thread in #213).")
 
@@ -554,8 +556,8 @@ bumps the revision the TUI poll consumes."
   (fikra-event-batch-has-final-p events))
 
 (defun fikra-event-emit-batch-for (id events)
-  (require-module editor/fikra/diff-line-index)
-(require-module fikra/thread)
+  ;; fikra/thread stays LAZY (top-level would be circular).
+  (require-module fikra/thread)
   (let ((target-root (fikra/thread/fikra-thread-field-root-of id))
         (target-buffer (fikra/thread/fikra-thread-buffer-name-of id)))
     ;; Gate round-2: unknown id (nil root) → DROP, never guess.
