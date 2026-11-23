@@ -5,6 +5,7 @@
           fikra-checkpoint-command fikra-checkpoint-tail
           fikra-checkpoint-filter fikra-checkpoint-sentinel
           fikra-checkpoint-capture-with-path fikra-checkpoint-set-emit-owner
+          fikra-checkpoint-set-emit-act
           fikra-checkpoint-last-ref-name-get fikra-checkpoint-pair-trees)
 
 ;; #217 (RFC-027 §D6, Phase 2): non-invasive git checkpoints. Every turn
@@ -43,6 +44,14 @@ the old sticky-flag design did exactly that).")
   "The async filter's captured output (sentinel consumes it).")
 
 ;; pid -> "<thread-id>/<turn>" stamped at SPAWN (the async identity fix).
+(defvar fikra-checkpoint-emit-act nil
+  "r157: the ACTION IDENTITY of the capture in flight, stamped into
+checkpoint-ready events. The tool row that minted it carries the same
+id, and the transcript associates marker to row by IDENTITY — not by
+proximity (the 8.1 re-grade's P1: two edits in one turn mislabeled their
+refs). Set by the caller around a capture, like
+fikra-checkpoint-emit-owner; nil leaves the event as before.")
+
 (defvar fikra-checkpoint-async-ids (hashmap))
 (defvar fikra-checkpoint-async-suffixes (hashmap)
   "r134: pid → the spawn-stamped ref SUFFIX (an action's -aN is
@@ -109,6 +118,11 @@ thread's persisted root (root-shell cwd), never the daemon cwd."
     "git update-ref " ref " $commit && "
     "rm -f " (fikra-checkpoint-shq tmp-index) " && "
     "echo REF:$commit || echo CAPTURE-FAILED"))
+
+;; r157: the exported setter — a cross-module defvar setq silently
+;; fails (the module lesson, r134): every caller goes through this.
+(defun fikra-checkpoint-set-emit-act (act)
+  (setq fikra-checkpoint-emit-act act))
 
 (defun fikra-checkpoint-set-emit-owner (owner)
   "r134e: callback contexts (the mediated bash's sync capture runs in
@@ -215,16 +229,22 @@ events; nil when disabled or failed. Never touches turn state."
         (if fikra-checkpoint-emit-owner
           (fikra/event/fikra-event-emit-batch-for fikra-checkpoint-emit-owner
             (list (if sha
-                    (list (list "kind" "checkpoint-ready")
-                          (list "ref" ref)
-                          (list "sha" sha))
+                    (append (list (list "kind" "checkpoint-ready")
+                                  (list "ref" ref)
+                                  (list "sha" sha))
+                            (if fikra-checkpoint-emit-act
+                              (list (list "act" fikra-checkpoint-emit-act))
+                              (list)))
                     (list (list "kind" "checkpoint-error")
                           (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))
           (fikra/event/fikra-event-emit
             (if sha
-              (list (list "kind" "checkpoint-ready")
-                    (list "ref" ref)
-                    (list "sha" sha))
+              (append (list (list "kind" "checkpoint-ready")
+                            (list "ref" ref)
+                            (list "sha" sha))
+                      (if fikra-checkpoint-emit-act
+                        (list (list "act" fikra-checkpoint-emit-act))
+                        (list)))
               (list (list "kind" "checkpoint-error")
                     (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))
         sha))))
@@ -274,13 +294,19 @@ events; nil when disabled or failed. Never touches turn state."
                 (setq fikra-checkpoint-last-ref-name post-name)
                 (if fikra-checkpoint-emit-owner
                   (fikra/event/fikra-event-emit-batch-for fikra-checkpoint-emit-owner
-                    (list (list (list "kind" "checkpoint-ready")
-                                (list "ref" post-name)
-                                (list "sha" post-sha))))
+                    (list (append (list (list "kind" "checkpoint-ready")
+                                        (list "ref" post-name)
+                                        (list "sha" post-sha))
+                                  (if fikra-checkpoint-emit-act
+                                    (list (list "act" fikra-checkpoint-emit-act))
+                                    (list)))))
                   (fikra/event/fikra-event-emit
-                    (list (list "kind" "checkpoint-ready")
-                          (list "ref" post-name)
-                          (list "sha" post-sha))))
+                    (append (list (list "kind" "checkpoint-ready")
+                                  (list "ref" post-name)
+                                  (list "sha" post-sha))
+                            (if fikra-checkpoint-emit-act
+                              (list (list "act" fikra-checkpoint-emit-act))
+                              (list)))))
                 (list pre-name post-name)))))))))
 
 ;; Test seam: capture with a PATH prepend — forces REAL git failures

@@ -471,6 +471,13 @@ round-12 approvals catch)."
         (concat (fikra-face "\e[36m"
                   (concat "  ⌘ [ckpt " (fikra-ckpt-short (fikra-event-get-str event "ref")) " ✓]"))
                 "\n"))
+      ((string= kind "guidance")
+        ;; r157 (the 8.1 re-grade's FOR_9 item 2): next-step guidance
+        ;; after a mutating turn — editor-side, independent of model
+        ;; wording. The mockup's reply says "SPC a d to diff, SPC a R to
+        ;; revert"; the loop surfaces it whenever the turn sealed actions.
+        (concat (fikra-face "\e[2m"
+                  (concat "  ⌘ " (fikra-event-get-str event "text"))) "\n"))
       ((string= kind "checkpoint-error")
         (concat (fikra-face "\e[1;31m" (concat "  ⌘ checkpoint-error: " (fikra-event-get-str event "reason"))) "\n"))
       ((string= kind "checkpoint-reverted")
@@ -1183,6 +1190,50 @@ id-less completed thoughts too).")
         (fikra-dedupe-scan (cdr events) (cons e acc) k
           (if (string= k "turn-end") st last-status))))))
 
+;; r157: ACTION IDENTITY pass — the 8.1 re-grade's P1. A
+;; checkpoint-ready whose event carries an "act" id belongs to the tool
+;; row that minted that id (the row's own "act" field); its ref attaches
+;; to the row and its SIBLINGS (the pre-capture's marker) drop —
+;; regardless of position, so two edits in one turn can no longer
+;; mislabel each other's refs. Events without an "act" (the baseline,
+;; the turn's completion, legacy logs) keep the proximity merge below.
+(defun fikra-event-inline-act-merge (events)
+  ;; act -> the LAST ref among its checkpoint-ready events (the post).
+  (fikra-event-inline-act-refs events (hashmap) (list)))
+(defun fikra-event-inline-act-refs (events refs acc)
+  (if (null events)
+    (list refs acc)
+    (let* ((e (car events))
+           (k (fikra-event-get-str e "kind")))
+      (if (string= k "checkpoint-ready")
+        (let ((act (fikra-event-get-str e "act")))
+          (if (and act (> (length act) 0))
+            (fikra-event-inline-act-refs (cdr events)
+              (editor/keymaps/keymap-mutable-set! refs act
+                (fikra-event-get-str e "ref"))
+              (cons e acc))
+            (fikra-event-inline-act-refs (cdr events) refs acc)))
+        (fikra-event-inline-act-refs (cdr events) refs acc)))))
+(defun fikra-event-inline-act-apply (events refs out)
+  (if (null events)
+    (reverse out)
+    (let* ((e (car events))
+           (k (fikra-event-get-str e "kind"))
+           (act (fikra-event-get-str e "act")))
+      (cond
+        ((string= k "checkpoint-ready")
+          (if (and act (> (length act) 0))
+            ;; its ref rides the row; the marker event itself drops
+            (fikra-event-inline-act-apply (cdr events) refs out)
+            (fikra-event-inline-act-apply (cdr events) refs (cons e out))))
+        ((string= k "tool-call")
+          (let ((ref (if (and act (> (length act) 0))
+                       (hashmap-get refs act)
+                       nil)))
+            (fikra-event-inline-act-apply (cdr events) refs
+              (cons (if ref (fikra-event-with-ckpt e ref) e) out))))
+        (t (fikra-event-inline-act-apply (cdr events) refs (cons e out)))))))
+
 ;; Merge checkpoint-ready markers INLINE (mockup 8.1's "[ckpt ... ✓]"
 ;; on the buffer-edit row). Pure list transform: a checkpoint-ready that
 ;; directly follows a tool-call attaches its ref to that call and is
@@ -1217,11 +1268,23 @@ id-less completed thoughts too).")
                              (fikra-inline-find-call out 0 (fikra-inline-action-ref-p (fikra-event-get-str e "ref")))))
                  (call-id (if call-idx
                             (fikra-inline-event-identity out call-idx)
-                            nil)))
+                            nil))
+                 ;; r157: a row that already carries its OWN action marker
+                 ;; (the identity pass) is not eligible — the turn's
+                 ;; completion ref (no act id) used to overwrite it by
+                 ;; proximity. The completion marker stands alone, as the
+                 ;; mockup's ⌘ row.
+                 (row-has-ckpt (if call-idx
+                            (fikra-event-get-str (nth call-idx out) "ckpt")
+                            nil))
+                 (row-has-action (and row-has-ckpt
+                                 (> (length row-has-ckpt) 0)
+                                 (fikra-inline-action-ref-p row-has-ckpt))))
             ;; Full identity: "<thread>/<turn>" on BOTH sides, and NO
             ;; attach when either is unparseable (r67: a missing side
             ;; used to attach — no identity, no marker).
-            (if (and call-idx ckpt-id call-id (string= ckpt-id call-id))
+            (if (and call-idx ckpt-id call-id (string= ckpt-id call-id)
+                     (not row-has-action))
               (fikra-event-inline-ckpt-merge (cdr events)
                 (fikra-inline-replace out call-idx
                   (fikra-event-with-ckpt (nth call-idx out)
@@ -1356,7 +1419,13 @@ id-less completed thoughts too).")
         ;; r62 follow-up: the mockup puts the ckpt marker INLINE on the
         ;; edit row. Merge each checkpoint-ready into the tool-call it
         ;; follows (when one does); otherwise the standalone row stands.
-        (let ((merged (fikra-event-inline-ckpt-merge deduped (list) nil)))
+        ;; r157: the identity pass FIRST (act-id'd markers attach to
+        ;; their own row; the pre's drop), then proximity for what has
+        ;; no act id.
+        (let* ((act-pair (fikra-event-inline-act-refs deduped (hashmap) (list)))
+               (merged (fikra-event-inline-ckpt-merge
+                         (fikra-event-inline-act-apply deduped (car act-pair) (list))
+                         (list) nil)))
           (setq fikra-thought-run-counter 0)
           (fikra-event-render-skip (fikra-thought-merge merged (list) nil "" nil)
             (fikra-event-tombstone-ranges events) 0 "" nil))))))

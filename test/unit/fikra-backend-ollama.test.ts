@@ -3773,6 +3773,80 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(actionRefs()).toEqual([]);
   });
 
+  // ── r157: ACTION IDENTITY (the 8.1 re-grade's reproduced P1) ─────────
+  // Two buffer_edit calls in ONE turn: each action captures a pre and a
+  // post ref (1-a1..1-a4), and the pre-capture's marker fires BEFORE the
+  // ⚙ row exists. The proximity merge labeled the first row with the
+  // SECOND action's pre (1-a3), the second row with the turn's completion
+  // ref, and left 1-a1 standalone. The identity pass attaches each row's
+  // OWN post ref by the "act" id minted at the row.
+  tt("two edits in one turn: each row carries its OWN post ref (r157)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "two edits")');
+    const edit = (path: string, content: string) => ({ function: { name: "buffer_edit", arguments: { path, content } } });
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 700 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 700 "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [edit("a157.txt", "A\n"), edit("b157.txt", "B\n")] } }))}")`);
+    e(ed, `(fikra-http-complete 700 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "[ckpt main/1-a4", 120);
+    await settleRefireFrom(ed, "700", "Done.");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    const pairs = String(e(ed, '(shell-command "cat .tmax/fikra/threads/main/actions.jsonl")').value).trim().split("\n");
+    // The pairs name the posts: pair 1 → 1-a2, pair 2 → 1-a4.
+    expect(pairs.length).toBe(2);
+    expect(pairs[0]!.startsWith("refs/fikra/main/1-a2 refs/fikra/main/1-a1")).toBe(true);
+    expect(pairs[1]!.startsWith("refs/fikra/main/1-a4 refs/fikra/main/1-a3")).toBe(true);
+    const buf = strip(String(e(ed, "(buffer-text)").value));
+    const rows = buf.split("\n").filter((l) => l.includes("buffer-edit"));
+    expect(rows).toHaveLength(2);
+    // Each ⚙ row carries its OWN post ref — a2 on the first, a4 on the
+    // second — and neither row claims another action's ref.
+    expect(rows[0]).toContain("[ckpt main/1-a2 ✓]");
+    expect(rows[0]).not.toContain("1-a3");
+    expect(rows[0]).not.toContain("[ckpt main/1 ✓]");
+    expect(rows[1]).toContain("[ckpt main/1-a4 ✓]");
+    expect(rows[1]).not.toContain("[ckpt main/1 ✓]");
+    // The pre markers (a1/a3) no longer stand alone either.
+    expect(buf).not.toContain("[ckpt main/1-a1 ✓]");
+    expect(buf).not.toContain("[ckpt main/1-a3 ✓]");
+    // The turn's completion marker still stands alone (no act id).
+    expect(buf).toContain("[ckpt main/1 ✓]");
+  });
+
+  // FOR_9 item 2: next-step guidance after a mutating turn — editor-side,
+  // independent of model wording; the model's reply above is just "Done."
+  tt("a turn that sealed actions ends with the diff/revert keys and the coverage (r157)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "two edits, terse reply")');
+    const edit = (path: string, content: string) => ({ function: { name: "buffer_edit", arguments: { path, content } } });
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 710 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 710 "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [edit("g157.txt", "G\n")] } }))}")`);
+    e(ed, `(fikra-http-complete 710 200 "${hex("{}")}")`);
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    await settleRefireFrom(ed, "710", "Done.");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    const buf = strip(String(e(ed, "(buffer-text)").value));
+    const hints = buf.split("\n").filter((l) => l.includes("action(s) checkpointed"));
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toContain("1 action(s) checkpointed this turn");
+    expect(hints[0]).toContain("SPC a d diff");
+    expect(hints[0]).toContain("SPC a R revert the turn");
+    expect(hints[0]).toContain("SPC a C-r revert the last action");
+    // The coverage boundary is honest (a bash command can write outside).
+    expect(hints[0]).toContain("covers ");
+  });
+
+  // The read-only mirror: a turn that seals NOTHING carries no guidance.
+  tt("a read-only turn ends with NO guidance row (r157)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "just look")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 720 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 720 "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [{ function: { name: "bash", arguments: { command: "echo just-looking" } } }] } }))}")`);
+    e(ed, `(fikra-http-complete 720 200 "${hex("{}")}")`);
+    await settleRefireFrom(ed, "720", "seen");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(strip(String(e(ed, "(buffer-text)").value)).split("\n").filter((l) => l.includes("action(s) checkpointed"))).toEqual([]);
+  });
+
   // Codex gate r154 round 5 (P2): the counters ran BEFORE the append — a
   // refused batch (held for a retry) counted every attempt.
   tt("a held batch counts its chunks ONCE", async () => {

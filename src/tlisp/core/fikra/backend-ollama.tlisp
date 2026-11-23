@@ -96,6 +96,16 @@ different threads never share fragments.")
   "The thread the parked call BELONGS to (r117: the decision resolves
 against the originating thread's working dir — a focus switch must not
 redirect the execution).")
+;; r157 (the 8.1 re-grade's FOR_9 item 1): the ACTION IDENTITY. Each
+;; mutating call mints an id at its row and carries it through the
+;; capture, whose checkpoint-ready event carries it back; the transcript
+;; associates marker to row by IDENTITY (two edits in one turn used to
+;; mislabel their refs — the association was by proximity).
+(defvar fikra-ollama-act-seq 0)
+(defun fikra-ollama-act-mint ()
+  (setq fikra-ollama-act-seq (+ 1 fikra-ollama-act-seq))
+  (number-to-string fikra-ollama-act-seq))
+
 (defvar fikra-ollama-parked-call nil
   "The tool_call PARKED at the L2 gate awaiting the user's a/r/A (the
 destructive-bash mediation; the loop resumes on the decision).")
@@ -274,6 +284,30 @@ availability gate must be synchronous; the turn itself is async)."
       (editor-set-status "Fikra-ollama: no model installed")))
   'pending)
 
+;; r157 (the 8.1 re-grade's FOR_9 item 2): next-step guidance after a
+;; mutating turn — editor-side, independent of model wording. The
+;; mockup's reply says "Checkpoint fikra/3/7 holds the change; SPC a d to
+;; diff, SPC a R to revert"; the loop surfaces the same keys whenever the
+;; turn ACTUALLY sealed actions, plus the coverage boundary (the record
+;; holds the working dir — a bash command can write outside it).
+(defun fikra-ollama-count-posts-prefix (posts prefix)
+  (if (null posts)
+    0
+    (+ (if (and (stringp (car posts)) (string-prefix-p prefix (car posts))) 1 0)
+       (fikra-ollama-count-posts-prefix (cdr posts) prefix))))
+(defun fikra-ollama-turn-guidance ()
+  (require-module fikra/thread)
+  (let* ((tid (or (fikra/thread/fikra-thread-current) "main"))
+         (turn (number-to-string (fikra/thread/fikra-thread-turn-count)))
+         (n (fikra-ollama-count-posts-prefix fikra-ollama-action-posts
+              (concat "refs/fikra/" tid "/" turn "-a"))))
+    (if (> n 0)
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "guidance")
+              (list "text" (concat (number-to-string n)
+                                   " action(s) checkpointed this turn — SPC a d diff · SPC a R revert the turn · SPC a C-r revert the last action · covers "
+                                   (fikra/thread/fikra-thread-working-dir))))))))
+
 (defvar fikra-ollama-pending-message nil
   "The message awaiting its reply (the land-time guard).")
 
@@ -422,6 +456,7 @@ availability gate must be synchronous; the turn itself is async)."
               (list (list "kind" "text-delta")
                     (list "speaker" "assistant")
                     (list "text" "(tool round cap reached — stopping the loop)")))
+            (fikra-ollama-turn-guidance)
             (fikra/thread/fikra-thread-turn-end "completed"))
           (fikra-ollama-chat fikra-ollama-pending-message))))))
 
@@ -760,9 +795,17 @@ with its post-exit capture.")
             "echo \"$__p $__q\" > " f)))
 
 (defun fikra-ollama-run-bash-now (cmd dir)
-  (fikra/event/fikra-event-emit
-    (list (list "kind" "tool-call") (list "tool" "bash")
-          (list "summary" cmd)))
+  ;; r157: the action's identity — minted at the row and stamped into the
+  ;; ownership entry; the sentinel's captures (mediated, or the ordinary
+  ;; snapshot pair) carry it into their checkpoint-ready events.
+  (let ((act (fikra-ollama-act-mint)))
+    (fikra/event/fikra-event-emit
+      (append (list (list "kind" "tool-call") (list "tool" "bash")
+                    (list "summary" cmd))
+              (list (list "act" act))))
+    (fikra-ollama-run-bash-now-1 cmd dir act)))
+
+(defun fikra-ollama-run-bash-now-1 (cmd dir act)
   (let ((mediated fikra-ollama-next-mediated))
     (setq fikra-ollama-next-mediated nil)
     ;; r155: ordinary calls are snapshotted (a mediated one already gets
@@ -795,6 +838,7 @@ with its post-exit capture.")
                      "out" ""
                      "cont" nil
                      "mediated" mediated
+                     "act" act
                      "snap" (if snap t nil)))
           pid)
       ;; r127 (codex catch 4): a FAILED spawn reports an honest FAIL
@@ -1139,7 +1183,13 @@ with its post-exit capture.")
                     ;; checkpoint marker (when the command changed the
                     ;; worktree) — whatever becomes of the turn.
                     (if (and entry (hashmap-get entry "snap"))
-                      (fikra-ollama-action-checkpoint)
+                      (progn
+                        ;; r157: the row's action identity rides the
+                        ;; entry (the sentinel is far from the row).
+                        (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
+                          (hashmap-get entry "act"))
+                        (fikra-ollama-action-checkpoint)
+                        (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil))
                       nil)
                     (if (not (fikra-ollama-turn-live-p))
                       ;; The turn ENDED while this child ran (e.g. the
@@ -1163,8 +1213,13 @@ with its post-exit capture.")
                                    ;; owner-bound (the pointer reads nil here).
                                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner
                                      (if home home (fikra/thread/fikra-thread-current)))
+                                   ;; r157: the row's action identity rides
+                                   ;; the entry.
+                                   (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
+                                     (hashmap-get entry "act"))
                                    (fikra/checkpoint/fikra-checkpoint-capture "action")
                                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+                                   (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
                                    ;; r142: the post→pre pair.
                                    (fikra-ollama-record-action-pair fikra-ollama-last-pre-name)
                                    (setq fikra-ollama-last-pre-name nil))
@@ -1229,7 +1284,8 @@ with its post-exit capture.")
                 (list (list "kind" "text-delta")
                       (list "speaker" "assistant")
                       (list "text" "(tool round cap reached — stopping the loop)")))
-              (fikra/thread/fikra-thread-turn-end "completed"))
+              (fikra-ollama-turn-guidance)
+            (fikra/thread/fikra-thread-turn-end "completed"))
             (fikra-ollama-chat fikra-ollama-pending-message))))))))
 
 ;; The trailing EXIT:N line's N.
@@ -1397,9 +1453,15 @@ with its post-exit capture.")
       (progn
         (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
                                              (fikra/thread/fikra-thread-dirname abs))))
-        ;; r137+r139: the PRE-state ref (BEFORE the write — the revert
-        ;; target). r142: its NAME is kept for the post→pre pair.
-        (let ((pre-name nil))
+        ;; r157: the action's IDENTITY — minted here, on the row, and
+        ;; carried through both captures so their events attach to THIS
+        ;; row (the pre-capture fires before the row exists, so its
+        ;; marker used to land standalone and the NEXT action's pre
+        ;; overwrote this row's marker).
+        (let ((act (fikra-ollama-act-mint))
+              (pre-name nil))
+          (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
+ act)
           (condition-case nil
             (let ((sha (progn (require-module fikra/checkpoint)
                               (fikra/checkpoint/fikra-checkpoint-capture "action")))
@@ -1417,19 +1479,21 @@ with its post-exit capture.")
             ;; r135c: the GEAR row + preview emit AFTER the verified
             ;; write (a failed write shows nothing it didn't do).
             (fikra/event/fikra-event-emit
-              (list (list "kind" "tool-call") (list "tool" "buffer-edit")
-                    (list "summary" (concat path " @" (number-to-string (length content))))
-                    (list "preview"
-                      (if written
-                        (fikra-ollama-diff-preview
-                          (if (and old-content (stringp old-content)) old-content "")
-                          content)
-                        ""))))
+              (append (list (list "kind" "tool-call") (list "tool" "buffer-edit")
+                            (list "summary" (concat path " @" (number-to-string (length content)))))
+                      (list (list "act" act))
+                      (list (list "preview"
+                        (if written
+                          (fikra-ollama-diff-preview
+                            (if (and old-content (stringp old-content)) old-content "")
+                            content))))))
             (if (not written)
               (progn
                 (fikra/event/fikra-event-emit
                   (list (list "kind" "tool-result") (list "ok" nil)
                         (list "summary" (concat "WRITE FAILED: " path))))
+                (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
+ nil)
                 (concat "{\"role\":\"tool\",\"content\":" (fikra-ollama-json-string (concat "write failed: " path)) "},"))
               (progn
                 ;; The POST-write ref (evidence + inline marker). r142:
@@ -1439,6 +1503,8 @@ with its post-exit capture.")
                          (fikra/checkpoint/fikra-checkpoint-capture "action")
                          (fikra-ollama-record-action-pair pre-name))
                   (error () nil))
+                (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
+ nil)
                 (fikra/event/fikra-event-emit
                   (list (list "kind" "tool-result") (list "ok" t)
                         (list "summary" (concat "wrote " path))))
@@ -2755,7 +2821,8 @@ with its post-exit capture.")
                 ;; reply: everything).
                 (let ((held (fikra-ollama-held-p (fikra-ollama-render-rest content entry))))
                   ;; The thread state machine settles the turn (emits turn-end).
-                  (fikra/thread/fikra-thread-turn-end "completed")
+                  (fikra-ollama-turn-guidance)
+            (fikra/thread/fikra-thread-turn-end "completed")
                   (editor-set-status
                     (if held
                       fikra-ollama-held-status
@@ -3006,7 +3073,8 @@ with its post-exit capture.")
           (list (list "kind" "text-delta")
                 (list "speaker" "assistant")
                 (list "text" "(tool round cap reached — stopping the loop)")))
-        (fikra/thread/fikra-thread-turn-end "completed")
+        (fikra-ollama-turn-guidance)
+            (fikra/thread/fikra-thread-turn-end "completed")
         'capped)
       (progn (fikra-ollama-chat fikra-ollama-pending-message) 'fired))
     'held))
