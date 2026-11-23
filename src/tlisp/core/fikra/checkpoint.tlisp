@@ -5,7 +5,7 @@
           fikra-checkpoint-command fikra-checkpoint-tail
           fikra-checkpoint-filter fikra-checkpoint-sentinel
           fikra-checkpoint-capture-with-path fikra-checkpoint-set-emit-owner
-          fikra-checkpoint-set-emit-act
+          fikra-checkpoint-set-emit-act fikra-checkpoint-emit-act-get
           fikra-checkpoint-last-ref-name-get fikra-checkpoint-pair-trees)
 
 ;; #217 (RFC-027 §D6, Phase 2): non-invasive git checkpoints. Every turn
@@ -123,6 +123,11 @@ thread's persisted root (root-shell cwd), never the daemon cwd."
 ;; fails (the module lesson, r134): every caller goes through this.
 (defun fikra-checkpoint-set-emit-act (act)
   (setq fikra-checkpoint-emit-act act))
+(defun fikra-checkpoint-emit-act-get ()
+  "r158: the action identity currently stamped onto emissions — the
+coverage report reads the carrier instead of threading a parameter
+(the zero-arity action-checkpoint is called directly by the tests)."
+  fikra-checkpoint-emit-act)
 
 (defun fikra-checkpoint-set-emit-owner (owner)
   "r134e: callback contexts (the mediated bash's sync capture runs in

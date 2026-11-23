@@ -3872,9 +3872,10 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(hints[0]).toContain("SPC a d diff");
     expect(hints[0]).toContain("SPC a R revert the turn");
     expect(hints[0]).toContain("SPC a C-r revert the last action");
-    // The coverage boundary is honest (a bash command can write outside).
+    // The coverage boundary is honest (r158: the trees also cannot hold
+    // nested-repository contents or permission metadata).
     expect(hints[0]).toContain("holds the worktree under ");
-    expect(hints[0]).toContain("ignored paths and outside-root writes are NOT held");
+    expect(hints[0]).toContain("ignored paths, nested repositories, permission changes, and outside-root writes are NOT held");
   });
 
   // The read-only mirror: a turn that seals NOTHING carries no guidance.
@@ -3891,6 +3892,111 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
 
   // Codex gate r154 round 5 (P2): the counters ran BEFORE the append — a
   // refused batch (held for a retry) counted every attempt.
+  // ── r158: PER-ACTION COVERAGE HONESTY (the 8/10 re-grade's P1) ────────
+  // An approved MEDIATED mutation the checkpoint's trees cannot hold (an
+  // ignored path) rendered "[ckpt main/1-a2 ✓]" with no per-action
+  // failure: the row implied a revertable action whose only change the
+  // checkpoint cannot hold. The mediated command now runs the changed-
+  // entry scan (the ordinary path's), the failure names the path, and
+  // the marker is qualified — never an unqualified ✓ for an uncovered
+  // mutation.
+  tt("an approved ignored-path mutation does NOT claim a revertable checkpoint (r158)", async () => {
+    const ed = await armed();
+    // Append to the fixture's .gitignore (it excludes .tmax — clobbering
+    // it would drag the checkpoint's own state into the mediated captures).
+    const giPath = join(process.cwd(), ".gitignore");
+    const gi = existsSync(giPath) ? readFileSync(giPath, "utf8") : "";
+    writeFileSync(giPath, gi + (gi.length > 0 && !gi.endsWith("\n") ? "\n" : "") + ".env\n");
+    writeFileSync(join(process.cwd(), ".env"), "SECRET-ENV");
+    e(ed, '(fikra/chat/fikra-turn-send "remove the ignored file")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 730 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 730 "${hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "rm -rf .env" } } }] } }))}")`);
+    e(ed, `(fikra-http-complete 730 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    await settleRefireFrom(ed, "730", "R158-DONE");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    // The mutation happened, and the trees cannot hold it (the file is
+    // ignored: both snapshot trees lack it).
+    expect(String(e(ed, '(shell-command "test -f .env && echo EXISTS || echo GONE")').value).trim()).toBe("GONE");
+    const buf = strip(String(e(ed, "(buffer-text)").value));
+    const row = buf.split("\n").find((l) => l.includes("⚙ bash"));
+    expect(row).toBeDefined();
+    // No unqualified success marker: the row says the change is not
+    // held, and the per-action failure names the path.
+    expect(row!).not.toContain("✓]");
+    expect(row!).toContain("not held");
+    expect(buf).toContain("checkpoint-error");
+    expect(buf).toContain(".env");
+    // The pair IS recorded (r146's design: the skip lives at revert
+    // time) — and reverting it is an honest no-op: nothing of this
+    // action's change is revertable.
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("skipped");
+  });
+
+  // FOR_9 #2: every DISPLAYED action ref is verified against its git
+  // tree — an edit and a mediated mutation in ONE turn; each row's ref
+  // names the tree its own action produced.
+  tt("mixed actions: each row's displayed ref matches its git tree (r158)", async () => {
+    const ed = await armed();
+    mkdirSync(join(process.cwd(), "b158dir"));
+    writeFileSync(join(process.cwd(), "b158dir/inner.txt"), "INNER");
+    e(ed, '(fikra/chat/fikra-turn-send "edit then remove a tracked dir")');
+    const edit = { function: { name: "buffer_edit", arguments: { path: "a158.txt", content: "EDIT-CONTENT\n" } } };
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 740 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 740 "${hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [edit, { function: { name: "bash", arguments: { command: "rm -rf b158dir/" } } }] } }))}")`);
+    e(ed, `(fikra-http-complete 740 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    await settleRefireFrom(ed, "740", "R158-DONE");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    const buf = strip(String(e(ed, "(buffer-text)").value));
+    const editRow = buf.split("\n").find((l) => l.includes("buffer-edit"));
+    const bashRow = buf.split("\n").find((l) => l.includes("⚙ bash"));
+    expect(editRow).toBeDefined();
+    expect(bashRow).toBeDefined();
+    // Each row displays its own ref (identity, r157); the mediated
+    // change IS held (a tracked dir), so its ✓ stands.
+    expect(editRow).toContain("✓]");
+    expect(bashRow).toContain("✓]");
+    const editRef = /\[ckpt (main\/1-a\d+)/.exec(editRow!)?.[1];
+    const bashRef = /\[ckpt (main\/1-a\d+)/.exec(bashRow!)?.[1];
+    expect(editRef).toMatch(/^main\/1-a\d+$/);
+    expect(bashRef).toMatch(/^main\/1-a\d+$/);
+    expect(editRef).not.toBe(bashRef);
+    // The edit's tree carries the edit; the bash's tree carries the
+    // edit AND lacks the removed dir.
+    expect(String(e(ed, `(shell-command "git show refs/fikra/${editRef}:a158.txt")`).value)).toContain("EDIT-CONTENT");
+    const bashTree = String(e(ed, `(shell-command "git ls-tree -r --name-only refs/fikra/${bashRef}")`).value);
+    expect(bashTree).toContain("a158.txt");
+    expect(bashTree).not.toContain("b158dir/inner.txt");
+  });
+
+  // The 60 KB cap used to cut the scan's LAST path mid-name (the r156
+  // declared limit): find -print0 always NUL-terminates a record, so a
+  // file not ending in NUL lost a fragment — a partial path could name
+  // a WRONG file. The scan's reader drops the fragment and says the cap
+  // was hit.
+  tt("the scan's byte cap drops a cut name and says so (r158)", async () => {
+    const ed = await armed();
+    const NUL = '(hex-decode "00")';
+    // Complete records: every path arrives, no flag.
+    expect(Number(e(ed, `(length (car (fikra/backend-ollama/fikra-ollama-scan-paths (concat "a.txt" ${NUL} "b.txt" ${NUL}) 60000)))`).value)).toBe(2);
+    expect(String(e(ed, `(nth 0 (car (fikra/backend-ollama/fikra-ollama-scan-paths (concat "a.txt" ${NUL} "b.txt" ${NUL}) 60000)))`).value)).toBe("a.txt");
+    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "a.txt" ${NUL} "b.txt" ${NUL}) 60000))`).value)).toBe(0);
+    // A cap cut mid-name: the fragment is DROPPED (a partial path must
+    // never be reported) and the flag is set.
+    expect(Number(e(ed, `(length (car (fikra/backend-ollama/fikra-ollama-scan-paths (concat "a.txt" ${NUL} "b.tx") 60000)))`).value)).toBe(1);
+    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "a.txt" ${NUL} "b.tx") 60000))`).value)).toBe(1);
+    // Exactly AT the cap on a record boundary: complete records, but
+    // whole records may have been lost beyond it — the flag is set.
+    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "abc" ${NUL}) 4))`).value)).toBe(1);
+    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "abc" ${NUL}) 5))`).value)).toBe(0);
+  });
+
   tt("a held batch counts its chunks ONCE", async () => {
     const ed = await armed();
     e(ed, "(require-module fikra/transient)");

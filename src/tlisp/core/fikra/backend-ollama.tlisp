@@ -13,7 +13,9 @@
           fikra-ollama-action-posts-get fikra-ollama-record-action-pair
           fikra-ollama-last-action-stash-get fikra-ollama-exchanges-file-get
           fikra-ollama-tool-exchanges-reset fikra-ollama-action-state-reset
-          fikra-ollama-set-streaming fikra-ollama-action-checkpoint)
+          fikra-ollama-set-streaming fikra-ollama-action-checkpoint
+          ;; r158: the scan's reader is probed by the tests.
+          fikra-ollama-scan-paths)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -313,7 +315,7 @@ availability gate must be synchronous; the turn itself is async)."
               (list "text" (concat (number-to-string n)
                                    " action(s) checkpointed this turn — SPC a d diff · SPC a R revert the turn · SPC a C-r revert the last action · holds the worktree under "
                                    (fikra/thread/fikra-thread-working-dir)
-                                   " (ignored paths and outside-root writes are NOT held)")))))))
+                                   " (ignored paths, nested repositories, permission changes, and outside-root writes are NOT held)")))))))
 
 (defvar fikra-ollama-pending-message nil
   "The message awaiting its reply (the land-time guard).")
@@ -646,6 +648,9 @@ availability gate must be synchronous; the turn itself is async)."
 (defvar fikra-ollama-last-pre-name nil
   "r142: the mediated action's PRE ref name — the sentinel pairs it
 with its post-exit capture.")
+(defvar fikra-ollama-last-pre-sha nil
+  "r158: the mediated action's PRE capture sha — the per-action
+coverage report diffs pre..post with it (the sentinel consumes it).")
 (defvar fikra-ollama-next-mediated nil
   "r134: set around a DECISION-executed spawn — the child was MEDIATED
 (the user allowed it); its exit lands a per-action checkpoint.")
@@ -805,6 +810,52 @@ with its post-exit capture.")
             "diff " ign-a " " ign-b " | grep '^[<>]' | cut -c3- | head -100 > " ignored " ; "
             "echo \"$__p $__q\" > " f)))
 
+;; r158: the MEDIATED command's scan — the ordinary wrap's changed-entry
+;; machinery (r155c/r156: the stamp scan, the mode/owner join, the
+;; ignored-entry diff) WITHOUT the tmp worktree snapshots (a mediated
+;; action's pre/post refs come from the checkpoint captures). Without it
+;; a mediated mutation the trees cannot hold — an ignored path, a nested
+;; repository, a permission change — rendered an unqualified success
+;; marker: nothing reported what the checkpoint could not hold.
+(defun fikra-ollama-scan-wrap (cmd dir)
+  (let* ((d (concat dir "/.tmax/fikra"))
+         (tid (fikra/thread/fikra-thread-current))
+         (dq (fikra/thread/fikra-thread-shq d))
+         (stamp (fikra/thread/fikra-thread-shq (concat d "/ckpt-stamp-" tid)))
+         (changed (fikra/thread/fikra-thread-shq (concat d "/ckpt-changed-" tid)))
+         (meta (fikra/thread/fikra-thread-shq (concat d "/ckpt-meta-" tid)))
+         (modes (fikra/thread/fikra-thread-shq (concat d "/ckpt-modes-" tid)))
+         (cand (fikra/thread/fikra-thread-shq (concat d "/ckpt-cand-" tid)))
+         (inodes (fikra/thread/fikra-thread-shq (concat d "/ckpt-inodes-" tid)))
+         (ignored (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-" tid)))
+         (ign-a (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-" tid)))
+         (ign-b (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-after-" tid))))
+    ;; The caller has cd'ed into the working dir. File names mirror the
+    ;; ordinary wrap's (the reader is shared); rm -f at the start keeps
+    ;; a stale run's listing out of this one.
+    (concat "mkdir -p " dq " ; rm -f " changed " " meta " " modes " " cand " " inodes " " ignored " ; "
+            (fikra-ollama-ignored-listing-cmd ign-a)
+            (fikra-ollama-mode-table-cmd modes)
+            "touch " stamp " ; "
+            (fikra-ollama-bash-body cmd)
+            " ; "
+            "find . -cnewer " stamp " -not -type d -not -path '*/.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
+            "rm -f " meta " ; if [ -s " changed " ] ; then "
+            (fikra-ollama-mode-candidates-cmd changed cand)
+            "awk 'NR==FNR {b[$1 \" \" $2]=$0; next} (($1 \" \" $2) in b) && b[$1 \" \" $2]!=$0 {print $2}' " modes " " cand " | sort -u | head -100 > " inodes " ; "
+            "if [ -s " inodes " ] ; then "
+            "find . -not -type d -not -path '*/.git/*' -not -path '*/.tmax/*' "
+            (hex-decode "5c") "( $(sed -e 's/^/-inum /' -e '$!s/$/ -o/' " inodes " | xargs) " (hex-decode "5c") ") -print0 > " meta " ; "
+            "fi ; fi ; rm -f " modes " " cand " " inodes " ; "
+            (fikra-ollama-ignored-listing-cmd ign-b)
+            "diff " ign-a " " ign-b " | grep '^[<>]' | cut -c3- | head -100 > " ignored " ; "
+            ;; The mediated captures see the WHOLE disk state (no .tmax
+            ;; exclusion) — every scratch file this wrap leaves would ride
+            ;; into the action's post tree and the pair's diff. The scan
+            ;; files the sentinel reads (changed/meta/ignored) are consumed
+            ;; by the reader BEFORE the capture; the rest go now.
+            "rm -f " stamp " " ign-a " " ign-b)))
+
 (defun fikra-ollama-run-bash-now (cmd dir)
   ;; r157: the action's identity — minted at the row and stamped into the
   ;; ownership entry; the sentinel's captures (mediated, or the ordinary
@@ -821,14 +872,19 @@ with its post-exit capture.")
     (setq fikra-ollama-next-mediated nil)
     ;; r155: ordinary calls are snapshotted (a mediated one already gets
     ;; its pre-capture before it runs and its post-capture at exit).
-    (let ((snap (and (not mediated) (stringp (fikra/thread/fikra-thread-current)))))
+    ;; r158: a MEDIATED command carries the changed-entry scan (the
+    ;; ordinary wrap's, without the snapshots) so the action's coverage
+    ;; failures are named per action.
+    (let* ((cur (fikra/thread/fikra-thread-current))
+           (snap (and (not mediated) (stringp cur)))
+           (scan (and mediated (stringp cur))))
       (let ((pid (condition-case nil
                   (make-process
                     :command (list "sh" "-c"
                                    (concat "cd " (fikra/thread/fikra-thread-shq dir)
-                                           " && " (if snap
-                                                    (fikra-ollama-snapshot-wrap cmd dir)
-                                                    (fikra-ollama-bash-body cmd))))
+                                           " && " (cond (snap (fikra-ollama-snapshot-wrap cmd dir))
+                                                        (scan (fikra-ollama-scan-wrap cmd dir))
+                                                        (t (fikra-ollama-bash-body cmd)))))
                     :cwd dir
                     :filter "fikra/backend-ollama/fikra-ollama-bash-filter"
                     :sentinel "fikra/backend-ollama/fikra-ollama-bash-sentinel")
@@ -911,45 +967,26 @@ with its post-exit capture.")
                          "/.tmax/fikra/ckpt-"))
            (tid (fikra/thread/fikra-thread-current))
            (f (concat base "trees-" tid))
-           (changed (concat base "changed-" tid))
-           (meta (concat base "meta-" tid))
-           (ignored (concat base "ignored-" tid))
            (toks (fikra-ollama-marker-tokens
                    (if (file-exists-p f) (string-trim (read-file-content f)) "")))
            (pre (if (> (length toks) 0) (nth 0 toks) ""))
            (post (if (> (length toks) 1) (nth 1 toks) ""))
            (usable (and (fikra-ollama-hex40-p pre) (fikra-ollama-hex40-p post)))
-           (changed-lines
-             (append
-               ;; The scan's list is NUL-separated (a name may contain a
-               ;; newline — r155e, codex gate); the ignored-entry diff is
-               ;; newline-separated (git's own listing).
-               (if (file-exists-p changed)
-                 (fikra-ollama-split-paths (read-file-content changed))
-                 (list))
-               (if (file-exists-p ignored)
-                 (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
-                 (list))))
-           ;; r156: the paths whose mode or owner changed — NUL-separated
-           ;; by find, exactly like the scan's list (a name may contain a
-           ;; newline, or begin with a dash).
-           (meta-lines
-             (if (file-exists-p meta)
-               (fikra-ollama-split-paths (read-file-content meta))
-               (list))))
-      ;; The markers are consumed whatever they held — a stale or useless
-      ;; one must not be reported again by an unrelated later call.
+           ;; r158: the scan files are read and CONSUMED by the shared
+           ;; reader (the mediated path reads the same files). The scan's
+           ;; list is NUL-separated (a name may contain a newline — r155e,
+           ;; codex gate); the ignored-entry diff is newline-separated
+           ;; (git's own listing). r158: a scan capped at 60 KB drops its
+           ;; cut fragment and says the cap was hit.
+           (scan (fikra-ollama-take-scan-files))
+           (changed-lines (nth 0 scan))
+           (meta-lines (nth 1 scan))
+           (scan-truncated (nth 2 scan)))
+      ;; The trees marker is consumed whatever it held — a stale or
+      ;; useless one must not be reported again by an unrelated later
+      ;; call (the scan files are consumed by the reader).
       (if (file-exists-p f)
         (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq f)))
-        nil)
-      (if (file-exists-p changed)
-        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq changed)))
-        nil)
-      (if (file-exists-p meta)
-        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq meta)))
-        nil)
-      (if (file-exists-p ignored)
-        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq ignored)))
         nil)
       (cond
         ((fikra/checkpoint/fikra-checkpoint-disable-p) nil)
@@ -958,8 +995,10 @@ with its post-exit capture.")
           (progn
           ;; r155c: what the command touched that the trees cannot hold.
           ;; r156: …and what changed on a path they DO hold, in a way they
-          ;; cannot record.
-          (fikra-ollama-report-outside-checkpoint changed-lines meta-lines pre post)
+          ;; cannot record. r158: the report carries the action's
+          ;; identity and the cap flag.
+          (fikra-ollama-report-outside-checkpoint changed-lines meta-lines pre post
+            (funcall 'fikra/checkpoint/fikra-checkpoint-emit-act-get) scan-truncated)
           (if (string= pre post)
             nil
             ;; r134e: this runs in the SENTINEL's eval context — the event
@@ -1011,7 +1050,7 @@ with its post-exit capture.")
 ;; A META entry is reported when the tree diff does not already cover it
 ;; — an executable bit, a link's target, a new or deleted file are
 ;; covered and stay silent.
-(defun fikra-ollama-report-outside-checkpoint (changed meta pre post)
+(defun fikra-ollama-report-outside-checkpoint (changed meta pre post act truncated)
   (let* ((root (fikra/thread/fikra-thread-working-dir))
          (rq (fikra/thread/fikra-thread-shq root))
          ;; Nothing scanned (a command that wrote no file the scan can
@@ -1046,15 +1085,27 @@ with its post-exit capture.")
          ;; found anything (codex gate round 1, NIT).
          (uncovered (fikra-ollama-outside-scan meta (list) covered unsighted 0))
          (outside (append unsighted uncovered)))
-    (if (> (length outside) 0)
+    ;; r158: a scan capped at 60 KB reports too — whole records beyond
+    ;; the cap were lost, so "no outside path found" is not proof the
+    ;; command changed nothing the checkpoint cannot hold. The event
+    ;; carries the action's identity: the row's marker is qualified
+    ;; (never an unqualified success for an uncovered mutation).
+    (if (or (> (length outside) 0) (= truncated 1))
       (let ((n (length outside)))
         (condition-case nil
           (fikra/event/fikra-event-emit-batch-for (fikra/thread/fikra-thread-current)
-            (list (list (list "kind" "checkpoint-error")
-                        (list "reason"
-                          (concat (number-to-string n) " path(s) the checkpoint cannot hold changed — not revertable: "
-                                  (fikra-ollama-join-take outside 3 ", ")
-                                  (if (> n 3) " …" ""))))))
+            (list (append (list (list "kind" "checkpoint-error")
+                                (list "reason"
+                                  (concat
+                                    (if (> n 0)
+                                      (concat (number-to-string n) " path(s) the checkpoint cannot hold changed — not revertable: "
+                                              (fikra-ollama-join-take outside 3 ", ")
+                                              (if (> n 3) " …" ""))
+                                      "the change scan hit its 60 KB cap — whole records beyond it were lost")
+                                    (if (and (= truncated 1) (> n 0))
+                                      " — the change scan hit its 60 KB cap; more changed paths may be unreported"
+                                      ""))))
+                          (if act (list (list "act" act)) (list)))))
           (error () nil))
         (if (string= pre post)
           (editor-set-status
@@ -1086,6 +1137,62 @@ with its post-exit capture.")
 ;; NUL-separated path list (git -z) → its paths, verbatim: no trimming
 ;; (a path may begin or end with a space), no newline splitting (a path
 ;; may contain one — r155d, codex gate), empty entries dropped.
+;; r158: the index of the LAST NUL at or before i, or -1. Tail-recursive
+;; over at most the scan cap's 60000 bytes.
+(defun fikra-ollama-last-nul-index (s i)
+  (cond ((< i 0) -1)
+        ((string= (substring s i (+ i 1)) (hex-decode "00")) i)
+        (t (fikra-ollama-last-nul-index s (- i 1)))))
+
+;; r158: the scan's output reader. The child caps its output with
+;; `head -c 60000`, which cuts a record MID-NAME when it hits — and
+;; find -print0 always NUL-terminates a record, so a file NOT ending in
+;; NUL lost a fragment: a partial path could name a WRONG file. The
+;; reader drops the fragment after the last complete record; a file
+;; ending in NUL at exactly the cap may still have lost whole records
+;; beyond it (undetectable here) — the flag says so too. Returns
+;; (list <paths> <truncated 1|0>).
+(defun fikra-ollama-scan-paths (raw cap)
+  (if (or (not (stringp raw)) (= (length raw) 0))
+    (list (list) 0)
+    (let* ((n (length raw))
+           (ends (string= (substring raw (- n 1)) (hex-decode "00")))
+           (cut (fikra-ollama-last-nul-index raw (- n 1)))
+           (body (cond (ends raw)
+                       ((>= cut 0) (substring raw 0 (+ cut 1)))
+                       (t "")))
+           (truncated (cond ((not ends) 1)
+                            ((>= n cap) 1)
+                            (t 0))))
+      (list (fikra-ollama-split-paths body) truncated))))
+
+;; r158: read and CONSUME the child's scan files (the ordinary wrap and
+;; the mediated scan share them; the ordinary path's trees marker is
+;; separate). Returns (list <changed-lines incl. ignored entries>
+;; <meta-lines> <truncated 1|0>).
+(defun fikra-ollama-take-scan-files ()
+  (let* ((base (concat (fikra/thread/fikra-thread-working-dir) "/.tmax/fikra/ckpt-"))
+         (tid (fikra/thread/fikra-thread-current))
+         (changed (concat base "changed-" tid))
+         (meta (concat base "meta-" tid))
+         (ignored (concat base "ignored-" tid))
+         (scanned (fikra-ollama-scan-paths
+                    (if (file-exists-p changed) (read-file-content changed) "") 60000))
+         (changed-lines
+           (append (car scanned)
+                   (if (file-exists-p ignored)
+                     (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
+                     (list))))
+         (meta-lines
+           (if (file-exists-p meta)
+             (fikra-ollama-split-paths (read-file-content meta))
+             (list))))
+    (shell-command (concat "rm -f "
+                      (fikra/thread/fikra-thread-shq changed) " "
+                      (fikra/thread/fikra-thread-shq meta) " "
+                      (fikra/thread/fikra-thread-shq ignored)))
+    (list changed-lines meta-lines (nth 1 scanned))))
+
 (defun fikra-ollama-split-paths (text)
   (if (or (not (stringp text)) (= (length text) 0))
     (list)
@@ -1215,25 +1322,45 @@ with its post-exit capture.")
                         (if (and entry (hashmap-get entry "mediated"))
                           (condition-case nil
                             (progn (require-module fikra/checkpoint)
-                                   ;; r134c (codex r134b catch): SYNC — the
-                                   ;; snapshot completes BEFORE the
-                                   ;; continuation resumes (an async capture's
-                                   ;; git add -A could stage a LATER edit into
-                                   ;; this action's ref). r134e: this runs in
-                                   ;; the SENTINEL context — the event emits
-                                   ;; owner-bound (the pointer reads nil here).
-                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner
-                                     (if home home (fikra/thread/fikra-thread-current)))
-                                   ;; r157: the row's action identity rides
-                                   ;; the entry.
-                                   (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
-                                     (hashmap-get entry "act"))
-                                   (fikra/checkpoint/fikra-checkpoint-capture "action")
-                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
-                                   (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
-                                   ;; r142: the post→pre pair.
-                                   (fikra-ollama-record-action-pair fikra-ollama-last-pre-name)
-                                   (setq fikra-ollama-last-pre-name nil))
+                                   ;; r158: the scan the child ran for THIS
+                                   ;; action (an ignored path, a nested
+                                   ;; repository, a permission change) —
+                                   ;; read and consumed whatever it held.
+                                   (let* ((scan (fikra-ollama-take-scan-files))
+                                          ;; r134c (codex r134b catch): SYNC —
+                                          ;; the snapshot completes BEFORE the
+                                          ;; continuation resumes (an async
+                                          ;; capture's git add -A could stage
+                                          ;; a LATER edit into this action's
+                                          ;; ref). r134e: this runs in the
+                                          ;; SENTINEL context — the event
+                                          ;; emits owner-bound (the pointer
+                                          ;; reads nil here).
+                                          (post (progn
+                                                  (fikra/checkpoint/fikra-checkpoint-set-emit-owner
+                                                    (if home home (fikra/thread/fikra-thread-current)))
+                                                  ;; r157: the row's action
+                                                  ;; identity rides the entry.
+                                                  (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act
+                                                    (hashmap-get entry "act"))
+                                                  (let ((r (fikra/checkpoint/fikra-checkpoint-capture "action")))
+                                                    (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+                                                    (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
+                                                    r))))
+                                     ;; r142: the post→pre pair.
+                                     (fikra-ollama-record-action-pair fikra-ollama-last-pre-name)
+                                     ;; r158: the per-action coverage report —
+                                     ;; the ordinary path's report, diffed
+                                     ;; pre..post by sha, stamped with the
+                                     ;; action's identity so the row's marker
+                                     ;; is qualified (never an unqualified ✓
+                                     ;; for an uncovered mutation).
+                                     (fikra-ollama-report-outside-checkpoint
+                                       (nth 0 scan) (nth 1 scan)
+                                       fikra-ollama-last-pre-sha post
+                                       (hashmap-get entry "act") (nth 2 scan))
+                                     (setq fikra-ollama-last-pre-name nil)
+                                     (setq fikra-ollama-last-pre-sha nil)))
                             (error () nil)))
                         (if (not cont)
                           (progn
@@ -2997,6 +3124,10 @@ with its post-exit capture.")
                                   (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
                                   (let ((r (fikra/checkpoint/fikra-checkpoint-capture "action")))
                                     (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
+                                    ;; r158: the sha the per-action coverage
+                                    ;; report diffs against (the sentinel
+                                    ;; consumes it with the pre name).
+                                    (setq fikra-ollama-last-pre-sha r)
                                     r))))
                   (if (not sha)
                     (editor-set-status

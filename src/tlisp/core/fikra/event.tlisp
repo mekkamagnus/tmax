@@ -401,7 +401,12 @@ round-12 approvals catch)."
                 (fikra-face "\e[33m" (concat "  " (fikra-event-get-str event "summary")))
                 (if (fikra-event-get event "ckpt")
                   (concat " " (fikra-face "\e[36m"
-                    (concat "[ckpt " (fikra-ckpt-short (fikra-event-get-str event "ckpt")) " ✓]")))
+                    ;; r158: a coverage failure for THIS action (the
+                    ;; checkpoint-error stamped with its act id) qualifies
+                    ;; the marker — never an unqualified success for an
+                    ;; uncovered mutation.
+                    (concat "[ckpt " (fikra-ckpt-short (fikra-event-get-str event "ckpt"))
+                            (if (fikra-event-get event "ckpt-err") " — not held]" " ✓]"))))
                   "")
                 "\n"
                 (fikra-event-render-preview event)))
@@ -1219,7 +1224,7 @@ id-less completed thoughts too).")
               (cons e acc))
             (fikra-event-inline-act-refs (cdr events) refs acc)))
         (fikra-event-inline-act-refs (cdr events) refs acc)))))
-(defun fikra-event-inline-act-apply (events refs out)
+(defun fikra-event-inline-act-apply (events refs errs out)
   (if (null events)
     (reverse out)
     (let* ((e (car events))
@@ -1229,15 +1234,25 @@ id-less completed thoughts too).")
         ((string= k "checkpoint-ready")
           (if (and act (> (length act) 0))
             ;; its ref rides the row; the marker event itself drops
-            (fikra-event-inline-act-apply (cdr events) refs out)
-            (fikra-event-inline-act-apply (cdr events) refs (cons e out))))
+            (fikra-event-inline-act-apply (cdr events) refs errs out)
+            (fikra-event-inline-act-apply (cdr events) refs errs (cons e out))))
         ((string= k "tool-call")
           (let ((ref (if (and act (> (length act) 0))
                        (hashmap-get refs act)
+                       nil))
+                ;; r158: a coverage failure for THIS action qualifies the
+                ;; row's marker (the render drops the unqualified ✓).
+                (err (if (and act (> (length act) 0))
+                       (hashmap-get errs act)
                        nil)))
-            (fikra-event-inline-act-apply (cdr events) refs
-              (cons (if ref (fikra-event-with-ckpt e ref) e) out))))
-        (t (fikra-event-inline-act-apply (cdr events) refs (cons e out)))))))
+            (fikra-event-inline-act-apply (cdr events) refs errs
+              (cons (if ref
+                      (fikra-event-with-ckpt
+                        (if err (fikra-event-with-field e "ckpt-err" err) e)
+                        ref)
+                      (if err (fikra-event-with-field e "ckpt-err" err) e))
+                    out))))
+        (t (fikra-event-inline-act-apply (cdr events) refs errs (cons e out)))))))
 
 ;; Merge checkpoint-ready markers INLINE (mockup 8.1's "[ckpt ... ✓]"
 ;; on the buffer-edit row). Pure list transform: a checkpoint-ready that
@@ -1402,14 +1417,33 @@ id-less completed thoughts too).")
 
 ;; Attach the ckpt ref to EVENT (both shapes: the FAEP parse yields
 ;; ALISTS — cons the pair; hashmaps get a copied set).
-(defun fikra-event-with-ckpt (event ref)
+(defun fikra-event-with-field (event key value)
   (if (hashmapp event)
     (let ((copy (hashmap)))
       (dolist (k (hashmap-keys event))
         (editor/keymaps/keymap-mutable-set! copy k (hashmap-get event k)))
-      (editor/keymaps/keymap-mutable-set! copy "ckpt" ref)
+      (editor/keymaps/keymap-mutable-set! copy key value)
       copy)
-    (cons (list "ckpt" ref) event)))
+    (cons (list key value) event)))
+(defun fikra-event-with-ckpt (event ref)
+  (fikra-event-with-field event "ckpt" ref))
+
+;; r158: the coverage failures stamp the SAME act id as their action —
+;; a checkpoint-error naming paths the checkpoint cannot hold qualifies
+;; that action's row (the render drops the unqualified ✓). act -> reason,
+;; last wins.
+(defun fikra-event-inline-act-errors (events errs)
+  (if (null events)
+    errs
+    (let ((e (car events)))
+      (if (string= (fikra-event-get-str e "kind") "checkpoint-error")
+        (let ((act (fikra-event-get-str e "act")))
+          (if (and act (> (length act) 0))
+            (fikra-event-inline-act-errors (cdr events)
+              (editor/keymaps/keymap-mutable-set! errs act
+                (fikra-event-get-str e "reason")))
+            (fikra-event-inline-act-errors (cdr events) errs)))
+        (fikra-event-inline-act-errors (cdr events) errs)))))
 
 (defun fikra-event-replay ()
   (if (not fikra-event-log)
@@ -1434,9 +1468,12 @@ id-less completed thoughts too).")
                              (progn (append-file ".tmax/fikra/actdbg.log"
                                       (concat "REFS-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
                                (list (hashmap) (list))))))
+               (errs (condition-case (m)
+                             (fikra-event-inline-act-errors deduped (hashmap))
+                           (error (m) (hashmap))))
                (merged (fikra-event-inline-ckpt-merge
                          (condition-case (m)
-                             (fikra-event-inline-act-apply deduped (car act-pair) (list))
+                             (fikra-event-inline-act-apply deduped (car act-pair) errs (list))
                            (error (m)
                              (progn (append-file ".tmax/fikra/actdbg.log"
                                       (concat "APPLY-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
