@@ -140,9 +140,8 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
 
   test("render-parts: the summary/footer pass VERBATIM; only the patch faces", async () => {
     e(editor, "(require-module fikra/diff)");
-    // Evaluate render-parts to a STRING first (no buffer interaction),
-    // then append into a scratch buffer — avoids the render path's
-    // read-only lifecycle entirely.
+    // Drive render-parts END-TO-END (it renders into *Fikra-Diff*)
+    // and assert on the BUFFER (the palette bytes must survive).
     const hdr = Buffer.from("\u001b[1;36mmy header\u001b[0m\n", "utf8").toString("hex");
     e(editor, `(condition-case nil (fikra/diff/fikra-diff-render-parts (hex-decode "${hdr}") (fikra/diff/fikra-diff-facelines "+added") "") (error (m) (concat "THREW:" m)))`);
     e(editor, '(buffer-switch "*Fikra-Diff*")');
