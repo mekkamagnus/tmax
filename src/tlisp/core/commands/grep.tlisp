@@ -904,7 +904,11 @@ fresh session, so the first search used to wrongly dispatch to the
 fallback (available-p's detection side effect had not run yet)."
   (interactive)
   (let ((ok (grep-backend-available-p)))
-    (if (not ok) nil
+    (if (not ok)
+      ;; valve r1: KILL the prior search before refusing — a new
+      ;; search with a vanished executable used to leave the
+      ;; previous one running.
+      (progn (grep-rg-kill-prior) (grep-fallback-kill-prior) nil)
       (let ((b (if (stringp grep-backend) grep-backend "auto")))
         (cond
           ((string= b "grep") (grep-fallback-run pattern scope))
@@ -993,7 +997,6 @@ walk's [] used to complete no-matches silently)."
     (progn
       (grep-fallback-kill-prior)
       (grep-rg-kill-prior)
-      (grep-fallback-detect-i)
       (let ((gen (grep-buffer-register
                    (hashmap "backend" "grep" "pattern" pattern "scope" scope
                      "rerun" (lambda () (grep-fallback-run pattern scope))))))
@@ -1047,7 +1050,12 @@ walk's [] used to complete no-matches silently)."
               (setq grep-fallback-total (length files))
               (if (= grep-fallback-total 0)
                 (grep-buffer-complete gen "no-matches" nil)
-                (grep-fallback-next))))))))))
+                (progn
+                  ;; valve r1: the -I probe DEFERRED until files
+                  ;; exist — an empty scope spawns NOTHING (the
+                  ;; no-spawn rule covers the probe).
+                  (grep-fallback-detect-i)
+                  (grep-fallback-next)))))))))))
 
 (defun grep-fallback-pending-as-list ()
   (if (null grep-fallback-pending) (list) grep-fallback-pending))
