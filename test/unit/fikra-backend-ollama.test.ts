@@ -3997,6 +3997,54 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "abc" ${NUL}) 5))`).value)).toBe(0);
   });
 
+  // Gate round 1's reproduced P1: the report's 400-entry examination cap
+  // gated the IGNORED-deletion entries too (they follow the scan's entries
+  // in the combined changed-lines). 401 held entries touched by the same
+  // command crowded the .env entry out — the row claimed an unqualified ✓
+  // for a mutation the checkpoint cannot hold. The ignored entries are
+  // examined in their OWN pass (they are the class the trees cannot hold
+  // by construction) and can no longer be crowded out.
+  tt("a crowd of held changes cannot crowd out the ignored-deletion report (r158b)", async () => {
+    const ed = await armed();
+    const giPath = join(process.cwd(), ".gitignore");
+    const gi = existsSync(giPath) ? readFileSync(giPath, "utf8") : "";
+    writeFileSync(giPath, gi + (gi.length > 0 && !gi.endsWith("\n") ? "\n" : "") + ".env\n");
+    writeFileSync(join(process.cwd(), ".env"), "SECRET-ENV");
+    mkdirSync(join(process.cwd(), "bulk158"));
+    for (let i = 0; i < 401; i++) writeFileSync(join(process.cwd(), `bulk158/f${i}.txt`), `B${i}\n`);
+    e(ed, '(fikra/chat/fikra-turn-send "remove the ignored file among a crowd")');
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 750 "live")`);
+    e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 750 "${hex(JSON.stringify({ message: { role: "assistant", content: "",
+      tool_calls: [{ function: { name: "bash", arguments: { command: "rm -rf .env; touch bulk158/*" } } }] } }))}")`);
+    e(ed, `(fikra-http-complete 750 200 "${hex("{}")}")`);
+    expect(String(e(ed, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    e(ed, "(fikra/approvals/fikra-approval-answer-allow)");
+    await settleRefireFrom(ed, "750", "R158B-DONE");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(String(e(ed, '(shell-command "test -f .env && echo EXISTS || echo GONE")').value).trim()).toBe("GONE");
+    const buf = strip(String(e(ed, "(buffer-text)").value));
+    const row = buf.split("\n").find((l) => l.includes("⚙ bash"));
+    expect(row).toBeDefined();
+    // The ignored deletion is named even though the scan's 400-entry
+    // examination cap was consumed by the held crowd.
+    expect(row!).not.toContain("✓]");
+    expect(row!).toContain("not held");
+    expect(buf).toContain("checkpoint-error");
+    expect(buf).toContain(".env");
+  });
+
+  // Gate round 1's reproduced P2: the cap comparison counted T-Lisp
+  // string units, the child's head -c counts BYTES — a capped scan ending
+  // on a NUL boundary with non-ASCII names suppressed the flag.
+  tt("the scan cap is counted in BYTES, not string units (r158b)", async () => {
+    const ed = await armed();
+    const NUL = '(hex-decode "00")';
+    // éa + NUL is 4 UTF-8 bytes but 3 string units: a 4-BYTE cap is hit.
+    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "éa" ${NUL}) 4))`).value)).toBe(1);
+    // One byte short of the cap: no flag.
+    expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "a" ${NUL}) 4))`).value)).toBe(0);
+  });
+
   tt("a held batch counts its chunks ONCE", async () => {
     const ed = await armed();
     e(ed, "(require-module fikra/transient)");

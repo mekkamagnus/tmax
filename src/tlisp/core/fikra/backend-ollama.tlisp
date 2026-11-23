@@ -981,7 +981,8 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
            (scan (fikra-ollama-take-scan-files))
            (changed-lines (nth 0 scan))
            (meta-lines (nth 1 scan))
-           (scan-truncated (nth 2 scan)))
+           (ignored-lines (nth 2 scan))
+           (scan-truncated (nth 3 scan)))
       ;; The trees marker is consumed whatever it held — a stale or
       ;; useless one must not be reported again by an unrelated later
       ;; call (the scan files are consumed by the reader).
@@ -997,7 +998,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
           ;; r156: …and what changed on a path they DO hold, in a way they
           ;; cannot record. r158: the report carries the action's
           ;; identity and the cap flag.
-          (fikra-ollama-report-outside-checkpoint changed-lines meta-lines pre post
+          (fikra-ollama-report-outside-checkpoint changed-lines meta-lines ignored-lines pre post
             (funcall 'fikra/checkpoint/fikra-checkpoint-emit-act-get) scan-truncated)
           (if (string= pre post)
             nil
@@ -1050,7 +1051,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
 ;; A META entry is reported when the tree diff does not already cover it
 ;; — an executable bit, a link's target, a new or deleted file are
 ;; covered and stay silent.
-(defun fikra-ollama-report-outside-checkpoint (changed meta pre post act truncated)
+(defun fikra-ollama-report-outside-checkpoint (changed meta ignored pre post act truncated)
   (let* ((root (fikra/thread/fikra-thread-working-dir))
          (rq (fikra/thread/fikra-thread-shq root))
          ;; Nothing scanned (a command that wrote no file the scan can
@@ -1084,7 +1085,12 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
          ;; the report's order must not depend on the second pass having
          ;; found anything (codex gate round 1, NIT).
          (uncovered (fikra-ollama-outside-scan meta (list) covered unsighted 0))
-         (outside (append unsighted uncovered)))
+         ;; r158b: the ignored entries in their OWN pass (deduped against
+         ;; both previous passes) — the class the trees cannot hold by
+         ;; construction can never be crowded out by the scan's cap.
+         (unseen (fikra-ollama-outside-scan ignored (list) covered
+                   (append unsighted uncovered) 0))
+         (outside (append unsighted uncovered unseen)))
     ;; r158: a scan capped at 60 KB reports too — whole records beyond
     ;; the cap were lost, so "no outside path found" is not proof the
     ;; command changed nothing the checkpoint cannot hold. The event
@@ -1161,15 +1167,22 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
            (body (cond (ends raw)
                        ((>= cut 0) (substring raw 0 (+ cut 1)))
                        (t "")))
+           ;; r158b: the cap is in BYTES (the child's `head -c` counts
+           ;; bytes; `length` counts string units — éa+NUL is 4 bytes but
+           ;; 3 units, which suppressed the flag at a 4-byte cap). hex
+           ;; chars are 2 per byte, so compare doubled.
            (truncated (cond ((not ends) 1)
-                            ((>= n cap) 1)
+                            ((>= (length (hex-encode raw)) (* 2 cap)) 1)
                             (t 0))))
       (list (fikra-ollama-split-paths body) truncated))))
 
 ;; r158: read and CONSUME the child's scan files (the ordinary wrap and
 ;; the mediated scan share them; the ordinary path's trees marker is
-;; separate). Returns (list <changed-lines incl. ignored entries>
-;; <meta-lines> <truncated 1|0>).
+;; separate). r158b: the ignored-entry listing is a SEPARATE element —
+;; the report examines each class in its own pass, so the scan's
+;; 400-entry examination cap cannot crowd the ignored entries out (the
+;; gate's reproduced P1: 401 held changes hid the ignored deletion).
+;; Returns (list <scan-lines> <meta-lines> <ignored-lines> <truncated 1|0>).
 (defun fikra-ollama-take-scan-files ()
   (let* ((base (concat (fikra/thread/fikra-thread-working-dir) "/.tmax/fikra/ckpt-"))
          (tid (fikra/thread/fikra-thread-current))
@@ -1178,20 +1191,21 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
          (ignored (concat base "ignored-" tid))
          (scanned (fikra-ollama-scan-paths
                     (if (file-exists-p changed) (read-file-content changed) "") 60000))
-         (changed-lines
-           (append (car scanned)
-                   (if (file-exists-p ignored)
-                     (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
-                     (list))))
          (meta-lines
            (if (file-exists-p meta)
              (fikra-ollama-split-paths (read-file-content meta))
+             (list)))
+         (ignored-lines
+           (if (file-exists-p ignored)
+             ;; The listing is newline-separated (git's own output); its
+             ;; own child cap is 100 lines.
+             (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
              (list))))
     (shell-command (concat "rm -f "
                       (fikra/thread/fikra-thread-shq changed) " "
                       (fikra/thread/fikra-thread-shq meta) " "
                       (fikra/thread/fikra-thread-shq ignored)))
-    (list changed-lines meta-lines (nth 1 scanned))))
+    (list (car scanned) meta-lines ignored-lines (nth 1 scanned))))
 
 (defun fikra-ollama-split-paths (text)
   (if (or (not (stringp text)) (= (length text) 0))
@@ -1356,9 +1370,9 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                                      ;; is qualified (never an unqualified ✓
                                      ;; for an uncovered mutation).
                                      (fikra-ollama-report-outside-checkpoint
-                                       (nth 0 scan) (nth 1 scan)
+                                       (nth 0 scan) (nth 1 scan) (nth 2 scan)
                                        fikra-ollama-last-pre-sha post
-                                       (hashmap-get entry "act") (nth 2 scan))
+                                       (hashmap-get entry "act") (nth 3 scan))
                                      (setq fikra-ollama-last-pre-name nil)
                                      (setq fikra-ollama-last-pre-sha nil)))
                             (error () nil)))
