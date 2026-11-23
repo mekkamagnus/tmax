@@ -1426,8 +1426,8 @@ id-less completed thoughts too).")
         ;; follows (when one does); otherwise the standalone row stands.
         ;; r157: the identity pass FIRST (act-id'd markers attach to
         ;; their own row; the pre's drop), then proximity for what has
-        ;; no act id. (The error trap is a DEBUG hook — remove before
-        ;; landing.)
+        ;; no act id. (The error traps DEGRADE to proximity association
+        ;; if the identity pass ever throws - they stay.)
         (let* ((act-pair (condition-case (m)
                              (fikra-event-inline-act-refs deduped (hashmap) (list))
                            (error (m)

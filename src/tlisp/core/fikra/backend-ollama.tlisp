@@ -2989,6 +2989,12 @@ with its post-exit capture.")
                 (let ((sha (progn (require-module fikra/checkpoint)
                                   (fikra/checkpoint/fikra-checkpoint-set-emit-owner
                                     (if home-thread home-thread (fikra/thread/fikra-thread-current)))
+                                  ;; r157d (gate round 3, reading-only): this PRE
+                                  ;; capture runs BEFORE the row's act is minted -
+                                  ;; clear the carrier so it cannot inherit the
+                                  ;; PREVIOUS action's act and misattribute the
+                                  ;; new pre ref to that older row.
+                                  (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil)
                                   (let ((r (fikra/checkpoint/fikra-checkpoint-capture "action")))
                                     (fikra/checkpoint/fikra-checkpoint-set-emit-owner nil)
                                     r))))
