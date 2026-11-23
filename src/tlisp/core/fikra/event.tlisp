@@ -8,7 +8,7 @@
           fikra-event-tombstone-ranges fikra-event-in-range-p
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
           fikra-event-get-str
-          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles-get fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
+          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles-get fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get fikra-event-render-batch fikra-event-index-scan fikra-event-index-row-path fikra-event-strip-faces)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
@@ -71,6 +71,7 @@
       (condition-case nil
         (progn
           (require-module fikra/transient)
+          (require-module editor/fikra/diff-line-index)
           (fikra/transient/fikra-transient-note-chunks id n streamed))
         (error () nil))
       nil)))
@@ -588,20 +589,24 @@ bumps the revision the TUI poll consumes."
               ;; verified end-to-end: the daemon *Fikra* holds the complete
               ;; streamed reply (540 chars) after the turn.
               (condition-case nil
-                (if (string= (buffer-current) target-buffer)
-                  (let ((was-ro (buffer-read-only-p)))
-                    (buffer-set-read-only nil)
-                    (buffer-append text)
-                    (fikra-thought-rebuild-line-ids)
-                    (buffer-set-read-only was-ro))
-                  (let ((prev (buffer-current))
-                        (was-ro (buffer-read-only-p)))
-                    (buffer-switch target-buffer)
-                    (buffer-set-read-only nil)
-                    (buffer-append text)
-                    (fikra-thought-rebuild-line-ids)
-                    (buffer-set-read-only was-ro)
-                    (buffer-switch prev)))
+                (let ((base (buffer-line-count)))
+                  (if (string= (buffer-current) target-buffer)
+                    (let ((was-ro (buffer-read-only-p)))
+                      (buffer-set-read-only nil)
+                      (buffer-append text)
+                      (fikra-event-index-scan target-buffer base text)
+                      (fikra-thought-rebuild-line-ids)
+                      (buffer-set-read-only was-ro))
+                    (let ((prev (buffer-current))
+                          (was-ro (buffer-read-only-p)))
+                      (buffer-switch target-buffer)
+                      (buffer-set-read-only nil)
+                      (let ((base2 (buffer-line-count)))
+                        (buffer-append text)
+                        (fikra-event-index-scan target-buffer base2 text))
+                      (fikra-thought-rebuild-line-ids)
+                      (buffer-set-read-only was-ro)
+                      (buffer-switch prev))))
                 (error () nil))))
           ;; #320 (codex r4 c1): a marker batch that SKIPS the incremental
           ;; render still THREADS the run state (the discarded text is
@@ -677,9 +682,11 @@ text-deltas inside the batch join into the same line."
         (let ((text (fikra-event-render-batch events)))
           (if (and (> (length text) 0)
                    (string= (buffer-current) (fikra/thread/fikra-thread-buffer-name)))
-            (let ((was-ro (buffer-read-only-p)))
+            (let ((was-ro (buffer-read-only-p))
+                  (base (buffer-line-count)))
               (buffer-set-read-only nil)
               (buffer-append text)
+              (fikra-event-index-scan (fikra/thread/fikra-thread-buffer-name) base text)
               (buffer-set-read-only was-ro)))))
       ;; 3. Record in memory.
       (dolist (e events)
@@ -793,8 +800,10 @@ what the render emits."
         (let ((l (buffer-line 0)))
           (if (> (length l) 0)
             (buffer-delete-range 0 0 0 (length l))))))
-    (if (> (length text) 0)
-      (buffer-append text))
+    (let ((rbase (buffer-line-count)))
+      (if (> (length text) 0)
+        (buffer-append text))
+      (fikra-event-index-scan (buffer-current) rbase text))
     (fikra-thought-rebuild-line-ids)
     (buffer-set-read-only was-ro)
     t))
@@ -1014,6 +1023,91 @@ id-less completed thoughts too).")
 ;; thread's run state (the batch's LAST event decides what stays open: a
 ;; text-delta leaves a text run open; a thought-delta leaves ITS block's
 ;; run open — cross-batch growth; anything else closes).
+
+;; #312 — the chat-side line-index population: ONE code path (every
+;; buffer-append site calls the scan after appending — live streaming
+;; AND the replay rebuild share them). A file-change ± row's shape
+;; (after face-stripping): "± <path> +<adds> -<dels>" — the path is
+;; recorded AS EMITTED (resolved against the thread root at RET).
+(defun fikra-event-index-scan (buffer-name base-line text)
+  (condition-case nil
+    (fikra-event-index-scan-lines
+      (string-split text "\n") buffer-name base-line 0)
+    (error () nil)))
+
+(defun fikra-event-index-scan-lines (lines buffer-name base-line i)
+  (if (null lines)
+    nil
+    (progn
+      (let ((path (fikra-event-index-row-path (fikra-event-strip-faces (car lines)))))
+        (if (stringp path)
+          (editor/fikra/diff-line-index/diff-line-index-record buffer-name
+            (+ base-line i)
+            (hashmap "path" path "line" nil "side" nil "hunk" nil))))
+      (fikra-event-index-scan-lines (cdr lines) buffer-name base-line (+ i 1)))))
+
+(defun fikra-event-index-row-path (line)
+  ;; "± <path> +<adds> -<dels>" → <path> (nil otherwise). The path ends
+  ;; at the LAST " +" before the trailing " -<dels>" — char-scanned
+  ;; (the reader strips backslashes; no regex).
+  (if (and (> (length line) 2) (string= (substring line 0 2) "± "))
+    (fikra-event-index-path-scan (substring line 2 (length line)) "")
+    nil))
+
+(defun fikra-event-index-path-scan (rest acc)
+  ;; The boundary: " +<digits> -<digits>" to EOL (OUR renderer's
+  ;; shape — "± " path " +" adds " -" dels). Spaces inside the path
+  ;; accumulate; only the VALIDATED suffix terminates.
+  (if (< (length rest) 2)
+    nil
+    (if (and (string= (substring rest 0 1) " ")
+             (fikra-event-index-tail-p (substring rest 1 (length rest))))
+      (if (> (length acc) 0) acc nil)
+      (fikra-event-index-path-scan (substring rest 1 (length rest))
+        (concat acc (substring rest 0 1))))))
+
+(defun fikra-event-index-tail-p (s)
+  ;; "+<digits> -<digits>" exactly.
+  (and (>= (length s) 5)
+       (string= (substring s 0 1) "+")
+       (fikra-event-index-digits-then
+         (substring s 1 (length s)) " -")))
+
+(defun fikra-event-index-digits-then (s marker)
+  (let ((n (fikra-event-index-count-digits s 0)))
+    (and (> n 0)
+         (>= (length s) (+ n (length marker)))
+         (string= (substring s n (+ n (length marker))) marker)
+         (let ((rest2 (substring s (+ n (length marker)) (length s))))
+           (and (> (length rest2) 0)
+                (= (length rest2) (fikra-event-index-count-digits rest2 0)))))))
+
+(defun fikra-event-index-count-digits (s i)
+  (if (>= i (length s))
+    i
+    (let ((cc (char-code (substring s i (+ i 1)))))
+      (if (and (>= cc 48) (<= cc 57))
+        (fikra-event-index-count-digits s (+ i 1))
+        i))))
+
+(defun fikra-event-strip-faces (s)
+  (fikra-event-strip-scan s "" nil))
+
+(defun fikra-event-strip-scan (s acc in-esc)
+  ;; drop ANSI escape sequences: ESC through the terminating m.
+  (if (= (length s) 0)
+    acc
+    (let ((c (substring s 0 1)))
+      (cond
+        (in-esc
+          (if (string= c "m")
+            (fikra-event-strip-scan (substring s 1 (length s)) acc nil)
+            (fikra-event-strip-scan (substring s 1 (length s)) acc t)))
+        ((string= c "\e")
+          (fikra-event-strip-scan (substring s 1 (length s)) acc t))
+        (t
+          (fikra-event-strip-scan (substring s 1 (length s)) (concat acc c) nil))))))
+
 (defun fikra-event-render-batch-for (id events)
   (let ((text (fikra-event-render-fold events ""
                (if (stringp id)

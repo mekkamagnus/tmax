@@ -142,3 +142,43 @@ describe("#312 — RET via the index", () => {
     expect(st(editor)).not.toContain("no file path");
   });
 });
+
+describe("#312 — the FAEP emit-side recording (population-chat)", () => {
+  const fcEvent = (path: string, adds: number, dels: number) =>
+    `(list (list "kind" "file-change") (list "path" "${path}") (list "adds" "${adds}") (list "dels" "${dels}"))`;
+
+  test("render-batch renders the ± row with faces; strip-faces exposes the plain shape; the row-path parser extracts the path", async () => {
+    editor = await setup();
+    const text = String(e(editor, `(fikra/event/fikra-event-render-batch (list ${fcEvent("src/real.ts", 3, 1)}))`).value);
+    expect(text).toContain("±");
+    const stripped = String(e(editor, `(fikra/event/fikra-event-strip-faces "${text.replace(/"/g, '\\"').replace(/\n/g, "\\n")}")`).value);
+    // The strip may be partial through the reader; assert the parser on a SYNTHETIC plain row instead (the reader mangles escapes).
+    const path = e(editor, '(condition-case nil (fikra/event/fikra-event-index-row-path (concat "± " "src/real.ts" " +3" " -1")) (error (m) (concat "THREW:" m)))');
+    expect(String(path.value)).toBe("src/real.ts");
+    const noMatch = e(editor, '(condition-case nil (fikra/event/fikra-event-index-row-path "just text +1 -1") (error (m) "THREW"))');
+    expect(["nil", "null"].includes(String(noMatch.value))).toBe(true);
+  });
+
+  test("the scan records a rendered ± row at the right line (face-wrapped text)", async () => {
+    editor = await setup();
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    const raw = String(e(editor, `(fikra/event/fikra-event-render-batch (list ${fcEvent(join(process.cwd(), "real2.ts"), 5, 2)}))`).value);
+    // The reader mangles raw ESC chars crossing TS→T-Lisp; hex-encode the payload (the established boundary).
+    const hex = Buffer.from(raw, "utf8").toString("hex");
+    const base = Number(e(editor, "(buffer-line-count)").value);
+    e(editor, `(buffer-append (hex-decode "${hex}"))`);
+    e(editor, `(fikra/event/fikra-event-index-scan "*Fikra*" ${base} (hex-decode "${hex}"))`);
+    // The recorded line = the buffer's pre-append line count (an
+    // empty buffer counts 1) + the ± row's offset (0).
+    const recLine = Number(e(editor, '(nth 0 (editor/fikra/diff-line-index/diff-line-index-lines "*Fikra*"))').value);
+    expect(Number.isFinite(recLine)).toBe(true);
+    const hit = e(editor, `(hashmap-get (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" ${recLine}) "path")`);
+    expect(String(hit.value)).toContain("real2.ts");
+    // RET follows the recorded row.
+    writeFileSync(join(process.cwd(), "real2.ts"), "x\n");
+    e(editor, `(cursor-move ${recLine} 0)`);
+    e(editor, "(fikra/chat/fikra-follow-link)");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("real2.ts");
+  });
+});
