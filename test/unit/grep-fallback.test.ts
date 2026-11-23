@@ -384,3 +384,35 @@ describe("#309 — valve r3", () => {
     expect(dump(editor)).toContain("/0");
   });
 });
+
+describe("#309 — valve r4", () => {
+  test("'g' rerun PRESERVES the glob filter", async () => {
+    writeFileSync(join(process.cwd(), "a.txt"), "rerunglob needle\n");
+    writeFileSync(join(process.cwd(), "b.lisp"), "rerunglob needle\n");
+    e(editor, '(editor/commands/grep/grep-fallback-run "rerunglob" "." (list (list "[.]lisp$") (list)))');
+    let s = await waitStatus(["hits", "no matches", "error"]);
+    expect(s).toContain("1 hits");
+    const gen1 = Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value);
+    e(editor, "(editor/commands/grep/grep-rerun)");
+    // Wait for the RERUN generation to register AND complete (the
+    // first search's stale '1 hits' status can satisfy an
+    // immediate poll).
+    // Poll the RERUN generation's OWN completion (the stale '1
+    // hits' status satisfies any status-only wait).
+    let done = false;
+    for (let i = 0; i < 200; i++) {
+      const gen = Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value);
+      const gstat = String(e(editor, "(editor/commands/grep/grep-status-get)").value);
+      if (gen > gen1 && (gstat.includes("done") || gstat.includes("no-matches") || gstat.includes("error"))) { done = true; break; }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(done).toBe(true);
+    s = st(editor);
+    expect(s).toContain("1 hits"); // still ONLY b.lisp (was: unfiltered → 2)
+    expect(Number(e(editor, "(editor/commands/grep/grep-current-gen-get)").value)).toBeGreaterThan(gen1);
+    e(editor, '(buffer-switch "*grep*")');
+    const v = strip(bufferText(editor));
+    expect(v).toContain("b.lisp");
+    expect(v).not.toContain("a.txt");
+  });
+});

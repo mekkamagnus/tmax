@@ -1048,7 +1048,9 @@ calls the registered closure directly."
       (grep-rg-kill-prior)
       (let ((gen (grep-buffer-register
                    (hashmap "backend" "grep" "pattern" pattern "scope" scope
-                     "rerun" (lambda () (grep-fallback-run pattern scope))))))
+                     ;; valve r4: globs PRESERVED in the rerun
+                     ;; closure ('g' re-ran unfiltered).
+                     "rerun" (lambda () (grep-fallback-run pattern scope globs))))))
         (setq grep-fallback-gen gen)
         (setq grep-fallback-pattern pattern)
         (setq grep-fallback-done-files 0)
