@@ -2,7 +2,8 @@
   (export fikra-chat-open fikra-chat-close fikra-turn-send
           fikra-turn-interrupt fikra-turn-status fikra-quit
           fikra-ensure-buffer-keymap fikra-refresh-lighter
-          fikra-follow-link fikra-follow-target fikra-file-line-count))
+          fikra-follow-link fikra-follow-target fikra-file-line-count
+          fikra-file-path-in-line-p fikra-extract-file-path)
 
 ;; #216 (RFC-027 §UI): the chat UI as a THIN layer over the Phase-1 stack —
 ;; threads own state (#213), FAEP owns rendering (#212), adapters own turns
@@ -232,7 +233,9 @@ context flakiness)."
 ;; consults FIRST (recorded targets — exact landings); the regex
 ;; extraction stays as the fallback.
 (defun fikra-follow-link ()
-  "Follow the file path under cursor in *Fikra*."
+  "Follow the file path under cursor in *Fikra* (#312: the line
+INDEX consults FIRST — recorded targets, exact landings; the
+regex extraction stays as the fallback)."
   (let ((target (condition-case nil
                     (editor/fikra/diff-line-index/diff-line-index-lookup
                       (buffer-current) (cursor-line))
@@ -244,6 +247,7 @@ context flakiness)."
           (if path
             (find-file path)
             (editor-set-status "Fikra: no file path on this line")))))))
+;; ^ closes: if(1) path-let(2) line-let(3) outer-if(4) target-let(5) defun(6)
 
 (defun fikra-follow-target (target)
   "Open a RECORDED index target: the path AS EMITTED resolved
@@ -277,7 +281,8 @@ contain the line) and say so."
         (t
           (progn
             (find-file resolved)
-            (if (numberp tline) (cursor-move tline 0) nil))))))
+            (if (numberp tline) (cursor-move tline 0) nil)))))))
+;; ^ closes: if-arg self, progn(1) t-clause(2) cond(3) resolved-let(4) outer-let(5) defun(6)
 
 (defun fikra-file-line-count (path)
   "The file's line count (old-side landing viability)."
