@@ -1490,8 +1490,7 @@ with its post-exit capture.")
             (error (m)
               (editor-set-status
                 (concat "Fikra: action checkpoint FAILED — the edit proceeds without a revert ref ("
-                        (if (stringp m) m "capture error") ")")))
-            (funcall 'fikra/checkpoint/fikra-checkpoint-set-emit-act nil))
+                        (if (stringp m) m "capture error") ")"))))
           (let ((written (condition-case nil
                           (progn (write-file-content abs content) t)
                           (error () nil))))
