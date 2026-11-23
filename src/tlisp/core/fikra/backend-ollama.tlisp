@@ -841,9 +841,14 @@ with its post-exit capture.")
                  (list))))
            ;; r156: the paths whose "mode:uid:gid" line changed between the
            ;; two listings (newline-separated, like git's own listing).
+           ;; NOT trimmed: the text ends with the last path, and a path may
+           ;; end with a space. (It was harmless — a changed path is listed
+           ;; twice, "<" then ">", and only the last line loses anything —
+           ;; but that is an accident to not depend on. The empty entry the
+           ;; trailing newline leaves is dropped below.)
            (meta-lines
              (if (file-exists-p meta)
-               (string-split (string-trim (read-file-content meta)) (hex-decode "0a"))
+               (string-split (read-file-content meta) (hex-decode "0a"))
                (list))))
       ;; The markers are consumed whatever they held — a stale or useless
       ;; one must not be reported again by an unrelated later call.

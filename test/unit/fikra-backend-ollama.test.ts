@@ -3627,6 +3627,25 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(actionRefs()).toEqual([]);
   });
 
+  // A path may begin or end with a space: pin that the report carries the
+  // exact name. (The listing used to be read through a string-trim of the
+  // WHOLE text — harmless only because a changed path is listed twice and
+  // the trim touched just the last line.)
+  tt("a chmod on a file whose name ENDS WITH A SPACE is reported under that exact name (r156)", async () => {
+    const ed = await armed();
+    execFileSync("touch", ["spaced "]);
+    e(ed, '(fikra/chat/fikra-turn-send "lock the oddly named one")');
+    call(ed, 550, "chmod 600 'spaced '");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    expect(seeded).toBe("550");
+    await settleRefireFrom(ed, seeded, "locked");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('"reason":"1 path(s) the checkpoint cannot hold changed — not revertable: spaced "'),
+    ]);
+    expect(actionRefs()).toEqual([]);
+  });
+
   // …nor a rewrite that leaves everything as it was, mtime included.
   tt("a preserved-mtime copy over an IDENTICAL tracked file is not reported (r156)", async () => {
     const ed = await armed();
