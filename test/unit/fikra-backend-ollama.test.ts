@@ -3963,7 +3963,9 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
   // for a mutation the checkpoint cannot hold. The ignored entries are
   // examined in their OWN pass (they are the class the trees cannot hold
   // by construction) and can no longer be crowded out.
-  tt("a crowd of held changes cannot crowd out the ignored-deletion report (r158b)", async () => {
+  // (A 90s budget: this one timed out at the uniform 20s in both r158 gate
+  // full runs under load and passed solo every time.)
+  test("a crowd of held changes cannot crowd out the ignored-deletion report (r158b)", async () => {
     const ed = await armed();
     const giPath = join(process.cwd(), ".gitignore");
     const gi = existsSync(giPath) ? readFileSync(giPath, "utf8") : "";
@@ -3990,7 +3992,7 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(row!).toContain("not held");
     expect(buf).toContain("checkpoint-error");
     expect(buf).toContain(".env");
-  });
+  }, 90000);
 
   // Gate round 1's reproduced P2: the cap comparison counted T-Lisp
   // string units, the child's head -c counts BYTES — a capped scan ending
@@ -4004,6 +4006,124 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     // round 2's NIT: this probe used "a" + NUL — two bytes short.)
     expect(Number(e(ed, `(nth 1 (fikra/backend-ollama/fikra-ollama-scan-paths (concat "é" ${NUL}) 4))`).value)).toBe(0);
   });
+
+  // ── r159: THE EXAMINATION CAP COUNTS CANDIDATES, NOT HELD ENTRIES ───
+  // The r158 gate's round-2 reproduced limit: the report examined only
+  // the first 400 entries of a class and HELD entries counted against
+  // that bound — 401 held changes pushed a changed, scan-only outside
+  // path past it, unexamined and unreported, with no cap warning.
+  // Membership is a hash lookup now (the bound existed because each
+  // entry was a scan of the held list), the bound is tenfold, and a hit
+  // is no longer silent.
+  test("a crowd of HELD entries cannot push an outside scan entry past the examination (r159)", async () => {
+    const ed = await armed();
+    const held = Array.from({ length: 401 }, (_, i) => `bulk159/f${i}.txt`);
+    const scan = [...held.map((h) => `./${h}`), "./outside159/only.txt"];
+    const expr = `(fikra/backend-ollama/fikra-ollama-outside-scan (list ${scan.map((x) => `"${x}"`).join(" ")}) (list) (hashmap) (fikra/backend-ollama/fikra-ollama-list-hash (list ${held.map((x) => `"${x}"`).join(" ")}) (hashmap)) (hashmap) 0)`;
+    // The one candidate sits AFTER the 401 held entries — found, and
+    // nothing was left unexamined.
+    expect(Number(e(ed, `(length (car ${expr}))`).value)).toBe(1);
+    expect(String(e(ed, `(nth 0 (car ${expr}))`).value)).toBe("outside159/only.txt");
+    expect(Number(e(ed, `(nth 1 ${expr})`).value)).toBe(0);
+    // A path two listings name is reported once (the passes share one
+    // seen-set).
+    const twice = '(fikra/backend-ollama/fikra-ollama-outside-scan (list "./x159.txt" "./x159.txt") (list) (hashmap) (hashmap) (hashmap) 0)';
+    expect(Number(e(ed, `(length (car ${twice}))`).value)).toBe(1);
+    // A path the tree diff covers is not a candidate.
+    const covered = '(fikra/backend-ollama/fikra-ollama-outside-scan (list "./c159.txt" "./o159.txt") (list) (fikra/backend-ollama/fikra-ollama-list-hash (list "c159.txt") (hashmap)) (hashmap) (hashmap) 0)';
+    expect(String(e(ed, `(nth 0 (car ${covered}))`).value)).toBe("o159.txt");
+    expect(Number(e(ed, `(length (car ${covered}))`).value)).toBe(1);
+    // Exactly at the cap: complete. One more: capped — and only the
+    // cap's worth was examined. (The cap is pinned here on purpose.)
+    const cap = 4000;
+    const many = (n: number) => Array.from({ length: n }, (_, i) => `"./o159/${i}.txt"`).join(" ");
+    const at = `(fikra/backend-ollama/fikra-ollama-outside-scan (list ${many(cap)}) (list) (hashmap) (hashmap) (hashmap) 0)`;
+    expect(Number(e(ed, `(length (car ${at}))`).value)).toBe(cap);
+    expect(Number(e(ed, `(nth 1 ${at})`).value)).toBe(0);
+    const over = `(fikra/backend-ollama/fikra-ollama-outside-scan (list ${many(cap + 1)}) (list) (hashmap) (hashmap) (hashmap) 0)`;
+    expect(Number(e(ed, `(length (car ${over}))`).value)).toBe(cap);
+    expect(Number(e(ed, `(nth 1 ${over})`).value)).toBe(1);
+  }, 90000);
+
+  // The gate's scenario end to end, on the ordinary path: one command
+  // touches 401 held files AND writes inside a nested repository (the
+  // parent's tree holds only the gitlink — a scan-only outside path).
+  test("a crowd of held changes cannot push a nested-repository write past the examination (r159)", async () => {
+    const ed = await armed();
+    const nested = join(process.cwd(), "nested");
+    mkdirSync(nested);
+    execFileSync("git", ["init", "-q"], { cwd: nested });
+    writeFileSync(join(nested, "inner.txt"), "inner\n");
+    execFileSync("git", ["add", "-A"], { cwd: nested });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: nested });
+    mkdirSync(join(process.cwd(), "bulk159"));
+    for (let i = 0; i < 401; i++) writeFileSync(join(process.cwd(), `bulk159/f${i}.txt`), "B\n");
+    e(ed, '(fikra/chat/fikra-turn-send "touch a crowd, then write inside the nested repo")');
+    // (The tracked-file edit makes the trees DIFFER, so a pair is sealed
+    // and the row carries a marker to qualify — a content-neutral touch
+    // of held files alone seals nothing.)
+    call(ed, 760, "touch bulk159/*; echo more >> base.txt; printf 'more\\n' >> nested/inner.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    // (The call row's summary names the path too — wait on the error
+    // row's own words.)
+    await until(ed, "(buffer-text)", "cannot hold", 240);
+    const rows = logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.join("\n")).toContain("not revertable: nested/inner.txt");
+    await settleRefireFrom(ed, seeded, "touched");
+    expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+    const buf = strip(String(e(ed, "(buffer-text)").value));
+    // (The row is wider than the terminal here — its summary names the
+    // command — so the marker renders on a continuation line: look at
+    // the row's first three lines.)
+    const lines = buf.split("\n");
+    const at = lines.findIndex((l) => l.includes("⚙ bash"));
+    expect(at).toBeGreaterThanOrEqual(0);
+    const row = lines.slice(at, at + 3).join("\n");
+    // The row does not claim a checkpoint that holds the whole change.
+    expect(row).toContain("[ckpt main/");
+    expect(row).toContain("— not held]");
+    expect(row).not.toContain("✓]");
+  }, 90000);
+
+  // A hit with NOTHING found is still a statement about the scan: the
+  // entries past the cap were never looked at. The row says so in its
+  // own words — "coverage not established", not "not held".
+  test("an examination-cap hit qualifies the row as coverage not established (r159)", async () => {
+    const ed = await armed();
+    // One HELD path, listed past the cap: no candidate, and unexamined
+    // entries remain.
+    const changed = Array.from({ length: 4001 }, () => '"./base.txt"').join(" ");
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "CAPPED-ROW") (list "act" "9-1")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/9-a2") (list "act" "9-1")))');
+    e(ed, `(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list ${changed}) (list) (list) "HEAD" "HEAD" "9-1" 0)`);
+    // (No turn ran here, so read the replay's own render.)
+    const buf = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    const row = buf.split("\n").find((l) => l.includes("CAPPED-ROW"));
+    expect(row).toBeDefined();
+    expect(row!).toContain("[ckpt main/9-a2 — coverage not established]");
+    expect(row!).not.toContain("✓]");
+    expect(buf).toContain("the change scan examined only its first 4000 entries — coverage beyond it is not established");
+    // A named path keeps its own qualifier.
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "NAMED-ROW") (list "act" "9-2")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/9-a4") (list "act" "9-2")))');
+    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list "./lost159.txt") (list) (list) "HEAD" "HEAD" "9-2" 0)');
+    const buf2 = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    expect(buf2.split("\n").find((l) => l.includes("CAPPED-ROW"))).toContain("coverage not established");
+    const named = buf2.split("\n").find((l) => l.includes("NAMED-ROW"));
+    expect(named).toContain("[ckpt main/9-a4 — not held]");
+    expect(buf2).toContain("not revertable: lost159.txt");
+    // THE PER-PASS CONTRACT (r156): a path the trees HOLD can still
+    // carry an unrecordable change — the mode pass must not exclude by
+    // the held-set. (The first r159 cut gave every pass the same sets
+    // and every permission report went silent.)
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "tool-call") (list "tool" "bash") (list "summary" "MODE-ROW") (list "act" "9-3")))');
+    e(ed, '(fikra/event/fikra-event-emit (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/9-a6") (list "act" "9-3")))');
+    e(ed, '(fikra/backend-ollama/fikra-ollama-report-outside-checkpoint (list) (list "./base.txt") (list) "HEAD" "HEAD" "9-3" 0)');
+    const buf3 = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    expect(buf3.split("\n").find((l) => l.includes("MODE-ROW"))).toContain("[ckpt main/9-a6 — not held]");
+    expect(buf3).toContain("1 path(s) the checkpoint cannot hold changed — not revertable: base.txt");
+  }, 90000);
 
   tt("a held batch counts its chunks ONCE", async () => {
     const ed = await armed();

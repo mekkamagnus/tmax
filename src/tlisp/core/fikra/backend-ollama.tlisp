@@ -15,7 +15,10 @@
           fikra-ollama-tool-exchanges-reset fikra-ollama-action-state-reset
           fikra-ollama-set-streaming fikra-ollama-action-checkpoint
           ;; r158: the scan's reader is probed by the tests.
-          fikra-ollama-scan-paths)
+          fikra-ollama-scan-paths
+          ;; r159: the examination is probed by the tests.
+          fikra-ollama-outside-scan fikra-ollama-list-hash
+          fikra-ollama-report-outside-checkpoint)
 
 ;; RFC-029 §8.1's RAW-API NATIVE LOOP (r108): a fikra-owned chat turn —
 ;; no CLI wrapper. The adapter hands the user's message here; this module
@@ -1077,26 +1080,50 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                        (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " post)))))))
          ;; In NEITHER tree: ignored, under a nested .tmax, inside a nested
          ;; repository.
-         (unsighted (fikra-ollama-outside-scan changed (list) covered held 0))
-         ;; …then the mode/owner changes the tree diff does not cover. The
-         ;; path IS in the trees; what they cannot hold is the change, so
-         ;; HELD is empty here on purpose; the already-reported paths are
-         ;; the exclusions. A separate list, appended after the first —
-         ;; the report's order must not depend on the second pass having
-         ;; found anything (codex gate round 1, NIT).
-         (uncovered (fikra-ollama-outside-scan meta (list) covered unsighted 0))
-         ;; r158b: the ignored entries in their OWN pass (deduped against
-         ;; both previous passes) — the class the trees cannot hold by
-         ;; construction can never be crowded out by the scan's cap.
-         (unseen (fikra-ollama-outside-scan ignored (list) covered
-                   (append unsighted uncovered) 0))
-         (outside (append unsighted uncovered unseen)))
+         ;; r159: membership is a hash LOOKUP, not a list scan. The old
+         ;; `member` passes cost O(entries x held) — which is why the
+         ;; examination cap was 400 — and the cap counted HELD entries:
+         ;; 401 held changes in one command pushed a genuinely-outside
+         ;; scan entry past it, unexamined and unreported (codex gate
+         ;; r158 round 2, reproduced). One set (`seen`) dedupes across
+         ;; the three passes.
+         (cm (fikra-ollama-list-hash covered (hashmap)))
+         (hm (fikra-ollama-list-hash held (hashmap)))
+         (seen (hashmap))
+         ;; In NEITHER tree: ignored, under a nested .tmax, inside a nested
+         ;; repository.
+         (r-scan (fikra-ollama-outside-scan changed (list) cm hm seen 0))
+         ;; …then the mode/owner changes the tree diff does not cover.
+         ;; r156: the path IS in the trees; what they cannot hold is the
+         ;; CHANGE — so this pass excludes nothing by HELD. (r159's first
+         ;; cut gave all three passes the same sets and every permission
+         ;; report went silent; the r156 suite caught it.)
+         (r-meta (fikra-ollama-outside-scan meta (list) cm (hashmap) seen 0))
+         ;; r158b: the ignored entries in their OWN pass — the class the
+         ;; trees cannot hold by construction. (Not excluded by HELD
+         ;; either, as before: the listing names only untracked paths.)
+         (r-ign (fikra-ollama-outside-scan ignored (list) cm (hashmap) seen 0))
+         (outside (append (car r-scan) (car r-meta) (car r-ign)))
+         ;; r159: an examination cap hit in ANY pass — the entries past it
+         ;; were never looked at, so coverage beyond it is NOT ESTABLISHED
+         ;; (a statement about the scan, true whatever was found).
+         (unexamined (> (+ (nth 1 r-scan) (nth 1 r-meta) (nth 1 r-ign)) 0))
+         ;; What the scan could not see, said in one clause.
+         (limits (concat
+                   (if (= truncated 1) "the change scan hit its 60 KB cap" "")
+                   (if (and (= truncated 1) unexamined) " and " "")
+                   (if unexamined
+                     (concat "the change scan examined only its first "
+                             (number-to-string fikra-ollama-examine-cap) " entries")
+                     ""))))
     ;; r158: a scan capped at 60 KB reports too — whole records beyond
     ;; the cap were lost, so "no outside path found" is not proof the
     ;; command changed nothing the checkpoint cannot hold. The event
     ;; carries the action's identity: the row's marker is qualified
-    ;; (never an unqualified success for an uncovered mutation).
-    (if (or (> (length outside) 0) (= truncated 1))
+    ;; (never an unqualified success for an uncovered mutation). r159:
+    ;; the qualifier itself is carried ("not held" when a path is named;
+    ;; "coverage not established" when only the scan's limits are known).
+    (if (or (> (length outside) 0) (> (length limits) 0))
       (let ((n (length outside)))
         (condition-case nil
           (fikra/event/fikra-event-emit-batch-for (fikra/thread/fikra-thread-current)
@@ -1107,38 +1134,62 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                                       (concat (number-to-string n) " path(s) the checkpoint cannot hold changed — not revertable: "
                                               (fikra-ollama-join-take outside 3 ", ")
                                               (if (> n 3) " …" ""))
-                                      "the change scan hit its 60 KB cap — whole records beyond it were lost")
-                                    (if (and (= truncated 1) (> n 0))
-                                      " — the change scan hit its 60 KB cap; more changed paths may be unreported"
-                                      ""))))
+                                      (concat limits " — coverage beyond it is not established"))
+                                    (if (and (> (length limits) 0) (> n 0))
+                                      (concat " — " limits "; more changed paths may be unreported")
+                                      "")))
+                                (list "qual"
+                                  (if (> n 0) "not held" "coverage not established")))
                           (if act (list (list "act" act)) (list)))))
           (error () nil))
-        (if (string= pre post)
+        ;; r159: "0 path(s) … not revertable" is not a thing to say —
+        ;; a cap-only report speaks in the transcript row.
+        (if (and (> n 0) (string= pre post))
           (editor-set-status
             (concat "Fikra: " (number-to-string n)
                     " path(s) changed outside the checkpoint — not revertable"))
           nil))
       nil)))
 
-;; Changed entries (the scan's ./x, the listing's git names) minus the
-;; covered ones and the ones the trees hold; empty entries dropped, "./"
-;; stripped; the first 400 (the list's own cap — exactly 400: the bound
-;; used to admit a 401st entry, codex gate r156 round 1).
-(defun fikra-ollama-outside-scan (lines acc covered held i)
-  (if (or (null lines) (>= i 400))
-    (reverse acc)
-    (let ((l (car lines)))
-      (let ((p (if (and (stringp l) (> (length l) 2) (string= (substring l 0 2) "./"))
-                  (substring l 2 (length l))
-                  (if (stringp l) l ""))))
-        ;; r155d: the time scan and the ignored-entry listing can both
-        ;; name one path — it is reported once.
-        (fikra-ollama-outside-scan (cdr lines)
-          (if (and (> (length p) 0) (not (member p covered)) (not (member p held))
-                   (not (member p acc)))
-            (cons p acc)
-            acc)
-          covered held (+ i 1))))))
+;; r159: a list of paths -> a membership hash (value t).
+(defun fikra-ollama-list-hash (items h)
+  (if (null items)
+    h
+    (progn (keymap-mutable-set! h (car items) t)
+           (fikra-ollama-list-hash (cdr items) h))))
+
+;; r159: how many entries of ONE class the report examines. The old cap
+;; was 400 because each entry cost a scan of the held list; with hash
+;; lookups an entry is cheap, so the bound is tenfold — and a hit is no
+;; longer silent (the row is qualified "coverage not established"). It
+;; bounds the editor thread's time, nothing else: the scan itself is
+;; already bounded by its 60 KB output.
+(defvar fikra-ollama-examine-cap 4000)
+
+;; Changed entries (the scan's ./x, the listing's git names) that are in
+;; neither the tree diff nor a tree; empty entries dropped, "./"
+;; stripped. COVERED, HELD and SEEN are membership hashes (r159 — lists
+;; made every entry a scan of the held list); SEEN is shared by the
+;; report's passes, so a path two listings name is reported once
+;; (r155d). Returns (list <outside> <capped 1|0>): capped is 1 exactly
+;; when entries were left unexamined.
+(defun fikra-ollama-outside-scan (lines acc covered held seen i)
+  (cond ((null lines) (list (reverse acc) 0))
+        ((>= i fikra-ollama-examine-cap) (list (reverse acc) 1))
+        (t
+          (let ((l (car lines)))
+            (let ((p (if (and (stringp l) (> (length l) 2) (string= (substring l 0 2) "./"))
+                        (substring l 2 (length l))
+                        (if (stringp l) l ""))))
+              (if (and (> (length p) 0)
+                       (not (hashmap-get covered p))
+                       (not (hashmap-get held p))
+                       (not (hashmap-get seen p)))
+                (progn (keymap-mutable-set! seen p t)
+                       (fikra-ollama-outside-scan (cdr lines) (cons p acc)
+                         covered held seen (+ i 1)))
+                (fikra-ollama-outside-scan (cdr lines) acc
+                  covered held seen (+ i 1))))))))
 
 ;; NUL-separated path list (git -z) → its paths, verbatim: no trimming
 ;; (a path may begin or end with a space), no newline splitting (a path
@@ -1179,8 +1230,8 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
 ;; r158: read and CONSUME the child's scan files (the ordinary wrap and
 ;; the mediated scan share them; the ordinary path's trees marker is
 ;; separate). r158b: the ignored-entry listing is a SEPARATE element —
-;; the report examines each class in its own pass, so the scan's
-;; 400-entry examination cap cannot crowd the ignored entries out (the
+;; the report examines each class in its own pass, with its own
+;; examination budget, so a crowd in one cannot crowd another out (the
 ;; gate's reproduced P1: 401 held changes hid the ignored deletion).
 ;; Returns (list <scan-lines> <meta-lines> <ignored-lines> <truncated 1|0>).
 (defun fikra-ollama-take-scan-files ()

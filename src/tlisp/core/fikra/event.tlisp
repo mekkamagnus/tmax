@@ -406,7 +406,10 @@ round-12 approvals catch)."
                     ;; the marker — never an unqualified success for an
                     ;; uncovered mutation.
                     (concat "[ckpt " (fikra-ckpt-short (fikra-event-get-str event "ckpt"))
-                            (if (fikra-event-get event "ckpt-err") " — not held]" " ✓]"))))
+                            (if (fikra-event-get event "ckpt-err")
+                              ;; r159: the qualifier is the event's own.
+                              (concat " — " (fikra-event-get-str event "ckpt-err") "]")
+                              " ✓]"))))
                   "")
                 "\n"
                 (fikra-event-render-preview event)))
@@ -1430,8 +1433,8 @@ id-less completed thoughts too).")
 
 ;; r158: the coverage failures stamp the SAME act id as their action —
 ;; a checkpoint-error naming paths the checkpoint cannot hold qualifies
-;; that action's row (the render drops the unqualified ✓). act -> reason,
-;; last wins.
+;; that action's row (the render drops the unqualified ✓). act -> the
+;; qualifier its row shows (r159), last wins.
 (defun fikra-event-inline-act-errors (events errs)
   (if (null events)
     errs
@@ -1439,9 +1442,14 @@ id-less completed thoughts too).")
       (if (string= (fikra-event-get-str e "kind") "checkpoint-error")
         (let ((act (fikra-event-get-str e "act")))
           (if (and act (> (length act) 0))
-            (fikra-event-inline-act-errors (cdr events)
-              (editor/keymaps/keymap-mutable-set! errs act
-                (fikra-event-get-str e "reason")))
+            (let ((q (fikra-event-get-str e "qual")))
+              ;; r159: the row shows the event's OWN qualifier ("not
+              ;; held" when a path is named, "coverage not established"
+              ;; when only the scan's limits are known); an event without
+              ;; one (older logs, other emitters) reads "not held".
+              (fikra-event-inline-act-errors (cdr events)
+                (editor/keymaps/keymap-mutable-set! errs act
+                  (if (and q (> (length q) 0)) q "not held"))))
             (fikra-event-inline-act-errors (cdr events) errs)))
         (fikra-event-inline-act-errors (cdr events) errs)))))
 
