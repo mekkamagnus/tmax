@@ -40,7 +40,11 @@
       (let ((style-function (hashmap-get completion-style-functions (car styles))))
         (if style-function
           (let ((result (funcall style-function input candidates)))
-            (if (and (null result) (cdr styles))
+            ;; valve r3 (#311): LENGTH-guard the fallback — a
+            ;; 1-element style list has a TRUTHY nil-tail cdr (the
+            ;; cons trap), so (car (cdr …)) yielded nil and
+            ;; hashmap-get threw on the nil key.
+            (if (and (null result) (> (length styles) 1))
               (let ((fallback (hashmap-get completion-style-functions (car (cdr styles)))))
                 (if fallback (funcall fallback input candidates) candidates))
               result))

@@ -84,11 +84,14 @@ describe("#311 — glob translation + match semantics", () => {
     expect(["t", "true"].includes(String(m("aXtxt", "a.txt").value))).toBe(false);
   });
 
-  test("untranslatable: bare ^, backslash, empty class [], unterminated class → nil", () => {
+  test("untranslatable: bare ^, backslash, empty class [], unterminated class, INVALID class → nil", () => {
     const tr = (g: string) => String(e(editor, `(editor/commands/grep-consult/grep-consult-glob->regex "${g}")`).value);
     expect(["nil", "null"].includes(tr("a^b"))).toBe(true);
     expect(["nil", "null"].includes(tr("[]"))).toBe(true);
     expect(["nil", "null"].includes(tr("[ab"))).toBe(true);
+    // valve r3: syntactically closed but invalid — the compile-probe
+    // rejects (used to pass and silently no-match at match time).
+    expect(["nil", "null"].includes(tr("a[z-a]b"))).toBe(true);
   });
 
   test("NEGATIVES-ONLY matches everything not negated (valve r2 — the issue's combination clause)", () => {
@@ -343,6 +346,75 @@ describe("#311 — the on-input state machine", () => {
       await new Promise((r) => setTimeout(r, 25));
     }
     expect(st(ed2)).toContain("1 hits"); // b.lisp from the root
+    // valve r3: GLOB-QUERY CANDIDATES — the consult style filters the
+    // PATTERN side; the prompt shows rows (the default style zeroed
+    // them on the raw '#*.lisp' input).
+    const rows = (ed2.getState() as unknown as { minibufferView?: { rows?: unknown[] } }).minibufferView?.rows ?? [];
+    expect(rows.length).toBe(1);
+  });
+
+  test("QUOTEPATH (valve r3): a non-ASCII filename is enumerated RAW (core.quotepath=false)", async () => {
+    writeFileSync(join(process.cwd(), "é.lisp"), "consult unicode\n");
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
+    e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult#*.lisp")');
+    for (let i = 0; i < 240; i++) {
+      if (st(editor).includes("hits") || st(editor).includes("no files")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // BOTH .lisp files — é.lisp enumerated unquoted (was: git's
+    // octal-escaped form missed the glob).
+    expect(st(editor)).toContain("2 hits");
+  });
+
+  test("IGNORED-ENTRY NOTE with valid entries (valve r3): '#*.lisp,!' filters AND notes", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult-test-begin)');
+    e(editor, '(editor/commands/grep-consult/grep-consult-on-input "consult#*.lisp,!")');
+    let sawNote = false;
+    let sawHits = false;
+    for (let i = 0; i < 300; i++) {
+      const s = st(editor);
+      if (s.includes("glob entry ignored")) sawNote = true;
+      if (s.includes("hits")) sawHits = true;
+      if (sawNote && sawHits) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(sawHits).toBe(true);
+    expect(st(editor)).toContain("1 hits"); // the valid entry still filters
+    expect(sawNote).toBe(true); // …and the note fired (was: all-ignored only)
+  });
+
+  test("ACCEPT during a pending generation (valve r3): the selected candidate resolves against the RESTORED completed hits", async () => {
+    execFileSync("git", ["-C", process.cwd(), "add", "."]);
+    e(editor, '(editor/commands/grep-consult/grep-consult)');
+    for (const key of "consu") await editor.handleKey(key);
+    for (let i = 0; i < 240; i++) {
+      if (st(editor).includes("hits")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(st(editor)).toContain("2 hits");
+    // Extend the query ('consul' still matches both displays) and
+    // stall the next fire — a pending gen2 that never completes…
+    const shim = join(process.cwd(), "stalled-rg.sh");
+    writeFileSync(shim, "#!/bin/sh\nexec sleep 30\n");
+    execFileSync("chmod", ["+x", shim]);
+    e(editor, `(editor/commands/grep/grep-rg-executable-set! "${shim}")`);
+    for (const key of "l") await editor.handleKey(key);
+    for (let i = 0; i < 120; i++) {
+      if (String(e(editor, "(editor/commands/grep/grep-current-gen-get)").value) !== "1") break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // …then accept. The selected candidate (the prompt's TOP hit —
+    // typing resets the selection, vertico-style) was taken against
+    // the COMPLETED generation's candidates; accept rolls the
+    // pending back FIRST so the value resolves and the jump LANDS
+    // (without the rollback the partial's empty hit list broke
+    // grep-ret entirely — no jump at all).
+    await editor.handleKey("Enter");
+    expect((editor.getState() as unknown as { mode: string }).mode).toBe("normal");
+    const cur = String(e(editor, "(buffer-current)").value);
+    expect(cur).toContain("a.txt");
   });
 
   test("ESCAPE after a completed fire (gate r2): the cancel path RUNS — state cleared, *grep* STAYS (snapshot)", async () => {

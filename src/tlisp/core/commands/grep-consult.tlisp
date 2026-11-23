@@ -7,7 +7,8 @@
           grep-consult-fire
           grep-consult-test-begin
           grep-consult-parse-globs
-          grep-consult-state-get grep-consult-preview)
+          grep-consult-state-get grep-consult-preview
+          grep-consult-style-filter)
 
 ;; #311 — the consult-grade interactive search layer (RFC-031 §2.4)
 ;; on #307's producer interface + #308's backend + #310's scope
@@ -18,6 +19,17 @@
 ;; 'foo#bar#baz' → pattern "foo", glob "bar#baz".
 (require-module editor/commands/grep)
 (require-module editor/completion/minibuffer)
+(require-module editor/completion/orderless)
+(require-module editor/completion)
+
+;; valve r3 finding 1: the default styles filter candidates against
+;; the WHOLE input — a glob query ('consult#*.lisp') zeroes the
+;; candidate list (no display contains the literal '#*.lisp'). The
+;; consult category matches the PATTERN side only.
+(editor/completion/completion-register-style
+  "consult-pattern" "editor/commands/grep-consult/grep-consult-style-filter")
+(editor/completion/completion-set-category-styles
+  "grep-consult" (list "consult-pattern"))
 
 (defvar grep-consult-state nil
   "The consult session: {query, pendingGen, completedSnapshot,
@@ -85,7 +97,15 @@ verbatim (so fnmatch [^…] negation works). A bare ^ or backslash
 outside a class, an EMPTY class [], or an unterminated class → nil
 (untranslatable — the entry is ignored + noted)."
   (let ((body (grep-consult-glob-scan glob "" nil)))
-    (if (stringp body) (concat "^" body "$") nil)))
+    (if (stringp body)
+      (let ((rx (concat "^" body "$")))
+        ;; valve r3 finding 5: COMPILE-PROBE — syntactically closed
+        ;; but invalid classes ('[z-a]') used to pass translation and
+        ;; throw at every match (swallowed → silent no-match).
+        (if (condition-case nil (progn (string-match rx "") t) (error () nil))
+          rx
+          nil))
+      nil)))
 
 (defun grep-consult-glob-scan (rest acc in-class)
   (if (= (length rest) 0)
@@ -240,13 +260,25 @@ backend preflight, then the debounced live prompt."
   "rg (auto resolves to it; the only landed backend)."
   "rg")
 
+(defun grep-consult-style-filter (input candidates)
+  "The consult category's completion style (valve r3): components
+match against the PATTERN side only — the glob side would zero the
+candidate list (no display contains a literal '#*.lisp'). An empty
+pattern keeps everything (glob-only queries navigate all hits).
+No-match returns the EMPTY LIST, never nil (the nil convention
+means 'try the next style' — this category has none, and a nil
+matches list breaks the session length reads)."
+  (let ((r (editor/completion/orderless/orderless-filter
+             (grep-consult-pattern-of input) candidates)))
+    (if (null r) (list) r)))
+
 (defun grep-consult-table (input action)
   "valve r2: the prompt's candidates ARE the current generation's
 hits — Up/Down move the selection, the echo shows the candidate,
 RET jumps from the CURRENT selection (the issue's Navigation
-clause). The completion style filters by the query text."
+clause). The consult style filters by the PATTERN side."
   (if (string= action "metadata")
-    (hashmap "category" "plain")
+    (hashmap "category" "grep-consult")
     (grep-consult-candidates (editor/commands/grep/grep-hits-get) (list))))
 
 (defun grep-consult-candidates (hits acc)
@@ -379,11 +411,13 @@ no-op; the newer generation already completed (snapshot moved on)
 
 (defun grep-consult-files-in (scope)
   "Enumerate the tracked+untracked files under SCOPE (the glob side
-matches against full relative path strings)."
+matches against full relative path strings). valve r3:
+core.quotepath=false — git quotes non-ASCII paths ('é.lisp' came
+back escaped and the glob missed it)."
   (condition-case nil
     (grep-consult-split-lines
       (nth 0 (shell-exec-argv
-                (list "git" "-C" scope "ls-files"
+                (list "git" "-c" "core.quotepath=false" "-C" scope "ls-files"
                       "--others" "--exclude-standard" "--cached")
                 scope)))
     (error () (list))))
@@ -421,32 +455,46 @@ glob-only queries DO run (the empty pattern registers per #307)."
         (let ((parsed (editor/commands/grep-consult/grep-consult-parse-globs glob)))
           (if (and (stringp (nth 2 parsed)) (string= (nth 2 parsed) "empty"))
             (editor-set-status "empty glob")
-            (let ((files
-                    (if (and (= (length (nth 0 parsed)) 0)
-                             (= (length (nth 1 parsed)) 0)
-                             (nth 2 parsed))
-                      ;; gate r2 + valve r2: EVERY entry ignored (BOTH
-                      ;; lists empty) → NO filtering applies (all files)
-                      ;; + the note. A valid negative + an ignored entry
-                      ;; ('!*.txt,!') is NOT this case — it filters.
-                      (progn
-                        (editor-set-status "glob entries ignored — searching all files")
-                        (grep-consult-files-in grep-consult-scope))
-                      (grep-consult-filtered-files grep-consult-scope parsed))))
-              (if (= (length files) 0)
-                (editor-set-status "no files match glob filters")
-                (editor/commands/grep/grep-rg-run-files pattern files grep-consult-scope)))))))))
+            (progn
+              ;; valve r3 finding 4: the ignored-entry note fires
+              ;; whenever ANY entry was ignored (a valid entry
+              ;; alongside a bare '!' or an untranslatable filters
+              ;; SILENTLY otherwise), not only in the all-ignored
+              ;; case.
+              (if (and (nth 2 parsed)
+                       (not (string= (nth 2 parsed) "empty")))
+                (editor-set-status "glob entry ignored — filtering with the rest")
+                nil)
+              (let ((files
+                      (if (and (= (length (nth 0 parsed)) 0)
+                               (= (length (nth 1 parsed)) 0)
+                               (nth 2 parsed))
+                        ;; gate r2 + valve r2: EVERY entry ignored (BOTH
+                        ;; lists empty) → NO filtering applies (all files)
+                        ;; + the note. A valid negative + an ignored entry
+                        ;; ('!*.txt,!') is NOT this case — it filters.
+                        (progn
+                          (editor-set-status "glob entries ignored — searching all files")
+                          (grep-consult-files-in grep-consult-scope))
+                        (grep-consult-filtered-files grep-consult-scope parsed))))
+                (if (= (length files) 0)
+                  (editor-set-status "no files match glob filters")
+                  (editor/commands/grep/grep-rg-run-files pattern files grep-consult-scope))))))))))
 
 (defun grep-consult-accept (value)
   "RET: kill pending + cancel the timer, jump via #307 from the
 CURRENT selection (valve r2: the prompt's SELECTED candidate when
-the value parses as a hit — the *grep* row otherwise); the hook
-tears down with the close."
+the value parses as a hit — the *grep* row otherwise). valve r3: a
+pending newer generation is rolled back to the completed snapshot
+FIRST — the selection was taken against the completed hits, and
+resolving it against the partial's hits could jump somewhere
+unrelated. The hook tears down with the close."
   (let ((st grep-consult-state))
     (if (not (null st))
       (progn
         (grep-consult-cancel-timer st)
-        (grep-consult-kill-pending)))
+        (grep-consult-kill-pending)
+        (grep-consult-restore-snapshot)))
     (setq grep-consult-state nil)
     (setq grep-consult-scope nil)
     ;; Jump from the current selection in *grep* (#307's RET).
