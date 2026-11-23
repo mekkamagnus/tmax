@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp, bufferText } from "../helpers/editor-fixture.ts";
@@ -225,5 +225,48 @@ describe("#312 gate r2 additions", () => {
     editor = await setup();
     const p2 = e(editor, '(condition-case nil (fikra/event/fikra-event-index-row-path (concat "±  double.ts" " +1" " -1")) (error (m) (concat "THREW:" m)))');
     expect(String(p2.value)).toBe("double.ts");
+  });
+});
+
+describe("#312 gate r3 additions", () => {
+  test("THREAD-ROOT resolution: a relative target concats the focused thread's working dir", async () => {
+    editor = await setup();
+    const sub = join(process.cwd(), "subroot");
+    mkdirSync(sub);
+    writeFileSync(join(sub, "threaded.ts"), "l0\nl1\n");
+    e(editor, "(fikra/thread/fikra-thread-init)");
+    // thread-state isn't exported — the exported SET-FIELD seam mutates it.
+    e(editor, `(fikra/thread/fikra-thread-set-field "worktree" "${sub}")`);
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(editor/fikra/diff-line-index/diff-line-index-record "*Fikra*" 0 (hashmap "path" "threaded.ts" "line" 1 "side" "new" "hunk" nil))');
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/chat/fikra-follow-link)");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("threaded.ts");
+    expect(Number(e(editor, "(cursor-line)").value)).toBe(1);
+  });
+
+  test("OLD-SIDE beyond EOF: the refusal status fires", async () => {
+    editor = await setup();
+    writeFileSync(join(process.cwd(), "short.ts"), "only line\n");
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, `(editor/fikra/diff-line-index/diff-line-index-record "*Fikra*" 0 (hashmap "path" "${join(process.cwd(), "short.ts")}" "line" 9 "side" "old" "hunk" nil))`);
+    e(editor, "(cursor-move 0 0)");
+    e(editor, "(fikra/chat/fikra-follow-link)");
+    expect(st(editor)).toContain("old-side line beyond EOF");
+    expect(String(e(editor, "(buffer-current)").value)).toContain("Fikra");
+  });
+
+  test("REPLAY REPOPULATION at the wiring level: the rebuild clears + rescans", async () => {
+    editor = await setup();
+    writeFileSync(join(process.cwd(), "replayed.ts"), "x\n");
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(editor/fikra/diff-line-index/diff-line-index-record "*Fikra*" 0 (hashmap "path" "STALE.ts" "line" 0 "side" "new" "hunk" nil))');
+    e(editor, '(condition-case nil (fikra/event/fikra-event-emit-batch (list (list (list "kind" "file-change") (list "path" "replayed.ts") (list "adds" "1") (list "dels" "0")))) (error () nil))');
+    e(editor, '(condition-case nil (fikra/event/fikra-event-rebuild-fikra-buffer) (error (m) (concat "THREW:" m)))');
+    const stale = e(editor, '(condition-case nil (hashmap-get (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" 0) "path") (error () "cleared"))');
+    expect(String(stale.value)).not.toContain("STALE");
   });
 });
