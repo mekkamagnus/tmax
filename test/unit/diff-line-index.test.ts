@@ -288,3 +288,37 @@ describe("#312 gate r3 additions", () => {
     expect(Number(e(editor, '(editor/fikra/diff-line-index/diff-line-index-entry-count "*Fikra*")').value)).toBe(0);
   });
 });
+
+
+describe("#312 valve r3", () => {
+  test("CROSS-BUFFER lookup: an empty CURRENT buffer never drops a POPULATED named buffer's slot", async () => {
+    editor = await setup();
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(buffer-append "l0\nl1\nl2\nl3\n")');
+    e(editor, '(editor/fikra/diff-line-index/diff-line-index-record "*Fikra*" 2 (hashmap "path" "x.ts" "line" 0 "side" "new" "hunk" nil))');
+    // Switch to the EMPTY startup buffer, then look up *Fikra*:
+    e(editor, '(buffer-create "*Empty*")');
+    e(editor, '(buffer-switch "*Empty*")');
+    const hit = e(editor, '(hashmap-get (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" 2) "path")');
+    expect(String(hit.value)).toBe("x.ts"); // was: the empty CURRENT buffer's count dropped the slot
+    expect(Number(e(editor, '(editor/fikra/diff-line-index/diff-line-index-entry-count "*Fikra*")').value)).toBe(1);
+  });
+
+  test("KILL+RECREATE at line 0: the watermark catches a shrunk named buffer even after repopulation", async () => {
+    editor = await setup();
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(buffer-append "l0\nl1\nl2\nl3\nl4\nl5\n")'); // 7 lines incl. phantom
+    e(editor, '(editor/fikra/diff-line-index/diff-line-index-record "*Fikra*" 0 (hashmap "path" "stale.ts" "line" 0 "side" "new" "hunk" nil))');
+    // KILL and RECREATE, partially repopulate (3 lines — BELOW the watermark):
+    e(editor, '(buffer-kill "*Fikra*")');
+    e(editor, '(buffer-create "*Fikra*")');
+    e(editor, '(buffer-switch "*Fikra*")');
+    e(editor, "(buffer-set-read-only nil)");
+    e(editor, '(buffer-append "n0\nn1\n")');
+    const stale = e(editor, '(condition-case nil (editor/fikra/diff-line-index/diff-line-index-lookup "*Fikra*" 0) (error () "cleared"))');
+    expect(["nil", "null"].includes(String(stale.value))).toBe(true); // the watermark dropped the slot
+    expect(Number(e(editor, '(editor/fikra/diff-line-index/diff-line-index-entry-count "*Fikra*")').value)).toBe(0);
+  });
+});

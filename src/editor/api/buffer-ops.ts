@@ -286,6 +286,27 @@ export function createBufferOps(
   });
 
   // Text editing functions
+  api.set("buffer-line-count-of", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    // #312 valve r3: the line count of a NAMED buffer (the current-
+    // buffer-only variant made cross-buffer lookups self-destruct).
+    if (args.length !== 1 || args[0]!.type !== "string") {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'buffer-line-count-of requires 1 argument: the buffer name',
+      ));
+    }
+    const name = args[0]!.value as string;
+    const buffer = buffers.get(name);
+    if (!buffer) {
+      return Either.left(createValidationError('ConstraintViolation', `Buffer '${name}' not found`));
+    }
+    const lineCountResult = buffer.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      return Either.left(lineCountResult.left as never);
+    }
+    return Either.right(createNumber(lineCountResult.right));
+  });
+
   api.set("buffer-insert", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 1, "buffer-insert");
     if (Either.isLeft(argsValidation)) {

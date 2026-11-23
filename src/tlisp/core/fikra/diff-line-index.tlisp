@@ -28,6 +28,12 @@
 carries path (string, AS EMITTED), line (number, 0-based in the
 FILE), side (\"new\" | \"old\"), hunk (number | nil).")
 
+(defvar diff-line-index-watermarks (hashmap)
+  "Buffer-name → the NAMED buffer's line count at the LAST record
+(valve r3: a log buffer only grows — a current count BELOW the
+watermark is the killed-and-recreated shape, even after partial
+repopulation; the empty-buffer heuristic missed both).")
+
 (defun diff-line-index-state-get () diff-line-index-state)
 
 (defun diff-line-index-buffers ()
@@ -72,10 +78,18 @@ FILE), side (\"new\" | \"old\"), hunk (number | nil).")
   overlaps old lines uses clear-buffer first)."
   (if (diff-line-index-assoc line (diff-line-index-slot buffer-name))
     nil ; append-stability: never rewrite
-    (setq diff-line-index-state
-      (hashmap-set diff-line-index-state buffer-name
-        (cons (list line target)
-          (diff-line-index-slot buffer-name)))))
+    (progn
+      (setq diff-line-index-state
+        (hashmap-set diff-line-index-state buffer-name
+          (cons (list line target)
+            (diff-line-index-slot buffer-name))))
+      (let ((count
+              (condition-case nil (buffer-line-count-of buffer-name)
+                (error () nil))))
+        (if (numberp count)
+          (setq diff-line-index-watermarks
+            (hashmap-set diff-line-index-watermarks buffer-name count))
+          nil))))
   t)
 
 (defun diff-line-index-assoc (line slot)
@@ -85,24 +99,44 @@ FILE), side (\"new\" | \"old\"), hunk (number | nil).")
       (diff-line-index-assoc line (cdr slot)))))
 
 (defun diff-line-index-lookup (buffer-name line)
-  "The target at LINE for BUFFER-NAME, or nil. LAZY INVALIDATION:
-  a buffer that no longer exists drops its slot here (the kill
-  observation point — buffer-kill has no hook). Valve r2: a KILLED
-  AND RECREATED buffer (same name, fresh empty content) also
-  drops — a recorded line at or beyond the current line count
-  cannot be visible, so the slot is stale by construction."
+  "The target at LINE for BUFFER-NAME, or nil. LAZY INVALIDATION —
+  all checks read the NAMED buffer (valve r3: the current-buffer
+  count made cross-buffer lookups self-destruct): (1) a buffer
+  that no longer exists drops its slot (buffer-kill has no hook);
+  (2) a count BELOW the slot's recorded WATERMARK drops it (a log
+  buffer only grows — a shrink is the killed-and-recreated shape,
+  caught even after partial repopulation, and at line 0 too);
+  (3) a line at or beyond the named count is not visible — nil and
+  drop."
   (if (not (member buffer-name (buffer-list)))
     (progn
       (diff-line-index-drop-buffer buffer-name)
       nil)
-    (if (and (= (buffer-line-count) 1) (> line 0))
-      ;; An EMPTY buffer holding entries beyond line 0 is the
-      ;; killed-and-recreated shape (a populated log buffer never
-      ;; shrinks below its recorded lines).
-      (progn
-        (diff-line-index-drop-buffer buffer-name)
-        nil)
-      (diff-line-index-assoc line (diff-line-index-slot buffer-name)))))
+    (let ((count
+            (condition-case nil (buffer-line-count-of buffer-name)
+              (error () -1)))
+          (wm (hashmap-get diff-line-index-watermarks buffer-name)))
+      (if (or (= count -1)
+              (and (numberp wm) (< count wm))
+              (>= line count))
+        (progn
+          (diff-line-index-drop-buffer buffer-name)
+          nil)
+        (diff-line-index-assoc line (diff-line-index-slot buffer-name))))))
+
+(defun diff-line-index-drop-watermark (buffer-name)
+  (setq diff-line-index-watermarks
+    (diff-line-index-rw-wm-scan
+      (hashmap-keys diff-line-index-watermarks)
+      diff-line-index-watermarks buffer-name (hashmap))))
+
+(defun diff-line-index-rw-wm-scan (keys carrier skip acc)
+  (if (null keys)
+    acc
+    (diff-line-index-rw-wm-scan (cdr keys) carrier skip
+      (if (string= (car keys) skip)
+        acc
+        (hashmap-set acc (car keys) (hashmap-get carrier (car keys)))))))
 
 (defun diff-line-index-drop-buffer (buffer-name)
   "Remove BUFFER-NAME's slot entirely (buffer-kill / replay
@@ -112,6 +146,7 @@ FILE), side (\"new\" | \"old\"), hunk (number | nil).")
     (diff-line-index-rw-scan
       (hashmap-keys diff-line-index-state)
       diff-line-index-state buffer-name (hashmap)))
+  (diff-line-index-drop-watermark buffer-name)
   t)
 
 (defun diff-line-index-rw-scan (keys carrier skip acc)
@@ -135,6 +170,7 @@ FILE), side (\"new\" | \"old\"), hunk (number | nil).")
 (defun diff-line-index-reset ()
   "Drop EVERY slot (test isolation)."
   (setq diff-line-index-state (hashmap))
+  (setq diff-line-index-watermarks (hashmap))
   t)
 
 (provide "editor/fikra/diff-line-index")
