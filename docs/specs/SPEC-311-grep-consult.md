@@ -51,9 +51,24 @@ backend, and #310's scope preflight.
 - **Up/Down arrow navigation in the prompt** moving the selection:
   the vertico machinery's C-n/C-p already does this via
   `minibuffer-dispatch-key`; the raw Up/Down keys route there too
-  (the existing binding). The consult candidates list rides the
-  free-text table (empty — the results buffer IS the candidate
-  list); in-prompt candidate echo is part of the preview follow-up.
+  (the existing binding).
+
+## Valve round 2 correction (2026-11-23)
+
+The r1 spec text above NARROWED the issue's Navigation clause ("the
+consult candidates list rides the free-text table (empty …); the
+in-prompt candidate echo is part of the preview follow-up"). The
+issue is normative on both: the prompt's candidates ARE the current
+generation's hits, the echo shows the selected candidate, and RET
+jumps from the CURRENT selection. Landed in c29d77fe: the table
+returns hit candidates (value path:line:col, display the *grep* row
+text); a `minibuffer-on-select` hook fires on selection change
+(the consult owner echoes the candidate); completion re-refreshes a
+live session so candidates appear without another keystroke; accept
+resolves the selected value to its hit index (cursor-move in
+*grep*, then #307's grep-ret) with the *grep* row as the raw-input
+fallback. The echo clause is thereby in scope; the preview PANE
+remains the only reduction.
 
 ## Out of scope
 
