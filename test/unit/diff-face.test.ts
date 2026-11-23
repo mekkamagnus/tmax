@@ -160,7 +160,6 @@ describe("#313 — PARITY: (class, normalized-text) sequences on identical logic
 });
 describe("#313 valve r1", () => {
   test("join PRESERVES leading empty lines (valve r1's probe: '\\n+a' keeps the blank)", async () => {
-    editor = await setup();
     e(editor, "(require-module fikra/diff)");
     const r = e(editor, '(condition-case nil (fikra/diff/fikra-diff-facelines "\\n+a") (error (m) (concat "THREW:" m)))');
     const v = String(r.value);
