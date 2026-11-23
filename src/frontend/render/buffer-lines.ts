@@ -412,14 +412,22 @@ function renderWithBlockCursorAnsi(text: string, cursorCol: number): string {
   if (cursorCol >= stringWidth(stripped)) {
     return text + style(" ", { fg: "black", bg: "white" });
   }
-  // Walk through text tracking visual column position
+  // Walk through text tracking visual column position. Active SGR state is
+  // accumulated (a full reset empties it): the cursor's own style ends with
+  // a reset, so WITHOUT re-emitting the active state the remainder of a
+  // highlighted line lost its colors — the cursor line rendered plain right
+  // of the cursor cell, which read as "no syntax highlighting" on the
+  // cursor's line (#335 follow-up, caught live in the demo tab).
   let visiblePos = 0;
   let i = 0;
   let splitPoint = 0;
+  let activeSgr = "";
   while (i < text.length) {
     if (text[i] === "\x1b") {
       const end = text.indexOf("m", i);
       if (end === -1) break;
+      const seq = text.slice(i, end + 1);
+      activeSgr = seq === "\x1b[0m" ? "" : activeSgr + seq;
       i = end + 1;
       continue;
     }
@@ -436,7 +444,7 @@ function renderWithBlockCursorAnsi(text: string, cursorCol: number): string {
   const before = text.slice(0, splitPoint);
   const ch = text[splitPoint]!;
   const after = text.slice(splitPoint + 1);
-  return before + style(ch, { fg: "black", bg: "white" }) + after;
+  return before + style(ch, { fg: "black", bg: "white" }) + activeSgr + after;
 }
 
 function renderSingleWindow(
