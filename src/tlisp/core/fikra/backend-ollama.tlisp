@@ -650,11 +650,12 @@ with its post-exit capture.")
          (f (fikra/thread/fikra-thread-shq (concat d "/ckpt-trees-" tid)))
          (stamp (fikra/thread/fikra-thread-shq (concat d "/ckpt-stamp-" tid)))
          (changed (fikra/thread/fikra-thread-shq (concat d "/ckpt-changed-" tid)))
+         (meta (fikra/thread/fikra-thread-shq (concat d "/ckpt-meta-" tid)))
          (ignored (fikra/thread/fikra-thread-shq (concat d "/ckpt-ignored-" tid)))
          (ign-a (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-" tid)))
          (ign-b (fikra/thread/fikra-thread-shq (concat d "/ckpt-ign-after-" tid))))
     ;; The caller has cd'ed into the working dir.
-    (concat "mkdir -p " dq " ; rm -f " f " " changed " " ignored " ; "
+    (concat "mkdir -p " dq " ; rm -f " f " " changed " " meta " " ignored " ; "
             (fikra-ollama-ignored-listing-cmd ign-a)
             (fikra-ollama-snapshot-cmd idx "__p")
             ;; r155c: everything the command modifies is listed — the
@@ -672,7 +673,21 @@ with its post-exit capture.")
             ;; repository's included — the snapshot's own `git add -A`
             ;; rewrites a nested repo's index, which the scan then listed
             ;; as a path it could not hold.
-            "find . -cnewer " stamp " -type f -not -path '*/.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
+            ;; r156 (codex gate round 6, P2): every NON-DIRECTORY entry — a
+            ;; symlink is one. A retargeted ignored link changed nothing a
+            ;; `-type f` scan could see, and the ignored-entry listing
+            ;; names it before and after.
+            "find . -cnewer " stamp " -not -type d -not -path '*/.git/*' -not -path './.tmax/*' -print0 | head -c 60000 > " changed " ; "
+            ;; r156 (codex gate round 6, P2): the entries whose STATUS
+            ;; changed without a write — ctime newer than the stamp, mtime
+            ;; NOT newer. `touch` moves both; `chmod`, `chown` and a link
+            ;; count move only the ctime. Those are the changes a git tree
+            ;; may not represent (it records the executable bit and
+            ;; nothing else), and r155f's "neither tree" rule had gone
+            ;; silent on them. A file WRITTEN keeps its mtime only when
+            ;; the tool preserves it (cp -p, tar, unzip) — the tree diff
+            ;; covers those whenever the content differs.
+            "find . -cnewer " stamp " ! -newer " stamp " -not -type d -not -path '*/.git/*' -not -path './.tmax/*' -print0 | head -c 20000 > " meta " ; "
             ;; r155d: ignored entries that appeared or vanished (the scan
             ;; above cannot see a deletion).
             (fikra-ollama-ignored-listing-cmd ign-b)
@@ -777,6 +792,7 @@ with its post-exit capture.")
            (tid (fikra/thread/fikra-thread-current))
            (f (concat base "trees-" tid))
            (changed (concat base "changed-" tid))
+           (meta (concat base "meta-" tid))
            (ignored (concat base "ignored-" tid))
            (toks (fikra-ollama-marker-tokens
                    (if (file-exists-p f) (string-trim (read-file-content f)) "")))
@@ -793,7 +809,13 @@ with its post-exit capture.")
                  (list))
                (if (file-exists-p ignored)
                  (string-split (string-trim (read-file-content ignored)) (hex-decode "0a"))
-                 (list)))))
+                 (list))))
+           ;; r156: the entries whose status changed without a write
+           ;; (NUL-separated, like the scan's list).
+           (meta-lines
+             (if (file-exists-p meta)
+               (fikra-ollama-split-paths (read-file-content meta))
+               (list))))
       ;; The markers are consumed whatever they held — a stale or useless
       ;; one must not be reported again by an unrelated later call.
       (if (file-exists-p f)
@@ -801,6 +823,9 @@ with its post-exit capture.")
         nil)
       (if (file-exists-p changed)
         (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq changed)))
+        nil)
+      (if (file-exists-p meta)
+        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq meta)))
         nil)
       (if (file-exists-p ignored)
         (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq ignored)))
@@ -811,7 +836,9 @@ with its post-exit capture.")
         (t
           (progn
           ;; r155c: what the command touched that the trees cannot hold.
-          (fikra-ollama-report-outside-checkpoint changed-lines pre post)
+          ;; r156: …and what changed on a path they DO hold, in a way they
+          ;; cannot record.
+          (fikra-ollama-report-outside-checkpoint changed-lines meta-lines pre post)
           (if (string= pre post)
             nil
             ;; r134e: this runs in the SENTINEL's eval context — the event
@@ -854,13 +881,22 @@ with its post-exit capture.")
 ;; tracked content and mode were unchanged. (The diff is read
 ;; NUL-separated: git quotes paths with spaces or quotes in its line
 ;; output.)
-(defun fikra-ollama-report-outside-checkpoint (changed pre post)
+;; r156 (codex gate round 6, P2): "neither tree" had gone silent on a
+;; change the trees hold the PATH of but cannot RECORD — a permission or
+;; owner change (git keeps the executable bit and nothing else). Those
+;; arrive in META: entries whose ctime moved past the stamp while their
+;; mtime did not (`chmod` does that; `touch` moves both). A META entry is
+;; reported when the tree diff does not already cover it — an executable
+;; bit, a link's target, a content change with a preserved mtime (cp -p,
+;; tar) are covered and stay silent.
+(defun fikra-ollama-report-outside-checkpoint (changed meta pre post)
   (let* ((root (fikra/thread/fikra-thread-working-dir))
          (rq (fikra/thread/fikra-thread-shq root))
          ;; Nothing scanned (a command that wrote no file the scan can
          ;; see — the common read-only call): nothing to compare, so no
          ;; git runs at all (the sentinel blocks the editor meanwhile).
-         (none (or (null changed) (= (length changed) 0)))
+         (none (and (or (null changed) (= (length changed) 0))
+                    (or (null meta) (= (length meta) 0))))
          (covered (if none
                    (list)
                    (fikra-ollama-split-paths
@@ -877,7 +913,13 @@ with its post-exit capture.")
                      (list)
                      (fikra-ollama-split-paths
                        (shell-command (concat "git -C " rq " ls-tree -r -z --name-only " post)))))))
-         (outside (fikra-ollama-outside-scan changed (list) covered held 0)))
+         ;; In NEITHER tree: ignored, under a nested .tmax, inside a nested
+         ;; repository.
+         (unsighted (fikra-ollama-outside-scan changed (list) covered held 0))
+         ;; …then the uncovered status-only changes. HELD is empty here on
+         ;; purpose — the path IS in the trees; what they cannot hold is
+         ;; the change. Already-reported paths are not repeated.
+         (outside (fikra-ollama-outside-scan meta unsighted covered (list) 0)))
     (if (> (length outside) 0)
       (let ((n (length outside)))
         (condition-case nil

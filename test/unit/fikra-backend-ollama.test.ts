@@ -3458,6 +3458,132 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(await untilStatus(ed, "idle", 80)).toBe("idle");
   });
 
+  // ── r156: what the trees hold the PATH of but cannot RECORD ──────────
+  // Codex gate round 6 left two P2s. A permission change on a tracked file
+  // was no longer reported — a REPORTING REGRESSION from r155f's "neither
+  // tree" rule (it used to be reported, by accident, as "not in the
+  // diff") — and a retargeted ignored symlink never was (the scan was
+  // `-type f`). The discriminator: `touch` moves a file's mtime AND ctime,
+  // `chmod` only the ctime. "ctime past the stamp, mtime not" = status
+  // changed without a write — reported unless the tree diff covers it.
+  const errorRows = (ed: Editor) => logText(ed).split("\n").filter((l) => l.includes("checkpoint-error"));
+
+  tt("`chmod 600` on a TRACKED file is reported — git records the executable bit and nothing else (r156)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "lock it down")');
+    call(ed, 540, "chmod 600 base.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('"reason":"1 path(s) the checkpoint cannot hold changed — not revertable: base.txt"'),
+    ]);
+    expect(String(e(ed, "(editor-status)").value)).toContain("outside the checkpoint");
+    // The change is real, and it is all that happened.
+    expect(statSync(join(process.cwd(), "base.txt")).mode & 0o777).toBe(0o600);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "locked");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  tt("`chmod 644` on a private file is reported too — the checkpoint cannot put the restriction back (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), "secret.txt"), "s3cret\n");
+    execFileSync("git", ["add", "secret.txt"]);
+    execFileSync("git", ["commit", "-qm", "add secret"]);
+    execFileSync("chmod", ["600", "secret.txt"]);
+    e(ed, '(fikra/chat/fikra-turn-send "open it up")');
+    call(ed, 541, "chmod 644 secret.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('not revertable: secret.txt"'),
+    ]);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "opened");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // …and only the uncovered one. The executable bit IS a tree entry: that
+  // change is checkpointed and says nothing.
+  tt("a representable mode change in the same call is checkpointed and NOT reported — the other one is named alone (r156)", async () => {
+    const ed = await armed();
+    e(ed, '(fikra/chat/fikra-turn-send "two mode changes")');
+    call(ed, 542, "chmod 600 base.txt && chmod +x .gitignore");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('"reason":"1 path(s) the checkpoint cannot hold changed — not revertable: base.txt"'),
+    ]);
+    expect(actionRefs()).toEqual(["refs/fikra/main/1-a1", "refs/fikra/main/1-a2"]);
+  });
+
+  // The discriminator's own false-positive class: a file written with its
+  // mtime PRESERVED looks like a status-only change. Its content covers it.
+  tt("a new file with a PRESERVED mtime is covered by its content — not reported (r156)", async () => {
+    const ed = await armed();
+    execFileSync("touch", ["-t", "202001010000", "old-source.txt"]);
+    e(ed, '(fikra/chat/fikra-turn-send "copy it")');
+    call(ed, 543, "cp -p old-source.txt kept-time.txt");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(logText(ed)).not.toContain("cannot hold");
+    expect(actionRefs()).toEqual(["refs/fikra/main/1-a1", "refs/fikra/main/1-a2"]);
+  });
+
+  // r155d made an executable-bit action REVERTABLE under
+  // core.fileMode=false only for a content change; the bit alone was a
+  // declared silence. It is reported now.
+  tt("with core.fileMode=false an executable-bit change is reported — git will not record it (r156)", async () => {
+    const ed = await armed();
+    execFileSync("git", ["config", "core.fileMode", "false"]);
+    e(ed, '(fikra/chat/fikra-turn-send "make it runnable")');
+    call(ed, 544, "chmod +x base.txt");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('not revertable: base.txt"'),
+    ]);
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "runnable");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  tt("a retargeted IGNORED symlink is reported — the scan sees every non-directory entry (r156)", async () => {
+    const ed = await armed();
+    writeFileSync(join(process.cwd(), ".gitignore"), ".tmax/\ncache/\n");
+    execFileSync("git", ["add", ".gitignore"]);
+    execFileSync("git", ["commit", "-qm", "ignore cache"]);
+    mkdirSync(join(process.cwd(), "cache"));
+    execFileSync("ln", ["-s", "base.txt", "cache/link"]);
+    e(ed, '(fikra/chat/fikra-turn-send "retarget the cache link")');
+    call(ed, 545, "ln -sfn .gitignore cache/link");
+    const seeded = String(e(ed, "(fikra/backend-ollama/fikra-ollama-latest-id-get)").value);
+    await until(ed, "(buffer-text)", "cannot hold", 120);
+    expect(errorRows(ed)).toEqual([
+      expect.stringContaining('"reason":"1 path(s) the checkpoint cannot hold changed — not revertable: cache/link"'),
+    ]);
+    // The link really moved (readlink ends its output with a newline).
+    expect(execFileSync("readlink", ["cache/link"], { encoding: "utf8" }).trim()).toBe(".gitignore");
+    expect(actionRefs()).toEqual([]);
+    await settleRefireFrom(ed, seeded, "retargeted");
+    expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+  });
+
+  // A TRACKED link's target text is its content: retargeting it is an
+  // ordinary, revertable change.
+  tt("a retargeted TRACKED symlink is checkpointed and reverts — not reported (r156)", async () => {
+    const ed = await armed();
+    execFileSync("ln", ["-s", "base.txt", "trk-link"]);
+    execFileSync("git", ["add", "trk-link"]);
+    execFileSync("git", ["commit", "-qm", "add link"]);
+    e(ed, '(fikra/chat/fikra-turn-send "retarget the tracked link")');
+    call(ed, 546, "ln -sfn .gitignore trk-link");
+    await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+    expect(logText(ed)).not.toContain("cannot hold");
+    expect(actionRefs()).toEqual(["refs/fikra/main/1-a1", "refs/fikra/main/1-a2"]);
+    e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+    expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+    expect(execFileSync("readlink", ["trk-link"], { encoding: "utf8" }).trim()).toBe("base.txt");
+  });
+
   // Codex gate r154 round 5 (P2): the counters ran BEFORE the append — a
   // refused batch (held for a retry) counted every attempt.
   tt("a held batch counts its chunks ONCE", async () => {
