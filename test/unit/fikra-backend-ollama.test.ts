@@ -4329,7 +4329,12 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
   // the first cut of these witnesses never failed a capture at all.)
   // The turn's baseline ref is never touched.
   const withRefusedRef = async (suffix: string, body: () => Promise<void>) => {
-    const hooks = join(process.cwd(), ".git", "r161-hooks");
+    // This witness's OWN repo, captured now: every test runs in its own
+    // temp repo through process.chdir, so a cleanup that runs LATE (the
+    // witness timed out under load) must not land in whichever repo is
+    // current then — it used to unset a LATER witness's hook.
+    const repo = process.cwd();
+    const hooks = join(repo, ".git", "r161-hooks");
     mkdirSync(hooks, { recursive: true });
     writeFileSync(join(hooks, "reference-transaction"), [
       "#!/bin/sh",
@@ -4340,17 +4345,18 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
       "",
     ].join("\n"));
     chmodSync(join(hooks, "reference-transaction"), 0o755);
-    execFileSync("git", ["config", "core.hooksPath", hooks]);
+    execFileSync("git", ["config", "core.hooksPath", hooks], { cwd: repo });
     try {
       await body();
     } finally {
       rmSync(hooks, { recursive: true, force: true });
-      // Idempotent: a witness that times out under load finishes its
-      // cleanup late — after a later witness has already unset the
-      // section — and `--unset` then exits 5 (an unhandled error in the
-      // gate's full run).
+      // Pinned to this witness's own repo, and idempotent: a witness that
+      // times out under load finishes its cleanup late — after a later
+      // witness has set ITS hook. Unpinned, it unset that later witness's
+      // hook (its capture then never failed); unwrapped, `--unset` exits 5
+      // once the section is gone (an unhandled error in a gate's run).
       try {
-        execFileSync("git", ["config", "--unset", "core.hooksPath"], { stdio: "ignore" });
+        execFileSync("git", ["config", "--unset", "core.hooksPath"], { cwd: repo, stdio: "ignore" });
       } catch {
         /* already unset */
       }
@@ -4531,6 +4537,28 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/5") (list "sha" "x")');
     const after = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
     expect(after).toContain("⌘ [ckpt main/5 ✓]");
+  }, 90000);
+
+  test("a witness's cleanup touches only its OWN repo, even when it runs from another one (r161d)", async () => {
+    const mine = process.cwd();
+    const other = mkdtempSync(join(tmpdir(), "r161d-other-"));
+    execFileSync("git", ["init", "-q"], { cwd: other });
+    const elsewhere = join(other, "elsewhere");
+    execFileSync("git", ["config", "core.hooksPath", elsewhere], { cwd: other });
+    try {
+      await withRefusedRef("9-a1", async () => {
+        // A cleanup that runs LATE (the witness timed out under load)
+        // runs from whichever repo is current THEN.
+        process.chdir(other);
+      });
+      process.chdir(mine);
+      // The other repo's hook is untouched; this witness's own is gone.
+      expect(execFileSync("git", ["config", "core.hooksPath"], { cwd: other, encoding: "utf8" }).trim()).toBe(elsewhere);
+      expect(() => execFileSync("git", ["config", "core.hooksPath"], { cwd: mine, encoding: "utf8" })).toThrow();
+    } finally {
+      process.chdir(mine);
+      rmSync(other, { recursive: true, force: true });
+    }
   }, 90000);
 
   test("a coverage qualifier other than 'not held' survives a capture failure too (r161b)", async () => {
