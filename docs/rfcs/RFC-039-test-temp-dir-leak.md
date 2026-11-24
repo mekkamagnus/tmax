@@ -1,6 +1,6 @@
 # RFC-039: Test temp-directory leak — `tmax-test-log-*`
 
-**Status:** Proposed. §2.3 (the backlog removal) is done, on 2026-11-25. §2.1 and §2.2 are not implemented; they are tracked in #352. #349 is open.
+**Status:** Implemented on 2026-11-25. §2.1 to §2.3 are done. §2.4 is a follow-up with its own decision. #349 and #352 are closed by the fix.
 
 **Related:** #349 (the bug), #352 (execution of §2.1 and §2.2), #353 (the launcher leak), [SPEC-055](../specs/SPEC-055-unified-observability.md) (the log isolation the fixture implements), `test/helpers/editor-fixture.ts`, `src/editor/log-persist.ts`, `scripts/run-unit-tests.ts`
 
@@ -249,9 +249,9 @@ Five findings follow from the table:
 
 ## 5. Acceptance criteria
 
-- [ ] **AC1.** The leak test (§2.2a) fails on the code before the fix and passes after it. Both outputs are in #352.
-- [ ] **AC2.** The isolation test (§2.2b) passes, including the writes and the tail-load. The full suite itself still writes to the default log path (§3). That is a separate defect.
-- [ ] **AC3.** One full `bun run test:unit` run with `TMPDIR` set to a new empty directory leaves no `tmax-test-log-*` entry in it. The count and the suite result are in #352. A run that was killed before its summary line does not count.
+- [x] **AC1.** The leak test (§2.2a) fails on the code before the fix and passes after it. Both outputs are in #352. The lead reproduced both: 2 leftover directories before the fix, 2 tests passing after it.
+- [x] **AC2.** The isolation test (§2.2b) passes, including the writes and the tail-load. The full suite itself still writes to the default log path (§3). That is a separate defect, open.
+- [x] **AC3.** One full `bun run test:unit` run with `TMPDIR` set to a new empty directory leaves no `tmax-test-log-*` entry in it. Recorded in #352: 4,606 tests, 866 s, 0 entries. The run's 21 failures are the ones known on `main` (#345) and no others. A run that was killed before its summary line does not count.
 - [x] **AC4.** The backlog is removed on the development machine (2026-11-25): 532,518 before, 0 after. `$TMPDIR` holds 35,616 entries.
 - [x] **AC5.** The launcher leak (§3) has an issue of its own. The issue created during review is [#353](https://github.com/mekkamagnus/tmax/issues/353).
 
@@ -309,5 +309,7 @@ The second codex run implemented §2.1 and §2.2 in four files. Checked outside 
 - **First full run** (4,606 tests, 818 s, Bun 1.4.4, private `TMPDIR`, `HOME` and `TMAX_SOCKET`). It left 0 `tmax-test-log-*` entries in the private `TMPDIR`. That folder held 53 other entries, all from the creators in §3.
 - **Gap 3: the AC12.1 guard.** The run's failures were the 21 known on `main` (#345) plus one. `AC12.1` failed because the new isolation test constructed an editor directly. The constructor now lives in the fixture, as `createEditorAfterFixture` (§2.2).
 - **The default log, in the same run.** A default log appeared under the private `HOME` (§3). 28 server-started editors wrote to it. §2.1 does not touch that path.
+
+- **Second full run, on the final code** (4,606 tests, 866 s, the same private environment). It left 0 `tmax-test-log-*` entries. Its failures are the 21 known on `main` (#345) and no others.
 
 Gaps 1 and 2 went back to codex as a third run, and gap 3 as a fourth.
