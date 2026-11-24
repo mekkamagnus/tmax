@@ -80,8 +80,9 @@ function isolatedLogPath(): string {
   return join(logRoot, `messages-${++logCount}.log`);
 }
 
-afterAll(() => {
+afterAll(async () => {
   if (!logRoot) return;
+  await Bun.sleep(0); // let the writes of the teardown land first
   try {
     rmSync(logRoot, { recursive: true, force: true });
   } catch (error) {
@@ -93,7 +94,7 @@ afterAll(() => {
 
 Each editor still gets a path of its own and reads `TMAX_LOG_PATH` once, so the SPEC-055 isolation is unchanged: an empty log per editor, and a rotation file (`<path>.1`) per editor.
 
-**Why one directory per test file.** What gets removed depends on where a module-level hook fires. That was measured on 2026-11-25 with Bun 1.4.4, on two test files that share one helper module:
+**Why one directory per test file.** What gets removed depends on where a module-level hook fires. That was measured on 2026-11-25 with Bun 1.4.4 and Bun 1.3.9, on two test files that share one helper module:
 
 | How the files are run | The module-level `afterAll` fires | One directory per editor | One directory per test file |
 |---|---|---|---|
@@ -101,14 +102,18 @@ Each editor still gets a path of its own and reads `TMAX_LOG_PATH` once, so the 
 | `--isolate` (the wrapper's opt-out) | once per file | 0 left | 0 left |
 | One file alone | once | 0 left | 0 left |
 | Several files, no flag: one shared module | for the first file only | every later file's directories | 1 per process |
+| Bun 1.3.9, any flag | for the first file only | every later file's directories | 1 per process |
 
 "Left" means entries whose name starts with `tmax-test-log-` after the run.
 
-In the last row the helper is evaluated once, so its hook exists for the first file only. With one directory per test file, the later files share that directory. The first file's hook removes it, the next fixture call creates it again (`existsSync` above), and no later hook removes it. One directory is the floor for this mode. `exit` and `beforeExit` handlers do not run under `bun test`, in any of the four rows (measured the same day), so there is no later moment to sweep.
+In the last two rows the helper is evaluated once, so its hook exists for the first file only. With one directory per test file, the later files share that directory. The first file's hook removes it, the next fixture call creates it again (`existsSync` above), and no later hook removes it. One directory is the floor for this mode. `exit` and `beforeExit` handlers do not run under `bun test`, in any of the four rows (measured the same day), so there is no later moment to sweep.
 
-Two rules are easy to get wrong:
+The development machine has two Bun installs. `~/.bun/bin/bun` is 1.4.4, the version CI pins, and it is first on the PATH of an agent's shell. `/usr/local/bin/bun` is 1.3.9, and it is first on the PATH of a login shell (§6).
+
+Three rules are easy to get wrong:
 
 - **Do not clear `TMAX_LOG_PATH` in `afterAll`.** A directly constructed editor inherits the path of the last fixture editor: `test/unit/fikra-thread-context.test.ts:350` builds `new Editor(...)` without the fixture. Without the variable, that editor appends to the developer's real log.
+- **Yield one tick before the sweep.** A test can leave behind an object that logs after the last test has returned. Measured on 2026-11-25: `test/unit/fikra-thread-context.test.ts` leaves a server whose shutdown writes two log lines after the hook ran. A synchronous sweep had removed the directory first, that write created it again, and one directory stayed behind in every mode. One `await Bun.sleep(0)` before the removal lets those writes land first. After it, the same six-file run left nothing with `--parallel` or with `--isolate`.
 - **Report a failed removal. Do not throw.** The `console.error` above keeps the failure visible in the output of the run and does not fail a test file. §2.2 is the check that reports a leak.
 
 Cost: one `mkdtemp` per test file that starts an editor (about 180 per full run; the code makes about 2,200 today) and one `rmSync`.
@@ -123,7 +128,7 @@ Cost: one `mkdtemp` per test file that starts an editor (about 180 per full run;
 2. Add two small child files under `test/fixtures/`. Their names must end in `.test.ts`, because `bun test` runs no other name. Each child starts an editor through `createStartedEditor` and does not call `dispose()`. Each then writes a marker with `editor.logMessage(...)`, waits a tick, and checks that the marker is in the file named by `TMAX_LOG_PATH`. So the test cannot pass because nothing was written. The second child also constructs `new Editor(...)` after its fixture and writes a second marker. Both children skip themselves unless `TMAX_FIXTURE_CHILD=1` is set. A plain `bun test` then never runs them, and the parent cannot find itself.
 3. Run `bun test` in a child process with `TMPDIR=<box>/tmp` and `HOME=<box>/home`. Give each child a bounded timeout and keep its output. Run three children: the pair with `--parallel`, the pair with `--isolate`, and the pair with no flag.
 4. For each child, assert that its tests ran and that it exited with code 0.
-5. Assert what is left in `<box>/tmp`. After the first two children: no name that starts with `tmax-test-log-`. After the third: at most one such name, and it is a directory (§2.1).
+5. Assert what is left in `<box>/tmp`. On Bun 1.4.0 or later, the first two children leave no name that starts with `tmax-test-log-`, and the third leaves at most one such name, a directory. On an older Bun no flag isolates the helper module, so each child leaves at most one such name, a directory (§2.1).
 6. Assert that `<box>/home/.config/tmax/messages.log` does not exist. Then no child editor fell back to the default log path.
 
 The test must be seen to fail on the code before the fix, and the failure must be a leftover `tmax-test-log-*` entry. A spawn failure or a timeout is not that failure. Paste both runs into #352 ([learnings](../learnings.md), "a regression test must be SEEN to fail on the previous commit").
@@ -231,6 +236,8 @@ Four findings follow from the table:
 | One directory per editor, removed in `afterAll` (the first design of this RFC) | In a shared-module run the hook exists for the first file only, so every later file's directories stay (§2.1). |
 | An extra sweep in a process `exit` handler | `exit` and `beforeExit` handlers do not run under `bun test` (§2.1). |
 | A sweep hook registered from inside a test | Measured: it sweeps after every test, in every mode. It removes directories while earlier editors of the file can still write to them, and it relies on undocumented hook timing. |
+| A synchronous sweep, with no wait | A write that lands after the sweep creates the directory again. Measured in `fikra-thread-context.test.ts` (§2.1). |
+| A second sweep on a timer, for writes that come later than one tick | No measurement asks for it yet. The full run of AC3 is the check. |
 | A switch that turns log persistence off in tests | The tests would no longer exercise the logging path that the product uses. |
 | A periodic cleanup, with no code change | It treats the symptom. About 62,000 directories arrive each day, and each cleanup pays for a scan of the folder. |
 | Runner containment only (§2.4) | It protects the real temp folder, but `bun test` run directly still leaks. The leak must stop at its source. |
@@ -253,6 +260,7 @@ Four findings follow from the table:
 4. **What removed the directories older than 2026-11-16 03:35?** The code has leaked since June. Entries of other families from 2026-11-10 are still present, so it was not a system-wide clean. The cause was not found.
 5. **Does a workflow exist that reads a test's log after the run?** None is documented and no test does it. If one exists, §2.1 needs a way to keep the directories of failed tests.
 6. **Does the filtered-run hole in §3 get its own issue?** Recommendation: yes. The fix is small: give that one direct construction an isolated path.
+7. **Which Bun does a developer's shell run on the development machine?** Today a login shell gets 1.3.9, and CI pins 1.4.4. Recommendation: put 1.4.4 first on the PATH, and make the unit runner refuse a Bun older than 1.4.0.
 
 ## 7. Review record
 
@@ -285,3 +293,15 @@ The review ran no tests. Each of its design claims was measured before it was ac
 - **Corrected: the child files.** `bun test` runs no file whose name does not end in `.test.ts`, so the children cannot sit outside that pattern. They skip themselves unless a marker variable is set.
 - **Corrected: AC3.** The suite on `main` fails 21 known tests (#345) and the wrapper force-exits it after its summary line, so "a forced or failed run does not satisfy" could not be met. AC3 now excludes only a run that was killed before its summary line.
 - **Measured: the filtered-run hole.** The review called it unverified. It is real, and §3 records it.
+
+### Lead's check of the implementation, 2026-11-25
+
+The second codex run implemented §2.1 and §2.2 in four files. Checked outside its sandbox:
+
+- **Typecheck.** All four projects are clean.
+- **AC1.** Reproduced by the lead: against the fixture before the fix the leak test fails and reports 2 leftover directories. After the fix 2 tests pass.
+- **Regression.** Six files, 55 tests, 0 failures, in all three modes on Bun 1.4.4. The one failure inside the sandbox (`EPERM` on `listen`) was the sandbox.
+- **Gap 1: a write after the sweep.** With `--parallel` and with `--isolate` one directory stayed behind. It came from `fikra-thread-context.test.ts` (the third rule in §2.1). A one-tick yield removed it.
+- **Gap 2: Bun 1.3.9.** The leak test failed under 1.3.9, because that version isolates nothing (table in §2.1). §2.2(a) now states the expectation per version.
+
+Both gaps went back to codex as a third run.
