@@ -7,7 +7,7 @@
           fikra-event-emit-held-for fikra-event-flush-undelivered
           fikra-event-tombstone-ranges fikra-event-in-range-p
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
-          fikra-event-get-str
+          fikra-event-get-str fikra-event-debug-line fikra-event-parse-lines
           fikra-event-inline-ckpt-merge fikra-event-inline-act-refs
           fikra-event-inline-act-apply fikra-event-render-fold fikra-thought-merge fikra-thought-toggle-at fikra-thought-render fikra-thought-collapsed-p fikra-thought-tab fikra-thought-toggles-get fikra-thought-line-ids-get fikra-thought-rebuild-line-ids fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity fikra-gate-panel fikra-event-get)
 
@@ -128,14 +128,19 @@
 
 ;; ── field accessors (alist of ("k" v)) ──────────────────────────────
 (defun fikra-event-get (event key)
-  "FIELD accessor for alist events — T-Lisp has no assoc builtin."
+  "FIELD accessor for alist events — T-Lisp has no assoc builtin.
+TOTAL (r162b): whatever a log line parsed to. A line that is valid
+JSON but not an object — 42, \"hello\", true, a bare array — reached
+this as EVENT, and dolist over a non-list threw."
   (let ((found nil))
-    (dolist (entry event)
-      (if (and (not found)
-               (listp entry)
-               (= (length entry) 2)
-               (string= (car entry) key))
-        (setq found (car (cdr entry)))))
+    (if (listp event)
+      (dolist (entry event)
+        (if (and (not found)
+                 (listp entry)
+                 (= (length entry) 2)
+                 (stringp (car entry))
+                 (string= (car entry) key))
+          (setq found (car (cdr entry))))))
     found))
 
 
@@ -1579,12 +1584,23 @@ id-less completed thoughts too).")
           (fikra-event-render-skip (fikra-thought-merge merged (list) nil "" nil)
             (fikra-event-tombstone-ranges events) 0 "" nil))))))
 
-;; JSONL lines -> parsed events (unparseable lines skipped).
+;; An event, as the protocol defines it: a non-empty list of
+;; ("field" value) pairs. (r162b: a line that PARSES but is not one —
+;; 42, "hello", true, a bare array — used to pass the reader and throw
+;; inside the replay, which then blanked the thread.)
+(defun fikra-event-shape-p (e)
+  ;; ("another element?" is asked with null — the empty-list VALUE is
+  ;; truthy here, and there is no consp.)
+  (and (listp e) (not (null e))
+       (listp (car e)) (= (length (car e)) 2) (stringp (car (car e)))))
+
+;; JSONL lines -> parsed events (unparseable lines skipped, and so are
+;; lines that parse to something else).
 (defun fikra-event-parse-lines (lines)
   (let ((out (list)))
     (dolist (line lines)
       (let ((e (condition-case nil (json-read-from-string line) (error nil))))
-        (if (not (null e))
+        (if (and (not (null e)) (fikra-event-shape-p e))
           (setq out (cons e out)))))
     (reverse out)))
 

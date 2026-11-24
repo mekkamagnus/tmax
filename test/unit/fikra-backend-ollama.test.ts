@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, beforeAll, afterAll, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -4715,22 +4715,51 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     expect(text).not.toContain("4-a2");
   }, 90000);
 
-  test("an unwritable debug log does not turn a degrade into an error (r162b)", async () => {
+  test("the replay traps' debug write is best effort — an unwritable path is not an error (r162b)", async () => {
     const ed = await armed();
-    // The traps' own debug write must fail: a DIRECTORY at its path.
     mkdirSync(join(process.cwd(), ".tmax/fikra"), { recursive: true });
-    mkdirSync(join(process.cwd(), ".tmax/fikra/actdbg.log"));
+    const blocked = join(process.cwd(), ".tmax/fikra/actdbg.log");
+    // A DIRECTORY at the debug path: appending to it fails.
+    mkdirSync(blocked);
     try {
-      emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "FAILED-ROW") (list "act" "4-1")');
-      emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4-a1") (list "sha" "x") (list "act" 3)');
-      // Before: the malformed line threw in a pass, the handler's own
-      // append-file threw too, and the REPLAY errored (a chat buffer
-      // that could not open at all).
-      const text = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
-      expect(text).toContain("FAILED-ROW");
+      // Called DIRECTLY: since the fix below, a malformed line no longer
+      // reaches a trap at all, so a replay through a bad line proves
+      // nothing about the handler (an independent review showed the
+      // earlier witness passing with this fix reverted).
+      e(ed, `(fikra/event/fikra-event-debug-line "${blocked}" "probe")`);
+      // …and a writable path still records.
+      const ok = join(process.cwd(), ".tmax/fikra/probe-dbg.log");
+      e(ed, `(fikra/event/fikra-event-debug-line "${ok}" "probe line")`);
+      expect(readFileSync(ok, "utf8")).toContain("probe line");
     } finally {
-      rmdirSync(join(process.cwd(), ".tmax/fikra/actdbg.log"));
+      rmdirSync(blocked);
     }
+  }, 90000);
+
+  test("a log line that is not an object is skipped like an unparseable one — the thread still renders (r162b)", async () => {
+    const ed = await armed();
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "BEFORE-ROW")');
+    emitEv(ed, '(list "kind" "tool-result") (list "ok" t) (list "summary" "wrote")');
+    // Valid JSON, but not events: a number, a string, a boolean, a bare
+    // array, and an array whose first pair has a non-string key.
+    const file = join(process.cwd(), ".tmax/fikra/threads/main/events.jsonl");
+    appendFileSync(file, ['42', '"hello"', "true", "[[3,\"x\"]]", "[[\"kind\",\"tool-call\"],[3,\"y\"]]",
+      '{"kind":"tool-call","tool":"buffer-edit","summary":"AFTER-ROW"}', ""].join("\n"));
+    // The READER drops them (defence in depth beside the total accessor:
+    // with only the accessor this replay would still be fine, so the
+    // filter needs a pin of its own).
+    // (The JSON lines go in through hex: the reader leaves backslash
+    // escapes intact in string literals.)
+    const jsonHex = (v: unknown) => Buffer.from(JSON.stringify(v), "utf8").toString("hex");
+    const kept = Number(e(ed, `(length (fikra/event/fikra-event-parse-lines (list "42" "true" (hex-decode "${jsonHex([[3, "x"]])}") (hex-decode "${jsonHex({ kind: "tool-call" })}"))))`).value);
+    expect(kept).toBe(1);
+    // A direct replay neither throws nor loses the rows around them.
+    const text = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    expect(text).toContain("BEFORE-ROW");
+    expect(text).toContain("AFTER-ROW");
+    // And the buffer rebuild does not blank the thread.
+    e(ed, "(fikra/event/fikra-event-rebuild-fikra-buffer)");
+    expect(strip(String(e(ed, "(buffer-text)").value))).toContain("BEFORE-ROW");
   }, 90000);
 
   // ── FOR_9 item 2: every DISPLAYED action ref is checked against its
