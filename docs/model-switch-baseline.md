@@ -16,9 +16,12 @@
 | Unchanged | The grader (codex), the issue specs, the burn-down order, the gates and the 5-round valve, the machine |
 | Excluded from both samples | **#311**: in flight across the switch, so it was partly built on each model |
 
-Each live ledger carries the switch as a second `run-start` event with `model: "glm-5.4[1m]"`
-(appended 2026-11-23T19:33:27Z). The model in force for any event is the model of the nearest
-`run-start` before it. The run itself did not restart; the note on the event says so.
+Each live ledger was given the switch as a second `run-start` event with `model: "glm-5.4[1m]"`
+(appended 2026-11-23T19:33:27Z). The burn-down tab then restated its ledger (2026-11-24T04:20Z)
+and that marker was dropped; it was re-appended on 2026-11-24 at 06:05Z. The fikra ledger kept
+its marker. **This document, not either ledger, is the boundary of record.** The model in force
+for an event is the model of the nearest `run-start` before it. The run itself did not restart;
+the note on each event says so.
 
 ## 2. Sources, and why the ledger is not the primary one
 
