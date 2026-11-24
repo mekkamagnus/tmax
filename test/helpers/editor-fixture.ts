@@ -1,12 +1,12 @@
 import { Editor } from "../../src/editor/editor.ts";
-import { afterEach } from "bun:test";
+import { afterAll, afterEach } from "bun:test";
 import type { TerminalIO } from "../../src/core/contracts/terminal.ts";
 import type { FileSystem } from "../../src/core/contracts/filesystem.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 import { Either, type Either as EitherValue } from "../../src/utils/task-either.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EditorAPIContext } from "../../src/editor/runtime/editor-api-context.ts";
@@ -180,13 +180,35 @@ afterEach(() => {
   compatibilityFixtures.clear();
 });
 
+/** One log directory per test file (RFC-039), removed in afterAll. Each editor
+ *  gets its own file inside it. Created on first use, and created again when a
+ *  shared-module run has lost the first one to the first file's hook. */
+let logRoot: string | undefined;
+let logCount = 0;
+
 /** Isolate the SPEC-055 log file per editor instance so tail-load never reads
  *  the developer's real ~/.config/tmax/messages.log AND never carries entries
  *  from a prior test in the same file (each editor gets its own empty log). */
 function isolatedLogPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "tmax-test-log-"));
-  return join(dir, "messages.log");
+  if (!logRoot || !existsSync(logRoot)) {
+    logRoot = mkdtempSync(join(tmpdir(), "tmax-test-log-"));
+  }
+  return join(logRoot, `messages-${++logCount}.log`);
 }
+
+afterAll(async () => {
+  if (!logRoot) return;
+  // Yield one tick first. A test can leave behind an object that logs after
+  // the last test returned, and that write would re-create the directory
+  // removed here (fikra-thread-context.test.ts does).
+  await Bun.sleep(0);
+  try {
+    rmSync(logRoot, { recursive: true, force: true });
+  } catch (error) {
+    console.error(`[editor-fixture] could not remove ${logRoot}`, error);
+  }
+  logRoot = undefined;
+});
 
 /**
  * CHORE-44 Change 12 — the single construction + cleanup path for editor
@@ -194,7 +216,7 @@ function isolatedLogPath(): string {
  * binding behavior; returns a deterministic dispose handle (AC12.2).
  *
  * Behavior:
- *  - sets `TMAX_LOG_PATH` to a fresh isolated directory (per-editor log);
+ *  - sets `TMAX_LOG_PATH` to a fresh per-editor log in an isolated directory;
  *  - constructs `new Editor(terminal, filesystem, initFilePath?)`;
  *  - unless `start: false`, awaits `editor.start()` (which loads core
  *    bindings via the real `BindingRuntime` policy);
@@ -247,6 +269,16 @@ export async function createEditorFixture(options: EditorFixtureOptions = {}): P
   };
 
   return { editor, terminal, filesystem, executeTlisp, dispose };
+}
+
+/**
+ * An editor built outside {@link createEditorFixture}. It inherits the log
+ * path of the last fixture, as `fikra-thread-context.test.ts` does when it
+ * injects an editor into a server. Only the two fixture-hygiene tests call
+ * it. AC12.1 permits the Editor constructor in this file alone.
+ */
+export function createEditorAfterFixture(): Editor {
+  return new Editor(new MockTerminal(), new MockFileSystem());
 }
 
 /**
