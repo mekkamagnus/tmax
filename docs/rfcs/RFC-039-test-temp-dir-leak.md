@@ -125,7 +125,7 @@ Cost: one `mkdtemp` per test file that starts an editor (about 180 per full run;
 **(a) The leak test.** A new file, `test/unit/fixture-temp-hygiene.test.ts`:
 
 1. Create an empty directory `box` with `mkdtemp`. Remove it in the test's own `afterAll`.
-2. Add two small child files under `test/fixtures/`. Their names must end in `.test.ts`, because `bun test` runs no other name. Each child starts an editor through `createStartedEditor` and does not call `dispose()`. Each then writes a marker with `editor.logMessage(...)`, waits a tick, and checks that the marker is in the file named by `TMAX_LOG_PATH`. So the test cannot pass because nothing was written. The second child also constructs `new Editor(...)` after its fixture and writes a second marker. Both children skip themselves unless `TMAX_FIXTURE_CHILD=1` is set. A plain `bun test` then never runs them, and the parent cannot find itself.
+2. Add two small child files under `test/fixtures/`. Their names must end in `.test.ts`, because `bun test` runs no other name. Each child starts an editor through `createStartedEditor` and does not call `dispose()`. Each then writes a marker with `editor.logMessage(...)`, waits a tick, and checks that the marker is in the file named by `TMAX_LOG_PATH`. So the test cannot pass because nothing was written. The second child also starts an editor through `createEditorAfterFixture()` and writes a second marker. That helper is the one construction outside the fixture: it builds an editor that inherits the log path of the last fixture, as `test/unit/fikra-thread-context.test.ts:350` does. Both children skip themselves unless `TMAX_FIXTURE_CHILD=1` is set. A plain `bun test` then never runs them, and the parent cannot find itself.
 3. Run `bun test` in a child process with `TMPDIR=<box>/tmp` and `HOME=<box>/home`. Give each child a bounded timeout and keep its output. Run three children: the pair with `--parallel`, the pair with `--isolate`, and the pair with no flag.
 4. For each child, assert that its tests ran and that it exited with code 0.
 5. Assert what is left in `<box>/tmp`. On Bun 1.4.0 or later, the first two children leave no name that starts with `tmax-test-log-`, and the third leaves at most one such name, a directory. On an older Bun no flag isolates the helper module, so each child leaves at most one such name, a directory (§2.1).
@@ -138,10 +138,12 @@ The test must be seen to fail on the code before the fix, and the failure must b
 1. Create two fixtures in one file. Read `TMAX_LOG_PATH` right after each creation.
 2. Assert that the two paths differ, that both are under `tmpdir()`, and that neither is `~/.config/tmax/messages.log`.
 3. Write a unique marker through each editor with `logMessage`. Wait for the queued write. Assert that each file holds its own marker and not the other one's.
-4. Start a third editor on the second path. Assert that its loaded log holds the second marker and not the first.
+4. Start a third editor through `createEditorAfterFixture()`, on the second path. Assert that its loaded log holds the second marker and not the first.
 5. Put back every environment variable the test changed.
 
 This is a characterization of the isolation. It may pass before §2.1 exists; it is not the leak regression.
+
+`createEditorAfterFixture` is exported by the fixture on purpose. `test/unit/editor-fixture-isolation.test.ts` (AC12.1) fails any file under `test/unit` or `test/integration` that contains a direct `new Editor(`. The first version of the isolation test did, and the guard failed in the full run.
 
 ### 2.3 Remove the backlog once, on each machine that runs the suite
 
@@ -222,11 +224,12 @@ The same folder holds 4,380 other entries whose name starts with `tmax`: 4,378 d
 | `tmax-ledger-scrape-` | 2 files | `scripts/ledger-scrapers.sh:38` | Not litter: the scraper logs |
 | other `tmax*` | 37 | `tmax-re-` (`test/unit/remote-editor.test.ts:31`), `tmax-vault*` (wiki-link tests), not classified | Partly |
 
-Four findings follow from the table:
+Five findings follow from the table:
 
 - **The launcher leaks one empty directory each time it starts a daemon.** `ensureDaemon` creates `tmax-daemon-start.XXXX/log` (`src/cli/launcher.ts:113`). It removes the log file after the daemon starts (`:131`, `:144`) and leaves the directory. There are 172, the oldest from 2026-11-14. The fix is to remove the directory instead of the file. This is product code, so it has its own issue: #353.
 - **A removal hook does not guarantee removal.** Several creators remove their directories during teardown, yet at least 1,714 of their directories are present. Two reasons are visible in the code and the data. First, `SIGKILL` runs no hook: 14 `tmax-capture-*` directories were created between 01:47 and 01:57 on 2026-11-24 and are still there, although `capture-daily.test.ts` removes every directory it creates. Second, the hook may not know the directory: `server-frame-sync.test.ts` creates its directory at `:70`, and `afterEach` learns the path only at `:97`, after the server has started.
 - **One test writes to the default log when it is run alone.** `test/unit/fikra-thread-context.test.ts:350` constructs `new Editor(...)` without the fixture, so it is isolated only when a fixture ran earlier in the same process. Run with a name filter and a private `HOME`, it wrote 36 lines to `$HOME/.config/tmax/messages.log` (2026-11-25). In a developer's session that file is the real log. §2.1 does not change this. It needs a small issue of its own.
+- **The full suite writes to the default log path.** In the full run of 2026-11-25, made with a private `HOME`, 28 editors that the server started appended `Welcome to tmax` and `Server started` to `$HOME/.config/tmax/messages.log`: 166 lines. The suite also created `backlink-cache.json` and `workspaces/` under `$HOME/.config/tmax/`. In a developer's session that is the real config directory. 13 test files construct a `TmaxServer` with two arguments, so the server builds its own editor on the default log path. §2.1 does not touch that path. This needs its own issue.
 - **Not a temp directory, found in the same check.** 44 `bun` processes leaked from `test/unit/adw-process-cleanup.test.ts` on 2026-11-22 are still running. They ignore `SIGTERM` and use about 625 MB. This also deserves its own issue.
 
 ## 4. Alternatives considered
@@ -247,7 +250,7 @@ Four findings follow from the table:
 ## 5. Acceptance criteria
 
 - [ ] **AC1.** The leak test (§2.2a) fails on the code before the fix and passes after it. Both outputs are in #352.
-- [ ] **AC2.** The isolation test (§2.2b) passes, including the writes and the tail-load. In the full run of AC3, which uses a private `HOME`, no `.config/tmax/messages.log` appears under that `HOME`.
+- [ ] **AC2.** The isolation test (§2.2b) passes, including the writes and the tail-load. The full suite itself still writes to the default log path (§3). That is a separate defect.
 - [ ] **AC3.** One full `bun run test:unit` run with `TMPDIR` set to a new empty directory leaves no `tmax-test-log-*` entry in it. The count and the suite result are in #352. A run that was killed before its summary line does not count.
 - [x] **AC4.** The backlog is removed on the development machine (2026-11-25): 532,518 before, 0 after. `$TMPDIR` holds 35,616 entries.
 - [x] **AC5.** The launcher leak (§3) has an issue of its own. The issue created during review is [#353](https://github.com/mekkamagnus/tmax/issues/353).
@@ -303,5 +306,8 @@ The second codex run implemented §2.1 and §2.2 in four files. Checked outside 
 - **Regression.** Six files, 55 tests, 0 failures, in all three modes on Bun 1.4.4. The one failure inside the sandbox (`EPERM` on `listen`) was the sandbox.
 - **Gap 1: a write after the sweep.** With `--parallel` and with `--isolate` one directory stayed behind. It came from `fikra-thread-context.test.ts` (the third rule in §2.1). A one-tick yield removed it.
 - **Gap 2: Bun 1.3.9.** The leak test failed under 1.3.9, because that version isolates nothing (table in §2.1). §2.2(a) now states the expectation per version.
+- **First full run** (4,606 tests, 818 s, Bun 1.4.4, private `TMPDIR`, `HOME` and `TMAX_SOCKET`). It left 0 `tmax-test-log-*` entries in the private `TMPDIR`. That folder held 53 other entries, all from the creators in §3.
+- **Gap 3: the AC12.1 guard.** The run's failures were the 21 known on `main` (#345) plus one. `AC12.1` failed because the new isolation test constructed an editor directly. The constructor now lives in the fixture, as `createEditorAfterFixture` (§2.2).
+- **The default log, in the same run.** A default log appeared under the private `HOME` (§3). 28 server-started editors wrote to it. §2.1 does not touch that path.
 
-Both gaps went back to codex as a third run.
+Gaps 1 and 2 went back to codex as a third run, and gap 3 as a fourth.
