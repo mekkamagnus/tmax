@@ -689,4 +689,9 @@ describe("#285: capture popup (SPC r d)", () => {
       rmSync(vault, { recursive: true, force: true });
     }
   });
+
+  test("SPC r t is bound to markdown-daily-note (global jump to today's note)", async () => {
+    const editor = await createStartedEditor("x");
+    expect(tl(editor, '(keymap-ref (current-keymap) "SPC r t")')).toBe("(markdown-daily-note)");
+  });
 });

@@ -420,6 +420,7 @@ no-write abort."
   (editor-set-status "Capture aborted"))
 
 (key-bind "SPC r d" "(capture-daily)" "normal")
+(key-bind "SPC r t" "(markdown-daily-note)" "normal")
 
 (provide "editor/commands/capture")
 )
