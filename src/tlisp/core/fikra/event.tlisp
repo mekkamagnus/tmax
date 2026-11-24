@@ -161,8 +161,14 @@
     seg))
 
 (defun fikra-event-get-str (event key)
+  ;; r162b: a STRING, always. This used to hand back whatever the field
+  ;; held, so one non-string value in a log (a damaged line, a newer
+  ;; format) reached `length`/`string=` inside the identity passes and
+  ;; threw — and the error traps then degraded EVERY row of the thread.
   (let ((v (fikra-event-get event key)))
-    (if v v "")))
+    (cond ((stringp v) v)
+          ((numberp v) (number-to-string v))
+          (t ""))))
 
 ;; ── semantic faces (ANSI SGR; \e is the tokenizer's ESC escape) ──────
 ;; The *Fikra* buffer carries ANSI; buffer-lines' ANSI-aware padding keeps
@@ -802,13 +808,22 @@ what the render emits."
         (hashmap-set fikra-thought-line-ids (number-to-string line) key))
       (fikra-thought-assign-lines (+ line 1) (- n 1) key))))
 
+;; r162b: a replay trap's debug line — BEST EFFORT. The write used to be
+;; bare inside the error handler: when it failed too (no .tmax/fikra
+;; under the process cwd, or something unwritable at the path), the
+;; handler threw and the replay errored instead of degrading.
+(defun fikra-event-debug-line (name text)
+  (condition-case nil
+    (append-file name (concat text (hex-decode "0a")))
+    (error () nil)))
+
 (defun fikra-event-rebuild-fikra-buffer ()
   (require-module fikra/thread)
   (let ((was-ro (buffer-read-only-p))
         (text (condition-case (m) (fikra-event-replay)
                 (error (m)
-                  (progn (append-file ".tmax/fikra/repldbg.log"
-                           (concat "REPLAY-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
+                  (progn (fikra-event-debug-line ".tmax/fikra/repldbg.log"
+                           (concat "REPLAY-ERR: " (if (stringp m) m "nonstring")))
                     "")))))
     (buffer-set-read-only nil)
     ;; Clear the WHOLE buffer (two in-bounds steps — the proven
@@ -1209,13 +1224,15 @@ id-less completed thoughts too).")
         (fikra-dedupe-scan (cdr events) (cons e acc) k
           (if (string= k "turn-end") st last-status))))))
 
-;; r157: ACTION IDENTITY pass — the 8.1 re-grade's P1. A
-;; checkpoint-ready whose event carries an "act" id belongs to the tool
-;; row that minted that id (the row's own "act" field); its ref attaches
-;; to the row and its SIBLINGS (the pre-capture's marker) drop —
-;; regardless of position, so two edits in one turn can no longer
-;; mislabel each other's refs. Events without an "act" (the baseline,
-;; the turn's completion, legacy logs) keep the proximity merge below.
+;; r157: ACTION IDENTITY pass — the 8.1 re-grade's P1. A checkpoint-ready
+;; that carries an "act" id belongs to the tool row that minted it (the
+;; row's own "act" field); its POST-stage ref attaches to that row
+;; wherever the two sit, so two edits in one turn can no longer mislabel
+;; each other's refs. r161: a ready that carries a STAGE is this pass's
+;; whether or not it has an act — a pre-stage or unknown-stage ref is
+;; never shown, on a row or alone. Only UNSTAGED readies without an act
+;; (the baseline, the turn's completion, an older log's action refs) go
+;; on to the proximity merge below.
 (defun fikra-event-inline-act-merge (events)
   ;; act -> the ref its row shows: the POST-stage one when there is one.
   (fikra-event-inline-act-refs events (hashmap) (hashmap) (list)))
@@ -1281,7 +1298,8 @@ id-less completed thoughts too).")
                   ;; readies — a turn's baseline and completion, an older
                   ;; log's action refs — keep their standalone rows.
                   (> (length stage) 0))
-            ;; its ref rides the row; the marker event itself drops
+            ;; identity-managed: its ref rides its row through its act,
+            ;; or nothing is shown; the marker event itself drops
             (fikra-event-inline-act-apply (cdr events) refs errs out)
             (fikra-event-inline-act-apply (cdr events) refs errs (cons e out))))
         ((string= k "tool-call")
@@ -1303,9 +1321,12 @@ id-less completed thoughts too).")
         (t (fikra-event-inline-act-apply (cdr events) refs errs (cons e out)))))))
 
 ;; Merge checkpoint-ready markers INLINE (mockup 8.1's "[ckpt ... ✓]"
-;; on the buffer-edit row). Pure list transform: a checkpoint-ready that
-;; directly follows a tool-call attaches its ref to that call and is
-;; dropped; anything else keeps the standalone marker row.
+;; on the tool row) — the LEGACY way, by proximity, for the unstaged
+;; readies the identity pass does not place. A ready attaches to the
+;; nearest eligible call of the SAME turn (an edit-like call, or a bash
+;; call when the ref is an action's own) that carries neither its own
+;; action marker nor a failure qualifier; anything else keeps the
+;; standalone marker row.
 ;; Bounded association (r63): a checkpoint attaches ONLY to an EDIT-like
 ;; call in its OWN turn (the turn-start boundary resets the search; reads
 ;; and shell calls never carry the marker — the mockup's row is ⚙
@@ -1532,15 +1553,16 @@ id-less completed thoughts too).")
         ;; r62 follow-up: the mockup puts the ckpt marker INLINE on the
         ;; edit row. Merge each checkpoint-ready into the tool-call it
         ;; follows (when one does); otherwise the standalone row stands.
-        ;; r157: the identity pass FIRST (act-id'd markers attach to
-        ;; their own row; the pre's drop), then proximity for what has
-        ;; no act id. (The error traps DEGRADE to proximity association
-        ;; if the identity pass ever throws - they stay.)
+        ;; The identity pass places the staged and the act-id'd readies;
+        ;; the proximity merge handles the unstaged act-less ones. (The
+        ;; error traps DEGRADE to proximity association if the identity
+        ;; pass ever throws — they stay. r162b: their own debug write can
+        ;; no longer throw, so a degrade is never an error.)
         (let* ((act-pair (condition-case (m)
                              (fikra-event-inline-act-refs deduped (hashmap) (hashmap) (list))
                            (error (m)
-                             (progn (append-file ".tmax/fikra/actdbg.log"
-                                      (concat "REFS-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
+                             (progn (fikra-event-debug-line ".tmax/fikra/actdbg.log"
+                                      (concat "REFS-ERR: " (if (stringp m) m "nonstring")))
                                (list (hashmap) (list))))))
                (errs (condition-case (m)
                              (fikra-event-inline-act-errors deduped (hashmap))
@@ -1549,8 +1571,8 @@ id-less completed thoughts too).")
                          (condition-case (m)
                              (fikra-event-inline-act-apply deduped (car act-pair) errs (list))
                            (error (m)
-                             (progn (append-file ".tmax/fikra/actdbg.log"
-                                      (concat "APPLY-ERR: " (if (stringp m) m "nonstring") (hex-decode "0a")))
+                             (progn (fikra-event-debug-line ".tmax/fikra/actdbg.log"
+                                      (concat "APPLY-ERR: " (if (stringp m) m "nonstring")))
                                deduped)))
                          (list) nil)))
           (setq fikra-thought-run-counter 0)

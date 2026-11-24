@@ -4333,7 +4333,12 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
   // shell-command does not resolve through a PATH changed by the test —
   // the first cut of these witnesses never failed a capture at all.)
   // The turn's baseline ref is never touched.
-  const withRefusedRef = async (suffix: string, body: () => Promise<void>) => {
+  // r162: the same hook, generalized — ACTION is the shell that runs
+  // when the named ref is updated. It can refuse (exit 1: that capture
+  // fails) or WRITE: a file it creates during the PRE ref's transaction
+  // is on disk for the post capture but not in the pre tree — exactly
+  // "something else changed during the action's window".
+  const withRefHook = async (onRef: string, action: string, body: () => Promise<void>) => {
     // This witness's OWN repo, captured now: every test runs in its own
     // temp repo through process.chdir, so a cleanup that runs LATE (the
     // witness timed out under load) must not land in whichever repo is
@@ -4344,7 +4349,7 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     writeFileSync(join(hooks, "reference-transaction"), [
       "#!/bin/sh",
       "while read old new ref; do",
-      `  case "$ref" in "refs/fikra/main/${suffix}") echo "r161: refused \${ref}" >&2; exit 1 ;; esac`,
+      '  case "$ref" in "' + onRef + '") ' + action + " ;; esac",
       "done",
       "exit 0",
       "",
@@ -4367,6 +4372,8 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
       }
     }
   };
+  const withRefusedRef = (suffix: string, body: () => Promise<void>) =>
+    withRefHook("refs/fikra/main/" + suffix, 'echo "r161: refused ${ref}" >&2; exit 1', body);
   const fireEdit = (ed2: Editor, id: number, path: string, content: string) => {
     const callSpec = { function: { name: "buffer_edit", arguments: { path, content } } };
     e(ed2, `(fikra/backend-ollama/fikra-backend-ollama-seed ${id} "live")`);
@@ -4580,6 +4587,150 @@ describe("ollama ordinary-bash checkpoints (r155)", () => {
     ready("6-7", "6-a22"); failure("6-7"); coverage("6-7", "coverage not established");
     expect(rowOf(ed, "6-a20-ROW")).toContain("[ckpt main/6-a20 — coverage not established]");
     expect(rowOf(ed, "6-a22-ROW")).toContain("[ckpt main/6-a22 — coverage not established]");
+  }, 90000);
+
+  // ── r162: A REVERT RESTORES ONLY WHAT THE ACTION CAN ACCOUNT FOR ───
+  // The action revert restored EVERY path that differed between the two
+  // checkpoint trees. Whatever else changed in the action's WINDOW — a
+  // file saved in another buffer while a command ran, another local
+  // thread's write — was swept in and silently undone (recoverable only
+  // from the stash patch). An edit knows its file: it restores that file
+  // and nothing else. (A shell command cannot declare its files; its
+  // revert still covers the whole tree difference.)
+  test("an edit's revert restores the edited file — not a file that appeared during its window (r162)", async () => {
+    await withRefHook("refs/fikra/main/1-a1", "echo FOREIGN-162 > foreign162.txt", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "one edit")');
+      fireEdit(ed, 790, "e162.txt", "EDITED-162\n");
+      await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+      await settleRefireFrom(ed, "790", "done");
+      expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+      // Both are in the post tree and not in the pre tree: the edit, and
+      // the file that appeared while the pre ref was being written.
+      expect(readFileSync(join(process.cwd(), "foreign162.txt"), "utf8")).toContain("FOREIGN-162");
+      const diff = String(e(ed, '(shell-command "git diff --name-only refs/fikra/main/1-a1 refs/fikra/main/1-a2")').value).trim().split("\n").sort();
+      expect(diff).toEqual(["e162.txt", "foreign162.txt"]);
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      expect(existsSync(join(process.cwd(), "e162.txt"))).toBe(false);
+      // The file that was not the action's to undo is still there.
+      expect(readFileSync(join(process.cwd(), "foreign162.txt"), "utf8")).toContain("FOREIGN-162");
+      // The durable record carried the edit's own path (a third token).
+      const pairs = readFileSync(join(process.cwd(), ".tmax/fikra/threads/main/actions.jsonl"), "utf8");
+      expect(pairs).toMatch(/^refs\/fikra\/main\/1-a2 refs\/fikra\/main\/1-a1 [0-9a-f]+/m);
+    });
+  }, 90000);
+
+  test("an edit's revert stays precise after a restart — the pairs reload from disk (r162)", async () => {
+    await withRefHook("refs/fikra/main/1-a1", "echo FOREIGN-162 > foreign162b.txt", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "one edit, then a restart")');
+      fireEdit(ed, 791, "g162.txt", "EDITED-162B\n");
+      await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+      await settleRefireFrom(ed, "791", "done");
+      expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+      // The in-memory pairs are gone; the file is all there is.
+      e(ed, "(fikra/backend-ollama/fikra-ollama-action-state-reset)");
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      expect(existsSync(join(process.cwd(), "g162.txt"))).toBe(false);
+      expect(readFileSync(join(process.cwd(), "foreign162b.txt"), "utf8")).toContain("FOREIGN-162");
+    });
+  }, 90000);
+
+  test("an edit's own path survives the record whatever it looks like — a space, non-ASCII, a subdirectory (r162)", async () => {
+    await withRefHook("refs/fikra/main/1-a1", "echo FOREIGN-162 > foreign162d.txt", async () => {
+      const ed = await armed();
+      const awkward = "sub162/dir with space/é162.txt";
+      mkdirSync(join(process.cwd(), "sub162/dir with space"), { recursive: true });
+      const edit = (path: string, content: string) => ({ function: { name: "buffer_edit", arguments: { path, content } } });
+      e(ed, '(fikra/chat/fikra-turn-send "two edits, awkward paths")');
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-seed 793 "live")`);
+      e(ed, `(fikra/backend-ollama/fikra-backend-ollama-http-filter 793 "${hex(JSON.stringify({ message: { role: "assistant", content: "", tool_calls: [edit(awkward, "AWKWARD\n"), edit("plain162.txt", "PLAIN\n")] } }))}")`);
+      e(ed, `(fikra-http-complete 793 200 "${hex("{}")}")`);
+      await until(ed, "(buffer-text)", "[ckpt main/1-a4", 180);
+      await settleRefireFrom(ed, "793", "done");
+      expect(await untilStatus(ed, "idle", 120)).toBe("idle");
+      expect(readFileSync(join(process.cwd(), awkward), "utf8")).toContain("AWKWARD");
+      // The pairs reload from disk: the awkward path rides the token.
+      const file = join(process.cwd(), ".tmax/fikra/threads/main/actions.jsonl");
+      expect(readFileSync(file, "utf8")).toContain(Buffer.from(awkward).toString("hex"));
+      e(ed, "(fikra/backend-ollama/fikra-ollama-action-state-reset)");
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(existsSync(join(process.cwd(), "plain162.txt"))).toBe(false);
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      expect(existsSync(join(process.cwd(), awkward))).toBe(false);
+      // The file that appeared during the first edit's window survives both.
+      expect(readFileSync(join(process.cwd(), "foreign162d.txt"), "utf8")).toContain("FOREIGN-162");
+    });
+  }, 90000);
+
+  test("when none of an action's own paths is in the diff, the whole difference is restored — never nothing (r162)", async () => {
+    await withRefHook("refs/fikra/main/1-a1", "echo FOREIGN-162 > foreign162c.txt", async () => {
+      const ed = await armed();
+      e(ed, '(fikra/chat/fikra-turn-send "one edit, misrecorded")');
+      fireEdit(ed, 792, "h162.txt", "EDITED-162C\n");
+      await until(ed, "(buffer-text)", "[ckpt main/1-a2", 120);
+      await settleRefireFrom(ed, "792", "done");
+      expect(await untilStatus(ed, "idle", 80)).toBe("idle");
+      // The record's own-path token names a path that is not in the
+      // diff (a file spelled differently from git's form). Restoring
+      // "nothing" would leave the edit standing.
+      const file = join(process.cwd(), ".tmax/fikra/threads/main/actions.jsonl");
+      const [post, pre] = readFileSync(file, "utf8").trim().split(" ");
+      writeFileSync(file, `${post} ${pre} ${Buffer.from("not-the-file.txt").toString("hex")}\n`);
+      e(ed, "(fikra/backend-ollama/fikra-ollama-action-state-reset)");
+      e(ed, "(fikra/backend-ollama/fikra-ollama-revert-latest-action)");
+      expect(String(e(ed, "(editor-status)").value)).toContain("action reverted");
+      expect(existsSync(join(process.cwd(), "h162.txt"))).toBe(false);
+      expect(existsSync(join(process.cwd(), "foreign162c.txt"))).toBe(false);
+    });
+  }, 90000);
+
+  // ── r162b (an independent review's P3s): ONE BAD LINE MUST NOT TAKE THE
+  // WHOLE TRANSCRIPT DOWN. A non-string field (a damaged or a newer log)
+  // threw inside the identity passes, and the error traps then degraded
+  // EVERY row of the thread, for good: a failed capture's pre stood as an
+  // unqualified ✓, a coverage-qualified row lost its qualifier. The
+  // traps' own debug write could throw as well, turning the degrade into
+  // an error.
+  test("one malformed line degrades nothing — the other rows keep their markers and qualifiers (r162b)", async () => {
+    const ed = await armed();
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "FAILED-ROW") (list "act" "4-1")');
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4-a1") (list "sha" "x") (list "act" "4-1") (list "stage" "pre")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "capture failed") (list "act" "4-1") (list "stage" "post")');
+    // The malformed one: a number where a string belongs.
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4-a2") (list "sha" "x") (list "act" 3)');
+    emitEv(ed, '(list "kind" "tool-call") (list "tool" "bash") (list "summary" "QUALIFIED-ROW") (list "act" "4-2")');
+    emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4-a4") (list "sha" "x") (list "act" "4-2") (list "stage" "post")');
+    emitEv(ed, '(list "kind" "checkpoint-error") (list "reason" "1 path(s) the checkpoint cannot hold changed") (list "qual" "not held") (list "act" "4-2")');
+    const text = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+    const line = (needle: string) => text.split("\n").find((l) => l.includes(needle)) ?? "";
+    expect(line("FAILED-ROW")).toContain("[no checkpoint — not revertable]");
+    expect(line("FAILED-ROW")).not.toContain("4-a1");
+    expect(line("QUALIFIED-ROW")).toContain("[ckpt main/4-a4 — not held]");
+    // The malformed ready belongs to no row anyone can name, and does
+    // not stand as a success marker.
+    expect(text).not.toContain("4-a2");
+  }, 90000);
+
+  test("an unwritable debug log does not turn a degrade into an error (r162b)", async () => {
+    const ed = await armed();
+    // The traps' own debug write must fail: a DIRECTORY at its path.
+    mkdirSync(join(process.cwd(), ".tmax/fikra"), { recursive: true });
+    mkdirSync(join(process.cwd(), ".tmax/fikra/actdbg.log"));
+    try {
+      emitEv(ed, '(list "kind" "tool-call") (list "tool" "buffer-edit") (list "summary" "FAILED-ROW") (list "act" "4-1")');
+      emitEv(ed, '(list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4-a1") (list "sha" "x") (list "act" 3)');
+      // Before: the malformed line threw in a pass, the handler's own
+      // append-file threw too, and the REPLAY errored (a chat buffer
+      // that could not open at all).
+      const text = strip(String(e(ed, "(fikra/event/fikra-event-replay)").value));
+      expect(text).toContain("FAILED-ROW");
+    } finally {
+      rmdirSync(join(process.cwd(), ".tmax/fikra/actdbg.log"));
+    }
   }, 90000);
 
   // ── FOR_9 item 2: every DISPLAYED action ref is checked against its

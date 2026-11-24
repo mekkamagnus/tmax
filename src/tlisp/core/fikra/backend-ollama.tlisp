@@ -152,6 +152,14 @@ message — the reject/approve-with-empty-rest path records from here).")
 both captures run back-to-back). The action-level revert restores an
 action's touched paths from ITS pre-ref — the turn baseline is not the
 pre-state when earlier actions changed the tree.")
+(defvar fikra-ollama-action-own (hashmap)
+  "r162: post-ref -> the paths the action can account for (an EDIT knows
+its file). The action-level revert restores ONLY those when they are
+known: whatever else differs between the two trees changed in the
+action's WINDOW — a file saved in another buffer while a command ran,
+another local thread's write — and is not the action's to undo. A shell
+command cannot declare its files: its revert still covers the whole
+tree difference.")
 (defvar fikra-ollama-last-action-stash nil
   "r142b: the last action revert's stash patch (the action's own
 pre-to-post change — git-apply restores it).")
@@ -1851,8 +1859,11 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                   ;; r161: the pair only when BOTH captures succeeded —
                   ;; a failed post left the pre's name in the stash, and
                   ;; the pair recorded the pre with itself.
+                  ;; r162: an edit can account for exactly its own file —
+                  ;; in git's form (no leading "./").
                   (if post-name
-                    (fikra-ollama-record-action-pair pre-name)
+                    (fikra-ollama-record-action-pair pre-name
+                      (list (fikra-ollama-git-rel-path path)))
                     nil))
                 (fikra/event/fikra-event-emit
                   (list (list "kind" "tool-result") (list "ok" t)
@@ -1907,7 +1918,24 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
 ;; r150: the restart-simulation accessor (pairs + stack wiped).
 (defun fikra-ollama-action-state-reset ()
   (setq fikra-ollama-action-pairs (hashmap))
+  (setq fikra-ollama-action-own (hashmap))
   (setq fikra-ollama-action-posts (list)))
+
+;; r162: an edit's path as git names it — every leading "./" dropped
+;; (the model may spell one; the tree diff never has it).
+(defun fikra-ollama-git-rel-path (path)
+  (if (string-prefix-p "./" (if path path ""))
+    (fikra-ollama-git-rel-path (substring path 2 (length path)))
+    path))
+
+;; r162: the elements of WANTED that are in ALL, in WANTED's order.
+(defun fikra-ollama-keep-in (wanted all)
+  (if (null wanted)
+    (list)
+    (let ((rest (fikra-ollama-keep-in (cdr wanted) all)))
+      (if (member (car wanted) all)
+        (cons (car wanted) rest)
+        rest))))
 
 ;; r152: drop other threads' entries (newest-first preserved).
 (defun fikra-ollama-posts-for-thread (posts)
@@ -1955,18 +1983,22 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
     (progn
       (condition-case nil
         (let* ((line (car lines))
-               (sp (string-match " " line)))
-          (if (and sp (numberp sp) (> sp 0))
-            (let* ((post (substring line 0 sp))
-                   ;; r155e (codex gate): a never-landed build wrote an
-                   ;; optional " ix" token after the pre-ref — read as part
-                   ;; of the ref it made every such pair unloadable.
-                   (pre0 (substring line (+ sp 1) (length line)))
-                   (pre (if (and (> (length pre0) 3)
-                                 (string= (substring pre0 (- (length pre0) 3) (length pre0)) " ix"))
-                          (substring pre0 0 (- (length pre0) 3))
-                          pre0))
-                   (have (hashmap-get fikra-ollama-action-pairs post)))
+               ;; r162: "<post> <pre>", or "<post> <pre> <own-hex>" (an
+               ;; edit's own paths, NUL-joined and hex-encoded). r155e
+               ;; (codex gate): a never-landed build wrote " ix" as a
+               ;; third token — read as part of the ref it made every
+               ;; such pair unloadable; it is no own-paths token.
+               (toks (string-split line " "))
+               (post (if (> (length toks) 0) (nth 0 toks) ""))
+               (pre (if (> (length toks) 1) (nth 1 toks) ""))
+               (own-hex (if (> (length toks) 2) (nth 2 toks) ""))
+               (own (if (and (> (length own-hex) 0) (not (string= own-hex "ix")))
+                      (condition-case nil
+                        (fikra-ollama-split-paths (hex-decode own-hex))
+                        (error () nil))
+                      nil)))
+          (if (and (> (length post) 0) (> (length pre) 0))
+            (let* ((have (hashmap-get fikra-ollama-action-pairs post)))
               ;; r150: a REVERTED tombstone (newest line for the post)
               ;; stays reverted — the loader never resurrects it.
               (cond
@@ -1977,6 +2009,7 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                 ((not have)
                   (progn
                     (keymap-mutable-set! fikra-ollama-action-pairs post pre)
+                    (if own (keymap-mutable-set! fikra-ollama-action-own post own) nil)
                     ;; r150b: newest-first iteration + APPEND keeps the
                     ;; NEWEST at the head (prepend reversed the order).
                     (setq fikra-ollama-action-posts
@@ -1987,19 +2020,26 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
 ;; r142: pair an action's post-ref with its pre-ref (called right
 ;; after the post capture; both names read from the checkpoint module's
 ;; last-ref-name stash).
-(defun fikra-ollama-record-action-pair (pre)
+(defun fikra-ollama-record-action-pair (pre &optional (own nil))
   (let* ((post (fikra/checkpoint/fikra-checkpoint-last-ref-name-get))
          (pre-ref (if pre pre nil)))
     (if (and post pre-ref)
       (progn
         (keymap-mutable-set! fikra-ollama-action-pairs post pre-ref)
+        ;; r162: the paths the action can account for (nil for a shell
+        ;; command). The durable line carries them as a third, hex token
+        ;; — NUL-joined, because a path may contain a space.
+        (if own (keymap-mutable-set! fikra-ollama-action-own post own) nil)
         (setq fikra-ollama-action-posts (append (list post) fikra-ollama-action-posts))
         ;; r150/r152: the durable line — a failure is VISIBLE (a
         ;; restart would lose this revertable action).
-        (let ((out (condition-case nil
+        (let* ((own-hex (if own (hex-encode (fikra-ollama-join-take own 9999 (hex-decode "00"))) ""))
+               (out (condition-case nil
                       (progn
                         (append-file (fikra-ollama-actions-file)
-                          (concat post " " pre-ref (hex-decode "0a")))
+                          (concat post " " pre-ref
+                                  (if (> (length own-hex) 0) (concat " " own-hex) "")
+                                  (hex-decode "0a")))
                         "ok")
                       (error () "failed"))))
           (if (string= out "failed")
@@ -2184,10 +2224,25 @@ coverage report diffs pre..post with it (the sentinel consumes it).")
                ;; r155c (codex gate): the paths are read NUL-separated —
                ;; git C-quotes names with spaces or quotes in its line
                ;; output, and the quoted text was passed as a filename.
-               (paths (fikra-ollama-split-paths
+               (diff-paths (fikra-ollama-split-paths
                         (shell-command
                           (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                                  " diff --name-only -z " pre " " post)))))
+                                  " diff --name-only -z " pre " " post))))
+               ;; r162: an action that can account for its paths (an edit)
+               ;; restores ONLY those. Whatever else differs between the
+               ;; two trees changed in the action's WINDOW — a file saved
+               ;; in another buffer while a command ran, another local
+               ;; thread's write — and is not the action's to undo (it
+               ;; was, silently: recoverable only from the stash patch).
+               ;; If NONE of the action's paths is in the diff (a path the
+               ;; model spelled differently from git's), the full
+               ;; difference is restored as before — never "nothing to
+               ;; do", which would leave the edit standing.
+               (own (hashmap-get fikra-ollama-action-own post))
+               (own-in-diff (if (and own (> (length own) 0))
+                              (fikra-ollama-keep-in own diff-paths)
+                              (list)))
+               (paths (if (> (length own-in-diff) 0) own-in-diff diff-paths)))
           (cond
             ((= (length paths) 0)
               ;; r146 (codex): a no-change action SKIPS (pops) — it
