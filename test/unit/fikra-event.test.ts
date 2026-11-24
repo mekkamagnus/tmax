@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { afterAll, describe, expect, test, beforeEach } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,10 +11,18 @@ type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 
 let dir = "";
 let log = "";
+// One directory per test, and each one removed afterwards. None was,
+// ever: 7,846 had piled up in the temp directory when an independent
+// review counted them (it holds >100,000 entries in all).
+const dirs: string[] = [];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "fikra-faep-"));
+  dirs.push(dir);
   log = join(dir, "events.jsonl");
+});
+afterAll(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
 const setup = (editor: Editor) => {

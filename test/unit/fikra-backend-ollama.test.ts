@@ -147,8 +147,12 @@ afterEach(() => {
 let stubUrl = "";
 let bodiesFile = "";
 let stubProc: ReturnType<typeof Bun.spawn> | null = null;
+// The stub's own directory. It was never removed: 1,159 had piled up in
+// the temp directory when an independent review counted them.
+let stubDir = "";
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "fikra-stub-"));
+  stubDir = dir;
   const script = join(dir, "stub.ts");
   writeFileSync(script, `
 const fs = require("node:fs");
@@ -259,6 +263,7 @@ afterAll(() => {
   process.chdir(originalCwd);
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   stubProc?.kill();
+  if (stubDir) rmSync(stubDir, { recursive: true, force: true });
 });
 
 describe("#8.1 raw-API ollama chat backend (r108)", () => {
