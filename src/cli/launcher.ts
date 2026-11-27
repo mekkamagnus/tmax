@@ -110,7 +110,10 @@ async function ensureDaemon(opts: { initFile: string; cleanStart: boolean }): Pr
 
   // Trailing-X template: BSD/macOS mktemp only substitutes a TRAILING run of
   // X's (BUG-35). mkdtemp needs the directory to exist; /tmp always does.
-  const logFile = join(mkdtempSync(join(tmpdir(), 'tmax-daemon-start.')), 'log');
+  // #353: the DIRECTORY is owned by this start and must be removed on every
+  // exit path (removing only the log file left an empty dir per start).
+  const logDir = mkdtempSync(join(tmpdir(), 'tmax-daemon-start.'));
+  const logFile = join(logDir, 'log');
 
   const target = daemonSpawnTarget();
   const daemonArgs = [...target.args];
@@ -128,11 +131,13 @@ async function ensureDaemon(opts: { initFile: string; cleanStart: boolean }): Pr
   child.unref();
 
   if (await waitForDaemon()) {
-    try { rmSync(logFile, { force: true }); } catch { /* fine */ }
+    try { rmSync(logDir, { recursive: true, force: true }); } catch { /* fine */ }
     return;
   }
 
   console.error(`Error: Failed to start daemon (pid ${child.pid})`);
+  // #353: read the log content BEFORE removing the directory — the tail is
+  // the failure report.
   try {
     const content = readFileSync(logFile, 'utf8');
     if (content.length > 0) {
@@ -141,7 +146,7 @@ async function ensureDaemon(opts: { initFile: string; cleanStart: boolean }): Pr
       console.error('--- end ---');
     }
   } catch { /* no log */ }
-  try { rmSync(logFile, { force: true }); } catch { /* fine */ }
+  try { rmSync(logDir, { recursive: true, force: true }); } catch { /* fine */ }
   process.exit(1);
 }
 
@@ -399,4 +404,4 @@ export async function runLauncher(argv: string[]): Promise<LauncherRoute> {
 }
 
 /** Exposed for the launcher unit tests. */
-export const __internals = { parseArgs, SOCKET, isRunning, waitForDaemon };
+export const __internals = { parseArgs, SOCKET, isRunning, waitForDaemon, ensureDaemon };
