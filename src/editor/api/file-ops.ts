@@ -419,18 +419,23 @@ export function createFileOps(
     }
 
     const path = expandHomePath(pathArg.value as string);
+    // #359: honest boolean return. This swallowed failures on BOTH paths
+    // (nil on success AND on error), so an interactive mkdir could not tell
+    // EACCES/ENAMETOOLONG from success. Existing callers (markdown/knowledge,
+    // fikra/thread) discard the result. The file-exists-p boolean shape is
+    // the in-file precedent (lines above).
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.mkdir(path, { recursive: true })
-        .then(() => createNil())
-        .catch(() => createNil())));
+        .then(() => createBoolean(true))
+        .catch(() => createBoolean(false))));
     }
 
     try {
       fs.mkdirSync(path, { recursive: true });
+      return Either.right(createBoolean(true));
     } catch {
-      // swallow - return nil regardless
+      return Either.right(createBoolean(false));
     }
-    return Either.right(createNil());
   });
 
   // --- Directory listing ---

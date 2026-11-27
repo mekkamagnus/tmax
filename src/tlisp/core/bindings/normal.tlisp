@@ -76,6 +76,7 @@
   (require-module editor/commands/execute-extended-command)
   (require-module editor/commands/save)
   (require-module editor/commands/find-file)
+  (require-module editor/commands/file-ops)
   (require-module editor/commands/isearch)
   (require-module editor/commands/replace)
   (require-module editor/commands/vim-replace)

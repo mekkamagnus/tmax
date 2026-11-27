@@ -1,0 +1,66 @@
+(defmodule editor/commands/file-ops
+  (export mkdir mkdir-accept mkdir-do)
+
+;; file-ops.tlisp — interactive file management (RFC-041). mkdir (#359) is
+;; the first command of the family and establishes the shared shape: a defun
+;; with (interactive), an optional path argument (programmatic callers skip
+;; the prompt), completing-read over the file table with the current file's
+;; directory prefilled, and a -accept handler that does the work. The
+;; delete/rename/copy/delete-directory commands (#361) grow this module.
+
+(defun file-ops-dirname (path)
+  "Directory portion of PATH (\".\" when PATH has no slash)."
+  (let ((i (- (length path) 1)))
+    (while (and (> i 0) (not (string= (substring path i (+ i 1)) "/")))
+      (set! i (- i 1)))
+    (if (> i 0)
+      (substring path 0 i)
+      ".")))
+
+(defun file-ops-default-dir ()
+  "Prefill for file-ops prompts: the current file's directory with a
+trailing slash when a file is visited, else \"~/\"."
+  (let ((fn (buffer-filename)))
+    (if fn
+      (concat (file-ops-dirname fn) "/")
+      "~/")))
+
+(defun mkdir (&optional path)
+  "Create a directory, creating parents as needed (#359).
+Prompts via minibuffer when called without a path; the prompt is
+prefilled with the current file's directory when a file is visited.
+~ expands to $HOME inside the primitive. An existing directory is
+reported, not treated as an error."
+  (interactive)
+  (if path
+    (mkdir-do path)
+    (completing-read
+      "Make directory: "
+      "file-completion-table"
+      nil
+      nil
+      (file-ops-default-dir)
+      "mkdir-history"
+      "mkdir-accept")))
+
+(defun mkdir-accept (path)
+  "Minibuffer accept handler: create PATH."
+  (mkdir-do path))
+
+(defun mkdir-do (path)
+  "Create PATH (recursive) and report on the status line.
+file-mkdir returns t on success and nil on failure (#359 gave the
+primitive honest returns); an existing path short-circuits with its own
+message before the call."
+  (cond
+    ((string= path "")
+      (message "mkdir: empty path"))
+    ((file-exists-p path)
+      (message (concat "mkdir: " path " already exists")))
+    ((file-mkdir path)
+      (message (concat "Created directory " path)))
+    (t
+      (message (concat "mkdir: failed to create " path)))))
+
+(provide "file-ops")
+)  ;; end of defmodule editor/commands/file-ops (BUG-74/#126: keep the close at EOF, not at the export clause)
