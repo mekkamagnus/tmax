@@ -1,12 +1,19 @@
 (defmodule editor/commands/file-ops
-  (export mkdir mkdir-accept mkdir-do)
+  (export mkdir mkdir-accept mkdir-do
+          delete-file delete-file-accept delete-file-do
+          rename-file rename-file-accept rename-file-dest-accept rename-file-do
+          copy-file copy-file-accept copy-file-dest-accept copy-file-do
+          delete-directory delete-directory-accept delete-directory-confirm-accept delete-directory-do
+          file-ops-yes-no-table file-ops-destructive-p)
 
-;; file-ops.tlisp — interactive file management (RFC-041). mkdir (#359) is
-;; the first command of the family and establishes the shared shape: a defun
-;; with (interactive), an optional path argument (programmatic callers skip
-;; the prompt), completing-read over the file table with the current file's
-;; directory prefilled, and a -accept handler that does the work. The
-;; delete/rename/copy/delete-directory commands (#361) grow this module.
+;; file-ops.tlisp — interactive file management (RFC-041). mkdir (#359)
+;; established the shared shape: a defun with (interactive), an optional path
+;; argument (programmatic callers skip the prompt), completing-read over the
+;; file table with the current file's directory prefilled, and -accept
+;; handlers that do the work. #361 adds the family: delete-file (confirmed),
+;; rename-file, copy-file (two prompts each), and delete-directory (guarded,
+;; tree removal behind an explicit confirm — ADR-0168 state machines, because
+;; completing-read is async and only the last live session survives).
 
 (defun file-ops-dirname (path)
   "Directory portion of PATH (\".\" when PATH has no slash)."
@@ -24,6 +31,16 @@ trailing slash when a file is visited, else \"~/\"."
     (if fn
       (concat (file-ops-dirname fn) "/")
       "~/")))
+
+(defun file-ops-yes-no-table (input action)
+  "Completion table offering yes/no for file-ops confirmation prompts."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "yes" "display" "yes" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "no" "display" "no" "annotation" "" "metadata" (hashmap)))))
+
+;; ── mkdir (#359) ──────────────────────────────────────────────────────
 
 (defun mkdir (&optional path)
   "Create a directory, creating parents as needed (#359).
@@ -61,6 +78,253 @@ message before the call."
       (message (concat "Created directory " path)))
     (t
       (message (concat "mkdir: failed to create " path)))))
+
+;; ── delete-file (#361, confirmed) ─────────────────────────────────────
+
+(defvar delete-file-pending-path nil
+  "The path awaiting the delete-file yes/no confirm (ADR-0168: the
+answer reaches the deletion only through this module state).")
+
+(defun delete-file (&optional path)
+  "Delete a FILE after an explicit yes/no confirm (#361).
+Prompts for the file (prefilled with the current file's directory),
+then asks for confirmation before deleting. ~ expands to $HOME."
+  (interactive)
+  (if path
+    (delete-file-confirm path)
+    (completing-read
+      "Delete file: "
+      "file-completion-table"
+      nil
+      nil
+      (file-ops-default-dir)
+      "delete-file-history"
+      "delete-file-accept")))
+
+(defun delete-file-accept (path)
+  "Minibuffer accept handler: open the delete confirm for PATH."
+  (delete-file-confirm path))
+
+(defun delete-file-confirm (path)
+  "Open the yes/no confirm for deleting PATH."
+  (setq delete-file-pending-path path)
+  (completing-read
+    (concat "Delete " path "? ")
+    "file-ops-yes-no-table"
+    nil
+    t
+    ""
+    "file-ops-history"
+    "delete-file-do"))
+
+(defun delete-file-do (answer)
+  "Confirm accept handler: delete the pending path on \"yes\".
+file-remove returns an honest boolean (#361 fixed the swallowed
+failures); directories fail here with a visible message —
+delete-directory is the directory command."
+  (let ((path delete-file-pending-path))
+    (setq delete-file-pending-path nil)
+    (if (string= answer "yes")
+      (cond
+        ((string= path "")
+          (message "delete-file: empty path"))
+        ((not (file-exists-p path))
+          (message (concat "delete-file: no such file " path)))
+        ((file-remove path)
+          (message (concat "Deleted " path)))
+        (t
+          (message (concat "delete-file: failed to delete " path))))
+      (message "Cancelled"))))
+
+;; ── rename-file / copy-file (#361, two prompts each) ──────────────────
+
+(defvar rename-file-pending-source nil
+  "The source awaiting rename-file's destination prompt (ADR-0168).")
+
+(defun rename-file (&optional source)
+  "Rename (move) a file (#361). Prompts for the source, then for the
+destination. ~ expands to $HOME in both."
+  (interactive)
+  (if source
+    (rename-file-dest-prompt source)
+    (completing-read
+      "Rename file: "
+      "file-completion-table"
+      nil
+      nil
+      (file-ops-default-dir)
+      "rename-file-history"
+      "rename-file-accept")))
+
+(defun rename-file-accept (source)
+  "Minibuffer accept handler: prompt for the destination of SOURCE."
+  (rename-file-dest-prompt source))
+
+(defun rename-file-dest-prompt (source)
+  "Open the destination prompt for renaming SOURCE."
+  (setq rename-file-pending-source source)
+  (completing-read
+    (concat "Rename " source " to: ")
+    "file-completion-table"
+    nil
+    nil
+    (file-ops-default-dir)
+    "rename-file-history"
+    "rename-file-dest-accept"))
+
+(defun rename-file-dest-accept (dest)
+  "Destination accept handler: rename the pending source to DEST."
+  (let ((source rename-file-pending-source))
+    (setq rename-file-pending-source nil)
+    (rename-file-do source dest)))
+
+(defun rename-file-do (source dest)
+  "Rename SOURCE to DEST and report. file-rename signals errors
+(EACCES, missing source, existing destination); the condition-case
+turns them into a visible status-line message."
+  (cond
+    ((or (string= source "") (string= dest ""))
+      (message "rename-file: empty path"))
+    ((not (file-exists-p source))
+      (message (concat "rename-file: no such file " source)))
+    (t
+      (condition-case err
+        (progn
+          (file-rename source dest)
+          (message (concat "Renamed " source " to " dest)))
+        (error (e)
+          (message (concat "rename-file: failed to rename " source)))))))
+
+(defvar copy-file-pending-source nil
+  "The source awaiting copy-file's destination prompt (ADR-0168).")
+
+(defun copy-file (&optional source)
+  "Copy a file (#361). Prompts for the source, then for the
+destination. ~ expands to $HOME in both."
+  (interactive)
+  (if source
+    (copy-file-dest-prompt source)
+    (completing-read
+      "Copy file: "
+      "file-completion-table"
+      nil
+      nil
+      (file-ops-default-dir)
+      "copy-file-history"
+      "copy-file-accept")))
+
+(defun copy-file-accept (source)
+  "Minibuffer accept handler: prompt for the destination of SOURCE."
+  (copy-file-dest-prompt source))
+
+(defun copy-file-dest-prompt (source)
+  "Open the destination prompt for copying SOURCE."
+  (setq copy-file-pending-source source)
+  (completing-read
+    (concat "Copy " source " to: ")
+    "file-completion-table"
+    nil
+    nil
+    (file-ops-default-dir)
+    "copy-file-history"
+    "copy-file-dest-accept"))
+
+(defun copy-file-dest-accept (dest)
+  "Destination accept handler: copy the pending source to DEST."
+  (let ((source copy-file-pending-source))
+    (setq copy-file-pending-source nil)
+    (copy-file-do source dest)))
+
+(defun copy-file-do (source dest)
+  "Copy SOURCE to DEST and report. file-copy returns an honest
+boolean (#361 fixed the swallowed sync-path failures)."
+  (cond
+    ((or (string= source "") (string= dest ""))
+      (message "copy-file: empty path"))
+    ((not (file-exists-p source))
+      (message (concat "copy-file: no such file " source)))
+    ((file-copy source dest)
+      (message (concat "Copied " source " to " dest)))
+    (t
+      (message (concat "copy-file: failed to copy " source)))))
+
+;; ── delete-directory (#361 tier 2, guarded) ───────────────────────────
+
+(defvar delete-directory-pending-path nil
+  "The path awaiting the recursive-delete confirm (ADR-0168).")
+
+(defun file-ops-destructive-p (path)
+  "Refuse the three protected trees (#361): /, $HOME, and the process
+working directory. Comparison is on file-realpath, so symlinked and
+tilde forms are caught too."
+  (let ((real (file-realpath path)))
+    (or
+      (string= real "/")
+      (string= real (file-realpath "~"))
+      (string= real (process-cwd)))))
+
+(defun delete-directory (&optional path)
+  "Delete a directory (#361). Empty directories go directly; a
+non-empty tree asks for an explicit yes/no confirm first. Refuses /,
+$HOME, and the process working directory. ~ expands to $HOME."
+  (interactive)
+  (if path
+    (delete-directory-check path)
+    (completing-read
+      "Delete directory: "
+      "file-completion-table"
+      nil
+      nil
+      (file-ops-default-dir)
+      "delete-directory-history"
+      "delete-directory-accept")))
+
+(defun delete-directory-accept (path)
+  "Minibuffer accept handler: run the checks for deleting PATH."
+  (delete-directory-check path))
+
+(defun delete-directory-check (path)
+  "Guard PATH, then delete it (empty) or open the recursive confirm."
+  (let ((real (file-realpath path)))
+    (cond
+      ((string= path "")
+        (message "delete-directory: empty path"))
+      ((file-ops-destructive-p path)
+        (message (concat "delete-directory: refusing to delete protected path " path)))
+      ((not (file-exists-p path))
+        (message (concat "delete-directory: no such directory " path)))
+      ((= (length (read-dir real)) 0)
+        ;; recursive rm also removes an EMPTY directory (plain unlink cannot:
+        ;; EISDIR). The emptiness check only decides confirm-vs-fast-path —
+        ;; delete-file keeps failing visibly on directories by design.
+        (delete-directory-do real t))
+      (t
+        (progn
+          (setq delete-directory-pending-path real)
+          (completing-read
+            (concat "Recursively delete " real "? ")
+            "file-ops-yes-no-table"
+            nil
+            t
+            ""
+            "file-ops-history"
+            "delete-directory-confirm-accept"))))))
+
+(defun delete-directory-confirm-accept (answer)
+  "Confirm accept handler: on \"yes\", remove the pending tree."
+  (let ((path delete-directory-pending-path))
+    (setq delete-directory-pending-path nil)
+    (if (string= answer "yes")
+      (delete-directory-do path t)
+      (message "Cancelled"))))
+
+(defun delete-directory-do (path recursive-p)
+  "Remove PATH (recursively when RECURSIVE-P) and report.
+file-remove's optional recursive flag (#361 tier 2) does the tree
+removal; both paths return an honest boolean."
+  (if (file-remove path recursive-p)
+    (message (concat "Deleted directory " path))
+    (message (concat "delete-directory: failed to delete " path))))
 
 (provide "file-ops")
 )  ;; end of defmodule editor/commands/file-ops (BUG-74/#126: keep the close at EOF, not at the export clause)

@@ -35,7 +35,7 @@ import { createBufferOps } from "./api/buffer-ops.ts";
 import { createConfirmationOps } from "./api/confirmation-ops.ts";
 import { createCursorOps } from "./api/cursor-ops.ts";
 import { createModeOps } from "./api/mode-ops.ts";
-import { createFileOps } from "./api/file-ops.ts";
+import { createFileOps, expandHomePath } from "./api/file-ops.ts";
 import { createBindingsOps } from "./api/bindings-ops.ts";
 import { createWordOps } from "./api/word-ops.ts";
 import { createLineOps } from "./api/line-ops.ts";
@@ -1596,8 +1596,13 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         ops.set('file-rename', (args: TLispValue[]): Either<AppError, TLispValue> => {
           if (args.length < 2) return Either.left(createValidationError('FormatError', 'file-rename requires 2 arguments: old, new'));
           if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
+          // #361: tilde expansion — every primitive in the file-ops family
+          // expands a leading ~ (file-mkdir/file-copy/file-remove); the
+          // interactive rename-file passes user paths straight through.
+          const oldPath = expandHomePath(String(args[0]!.value));
+          const newPath = expandHomePath(String(args[1]!.value));
           try {
-            renameSync(String(args[0]!.value), String(args[1]!.value));
+            renameSync(oldPath, newPath);
             return Either.right(createNil());
           } catch (e) {
             return Either.left(createValidationError('FormatError', `file-rename failed: ${e instanceof Error ? e.message : String(e)}`));

@@ -8,6 +8,7 @@ import type { EvalContext, TLispValue, TLispFunctionImpl } from "../../tlisp/typ
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol, createHashmap, createPromise } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
+import { createValidationError } from "../../error/types.ts";
 import { AppError } from "../../error/types.ts";
 import { isAsyncMode } from "../../tlisp/async.ts";
 import { runModel, setModelField, type EditorModelAccess } from "./state-context.ts";
@@ -38,6 +39,7 @@ function fsRuntimeError(operation: string, path: string, error: unknown): AppErr
 function expandHomePath(path: string): string {
   return path.replace(/^~/, process.env.HOME ?? '~');
 }
+export { expandHomePath };
 
 /**
  * Create file operations API functions
@@ -307,17 +309,17 @@ export function createFileOps(
     const dest = expandHomePath(destArg.value as string);
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.copyFile(src, dest)
-        .then(() => createNil())
-        .catch((error) => {
-          throw fsRuntimeError("file-copy", src, error);
-        })));
+        .then(() => createBoolean(true))
+        .catch(() => createBoolean(false))));
     }
 
     try {
       fs.copyFileSync(src, dest);
-      return Either.right(createNil());
+      // #361: honest boolean (the sync path swallowed failures — nil both
+      // ways — same defect class as file-remove).
+      return Either.right(createBoolean(true));
     } catch {
-      return Either.right(createNil());
+      return Either.right(createBoolean(false));
     }
   });
 
@@ -351,9 +353,17 @@ export function createFileOps(
   });
 
   api.set("file-remove", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {
-    const argsValidation = validateArgsCount(args, 1, "file-remove");
-    if (Either.isLeft(argsValidation)) {
-      return Either.left(argsValidation.left);
+    // #361: 1 or 2 args — the optional second is a recursive flag (delete-
+    // directory's tree removal). validateArgsCount is exact-count, so check
+    // the range here.
+    if (args.length < 1 || args.length > 2) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        `file-remove requires 1 or 2 arguments (path, [recursive])`,
+        'args',
+        args.length,
+        '1 or 2',
+      ));
     }
 
     const pathArg = args[0]!
@@ -362,19 +372,40 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
+    const recursive = args.length > 1 && args[1]!.type === "boolean" && args[1]!.value === true;
+
     const path = expandHomePath(pathArg.value as string);
+    // #361: honest boolean return. This swallowed failures on BOTH paths
+    // (`.catch(() => createNil())` / a bare catch), so a failed delete was
+    // indistinguishable from success — unacceptable behind an interactive
+    // delete-file. Existing caller (dired-execute-deletions) discards the
+    // result.
     if (isAsyncMode(context)) {
-      return Either.right(createPromise(fs.promises.unlink(path)
-        .then(() => createNil())
-        .catch(() => createNil())));
+      const rm = recursive
+        ? fs.promises.rm(path, { recursive: true })
+        : fs.promises.unlink(path);
+      return Either.right(createPromise(rm
+        .then(() => createBoolean(true))
+        .catch(() => createBoolean(false))));
     }
 
     try {
-      fs.unlinkSync(path);
+      if (recursive) {
+        fs.rmSync(path, { recursive: true });
+      } else {
+        fs.unlinkSync(path);
+      }
+      return Either.right(createBoolean(true));
     } catch {
-      // swallow - return nil regardless
+      return Either.right(createBoolean(false));
     }
-    return Either.right(createNil());
+  });
+
+  // #361: the process working directory as a FACT primitive — the
+  // delete-directory guard refuses it, and T-Lisp cannot compute it without
+  // shelling out (architecture rule: TS exposes facts, T-Lisp decides).
+  api.set("process-cwd", (): Either<AppError, TLispValue> => {
+    return Either.right(createString(process.cwd()));
   });
 
   // #285 codex r9: canonical file identity as a PRIMITIVE — T-Lisp was

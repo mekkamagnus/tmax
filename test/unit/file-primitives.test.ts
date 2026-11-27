@@ -158,16 +158,19 @@ describe("File Primitives", () => {
       expect(fs.existsSync(filePath)).toBe(true);
 
       const result = call("file-remove", [createString(filePath)]);
-      expect(result.type).toBe("nil");
+      // #361: honest boolean return (was nil on both paths).
+      expect(result.type).toBe("boolean");
+      expect(result.value).toBe(true);
       expect(fs.existsSync(filePath)).toBe(false);
     });
 
-    test("returns nil for a nonexistent file without error", () => {
+    test("returns false for a nonexistent file — honest failure (#361)", () => {
       const filePath = path.join(tmpDir, "does-not-exist.txt");
       expect(fs.existsSync(filePath)).toBe(false);
 
       const result = call("file-remove", [createString(filePath)]);
-      expect(result.type).toBe("nil");
+      expect(result.type).toBe("boolean");
+      expect(result.value).toBe(false);
     });
 
     test("rejects non-string argument", () => {
@@ -245,15 +248,18 @@ describe("File Primitives", () => {
       fs.writeFileSync(srcPath, "copy me");
 
       const result = call("file-copy", [createString(srcPath), createString(destPath)]);
-      expect(result.type).toBe("nil");
+      // #361: honest boolean return (the sync path swallowed failures).
+      expect(result.type).toBe("boolean");
+      expect(result.value).toBe(true);
       expect(fs.existsSync(destPath)).toBe(true);
       expect(fs.readFileSync(destPath, "utf-8")).toBe("copy me");
     });
 
-    test("returns nil for nonexistent source (swallows error)", () => {
+    test("returns false for nonexistent source — honest failure (#361)", () => {
       const destPath = path.join(tmpDir, "copy-noop.txt");
       const result = call("file-copy", [createString("/nonexistent/src.txt"), createString(destPath)]);
-      expect(result.type).toBe("nil");
+      expect(result.type).toBe("boolean");
+      expect(result.value).toBe(false);
     });
   });
 
