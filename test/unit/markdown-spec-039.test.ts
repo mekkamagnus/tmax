@@ -11,6 +11,9 @@ import {
   expectTlispString,
   setupMdEditor,
 } from "../helpers/editor-fixture.ts";
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ── Phase 1: Subtree operations ──────────────────────────────────────
 
@@ -564,10 +567,25 @@ describe("SPEC-039 coverage: previously-uncovered behaviors", () => {
   });
 
   test("markdown-daily-note creates note", async () => {
-    const editor = await setupMdEditor("");
-    const result = executeTlisp(editor, `(markdown-daily-note)`);
-    // Should return a message (may be about the file path).
-    expect(result.type).not.toBe("left");
+    // #355: markdown-journal-dir defaults to the relative "daily", so the
+    // note lands in the cwd (repo root) unless pointed elsewhere. Isolate it
+    // in a mkdtemp vault (the capture-daily.test.ts pattern) and assert the
+    // note lands inside the vault.
+    const vault = mkdtempSync(join(tmpdir(), "tmax-md-daily-"));
+    try {
+      const editor = await setupMdEditor("");
+      executeTlisp(editor, `(markdown-journal-dir-set "${join(vault, "daily")}")`);
+      const result = executeTlisp(editor, `(markdown-daily-note)`);
+      // Should return a message (may be about the file path).
+      expect(result.type).not.toBe("left");
+      const files = readdirSync(join(vault, "daily")).filter((f) =>
+        /^\d{4}-\d\d-\d\d\.md$/.test(f)
+      );
+      expect(files).toHaveLength(1);
+      expect(readFileSync(join(vault, "daily", files[0]!), "utf-8").length).toBeGreaterThan(0);
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+    }
   });
 
   test("markdown-table-eval-formula sum end-to-end", async () => {
