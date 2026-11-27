@@ -635,3 +635,29 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
     executeTlisp(ed, '(minibuffer-dispatch-key "Escape")');
   });
 });
+
+describe("Enter on an empty dired batch confirmation cancels", () => {
+  test("dired x: empty input + Enter keeps the file AND the mark", async () => {
+    writeFileSync(join(vault, "dired-enter-guard.txt"), "keep");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  dired-enter-guard.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    expect(ed.getState().mode).toBe("mx");
+    executeTlisp(ed, '(minibuffer-set-input "")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "dired-enter-guard.txt"))).toBe(true);
+    // the mark survives the cancelled confirmation
+    const rows2 = Number(tl(ed, "(buffer-line-count)"));
+    let still = false;
+    for (let i = 0; i < rows2; i++) if (line(ed, i) === "D dired-enter-guard.txt") still = true;
+    expect(still).toBe(true);
+  });
+});

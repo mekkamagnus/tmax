@@ -40,12 +40,15 @@ dirname is already \"/\" — no double slash (codex r1 finding 4)."
       "~/")))
 
 (defun file-ops-yes-no-table (input action)
-  "Completion table offering yes/no for file-ops confirmation prompts."
+  "Completion table offering yes/no for file-ops confirmation prompts.
+\"no\" is the FIRST candidate — Enter on empty input selects it and
+CANCELS; \"yes\" must be typed. Every destructive confirm in the family
+(delete-file, delete-directory, dired's x) shares this table."
   (if (string= action "metadata")
     (hashmap "category" "plain")
     (list
-      (hashmap "value" "yes" "display" "yes" "annotation" "" "metadata" (hashmap))
-      (hashmap "value" "no" "display" "no" "annotation" "" "metadata" (hashmap)))))
+      (hashmap "value" "no" "display" "no" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "yes" "display" "yes" "annotation" "" "metadata" (hashmap)))))
 
 ;; ── mkdir (#359) ──────────────────────────────────────────────────────
 

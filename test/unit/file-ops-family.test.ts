@@ -365,3 +365,40 @@ describe("#361 coach round 3: read failure, link semantics, canonical guard", ()
     expect(lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
   });
 });
+
+describe("Enter on an empty confirmation cancels (the preselected-yes fix)", () => {
+  test("delete-file: empty input + Enter keeps the file", async () => {
+    const f = join(vault, "enter-guard.txt");
+    mkdirSync(vault, { recursive: true });
+    writeFileSync(f, "keep");
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-file "${f}")`);
+    expect(editor.getState().mode).toBe("mx"); // confirm open
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")'); // empty input
+    expect(existsSync(f)).toBe(true);
+    expect(editor.getState().statusMessage).toContain("Cancelled");
+  });
+
+  test("delete-directory on a folder with files: empty input + Enter keeps everything", async () => {
+    const d = join(vault, "enter-guard-dir");
+    mkdirSync(join(d, "sub"), { recursive: true });
+    writeFileSync(join(d, "sub", "f.txt"), "keep");
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-directory "${d}")`);
+    executeTlisp(editor, '(minibuffer-set-input "")');
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(d, "sub", "f.txt"))).toBe(true);
+    expect(editor.getState().statusMessage).toContain("Cancelled");
+  });
+
+  test("delete-file: typing yes still deletes (the real path is intact)", async () => {
+    const f = join(vault, "enter-yes.txt");
+    mkdirSync(vault, { recursive: true });
+    writeFileSync(f, "gone");
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-file "${f}")`);
+    executeTlisp(editor, '(minibuffer-set-input "yes")');
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(f)).toBe(false);
+  });
+});
