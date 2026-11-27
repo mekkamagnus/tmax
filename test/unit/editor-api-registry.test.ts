@@ -63,7 +63,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // r154: 439 → 440 — http-cancel (abort an in-flight http-request).
     // #361: 440 → 441 — process-cwd (the delete-directory guard's fact
     // primitive; refrozen with the U2 full-suite catch).
-    expect(live.length).toBe(441);
+    // #361 codex r1: 441 → 442 — file-rmdir (the non-recursive fast path).
+    expect(live.length).toBe(442);
     expect(live).toEqual(expected);
   });
 

@@ -408,6 +408,39 @@ export function createFileOps(
     return Either.right(createString(process.cwd()));
   });
 
+  // #361 codex r1 finding 2: non-recursive directory removal for
+  // delete-directory's fast path. rmdir fails with ENOTEMPTY the moment
+  // anything exists in the directory, so the emptiness CHECK and the
+  // removal are one operation — no window where content that appeared
+  // between a separate check and a recursive rm is destroyed without the
+  // tree confirmation. Boolean returns like the rest of the family.
+  api.set("file-rmdir", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "file-rmdir");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const pathArg = args[0]!
+    const typeValidation = validateArgType(pathArg, "string", 0, "file-rmdir");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+
+    const path = expandHomePath(pathArg.value as string);
+    if (isAsyncMode(context)) {
+      return Either.right(createPromise(fs.promises.rmdir(path)
+        .then(() => createBoolean(true))
+        .catch(() => createBoolean(false))));
+    }
+
+    try {
+      fs.rmdirSync(path);
+      return Either.right(createBoolean(true));
+    } catch {
+      return Either.right(createBoolean(false));
+    }
+  });
+
   // #285 codex r9: canonical file identity as a PRIMITIVE — T-Lisp was
   // shelling out to `realpath`, and quoting paths through the shell kept
   // breaking (spaces, then apostrophes), each time as silent entry loss

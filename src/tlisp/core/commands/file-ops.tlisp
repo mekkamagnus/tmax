@@ -16,20 +16,27 @@
 ;; completing-read is async and only the last live session survives).
 
 (defun file-ops-dirname (path)
-  "Directory portion of PATH (\".\" when PATH has no slash)."
+  "Directory portion of PATH. \"/\" when PATH is directly under root
+(codex r1 finding 4 — was \".\"), \".\" when PATH has no slash at all."
   (let ((i (- (length path) 1)))
     (while (and (> i 0) (not (string= (substring path i (+ i 1)) "/")))
       (set! i (- i 1)))
     (if (> i 0)
       (substring path 0 i)
-      ".")))
+      (if (and (= i 0) (> (length path) 0) (string= (substring path 0 1) "/"))
+        "/"
+        "."))))
 
 (defun file-ops-default-dir ()
   "Prefill for file-ops prompts: the current file's directory with a
-trailing slash when a file is visited, else \"~/\"."
+trailing slash when a file is visited, else \"~/\". A root file's
+dirname is already \"/\" — no double slash (codex r1 finding 4)."
   (let ((fn (buffer-filename)))
     (if fn
-      (concat (file-ops-dirname fn) "/")
+      (let ((dir (file-ops-dirname fn)))
+        (if (string= (substring dir (- (length dir) 1)) "/")
+          dir
+          (concat dir "/")))
       "~/")))
 
 (defun file-ops-yes-no-table (input action)
@@ -256,17 +263,36 @@ boolean (#361 fixed the swallowed sync-path failures)."
 (defun file-ops-destructive-p (path)
   "Refuse the three protected trees (#361): /, $HOME, and the process
 working directory. Comparison is on file-realpath, so symlinked and
-tilde forms are caught too."
+tilde forms are caught too. GUARD ONLY — callers must never pass the
+resolved form on as the operand (codex r1 finding 1)."
   (let ((real (file-realpath path)))
     (or
       (string= real "/")
       (string= real (file-realpath "~"))
       (string= real (process-cwd)))))
 
+(defun file-ops-plist-get (plist key)
+  "Fetch KEY's value from the (key value key value ...) list that
+file-stat returns. nil when the key is absent."
+  (if (or (null plist) (null (cdr plist)))
+    nil
+    (if (equal (car plist) key)
+      (car (cdr plist))
+      (file-ops-plist-get (cdr (cdr plist)) key))))
+
+(defun file-ops-directory-p (path)
+  "t when PATH exists and is a directory (file-stat follows symlinks)."
+  (let ((st (file-stat path)))
+    (if st
+      (file-ops-plist-get st 'isDirectory)
+      nil)))
+
 (defun delete-directory (&optional path)
   "Delete a directory (#361). Empty directories go directly; a
 non-empty tree asks for an explicit yes/no confirm first. Refuses /,
-$HOME, and the process working directory. ~ expands to $HOME."
+$HOME, and the process working directory. ~ expands to $HOME.
+A SYMLINK operand removes the LINK itself, never its target tree
+(codex r1 finding 1)."
   (interactive)
   (if path
     (delete-directory-check path)
@@ -284,31 +310,36 @@ $HOME, and the process working directory. ~ expands to $HOME."
   (delete-directory-check path))
 
 (defun delete-directory-check (path)
-  "Guard PATH, then delete it (empty) or open the recursive confirm."
-  (let ((real (file-realpath path)))
-    (cond
-      ((string= path "")
-        (message "delete-directory: empty path"))
-      ((file-ops-destructive-p path)
-        (message (concat "delete-directory: refusing to delete protected path " path)))
-      ((not (file-exists-p path))
-        (message (concat "delete-directory: no such directory " path)))
-      ((= (length (read-dir real)) 0)
-        ;; recursive rm also removes an EMPTY directory (plain unlink cannot:
-        ;; EISDIR). The emptiness check only decides confirm-vs-fast-path —
-        ;; delete-file keeps failing visibly on directories by design.
-        (delete-directory-do real t))
-      (t
-        (progn
-          (setq delete-directory-pending-path real)
-          (completing-read
-            (concat "Recursively delete " real "? ")
-            "file-ops-yes-no-table"
-            nil
-            t
-            ""
-            "file-ops-history"
-            "delete-directory-confirm-accept"))))))
+  "Guard PATH, then fast-path or confirm. The OPERAND is always the
+path as the user gave it — realpath forms feed only the safety guard,
+so a symlink deletes the link, never its target tree (codex r1
+finding 1). The fast path is non-recursive file-rmdir (finding 2): it
+FAILS on non-empty, so content appearing between check and removal
+falls through to the explicit tree confirmation instead of being
+destroyed. A non-directory operand reports visibly instead of
+crashing on read-dir (finding 3)."
+  (cond
+    ((string= path "")
+      (message "delete-directory: empty path"))
+    ((file-ops-destructive-p path)
+      (message (concat "delete-directory: refusing to delete protected path " path)))
+    ((not (file-exists-p path))
+      (message (concat "delete-directory: no such directory " path)))
+    ((not (file-ops-directory-p path))
+      (message (concat "delete-directory: not a directory: " path)))
+    ((file-rmdir path)
+      (message (concat "Deleted directory " path)))
+    (t
+      (progn
+        (setq delete-directory-pending-path path)
+        (completing-read
+          (concat "Recursively delete " path "? ")
+          "file-ops-yes-no-table"
+          nil
+          t
+          ""
+          "file-ops-history"
+          "delete-directory-confirm-accept")))))
 
 (defun delete-directory-confirm-accept (answer)
   "Confirm accept handler: on \"yes\", remove the pending tree."

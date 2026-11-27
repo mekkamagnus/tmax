@@ -1,4 +1,5 @@
 # Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
+# #361 codex r1: 441 -> 442 — file-rmdir (the non-recursive fast-path primitive).
 # #361: 440 -> 441 — process-cwd (the delete-directory guard's fact primitive).
 # r88 L2-token arc's primitive landed without the refreeze — caught at the #318
 # rebase re-verify; also carries #318's editor-transient-timer-start/-stop).
@@ -191,6 +192,7 @@ file-modtime
 file-realpath
 file-remove
 file-rename
+file-rmdir
 file-stat
 find-char-position
 find-heading-ranges
