@@ -67,7 +67,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // #361 codex r2: 442 → 443 — file-symlink-p (lstat entry test).
     // #360 p1: 443 → 444 — dired-insert-lines (pre-formatted listing write).
     // #360 coach r8: 444 → 447 — encode/decode-name + mark-rows.
-    expect(live.length).toBe(447);
+    // #360 coach r10: 447 → 448 — file-entry-id (lstat identity).
+    expect(live.length).toBe(448);
     expect(live).toEqual(expected);
   });
 

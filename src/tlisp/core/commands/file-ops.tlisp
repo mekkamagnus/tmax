@@ -116,20 +116,19 @@ then asks for confirmation before deleting. ~ expands to $HOME."
   (delete-file-confirm path))
 
 (defun delete-file-confirm (path)
-  "Open the yes/no confirm for deleting PATH — unless PATH resolves to
-a protected tree (coach r3: the same canonical guard
+  "Open the literal confirm for deleting PATH — unless PATH resolves
+to a protected tree (coach r3: the same canonical guard
 delete-directory applies, so a symlink to $HOME or the cwd is refused
-here too, before any prompt)."
+here too, before any prompt). Coach r10: the prompt is FREE-FORM
+(read-from-minibuffer) — only the exact string \"yes\" authorizes;
+completion must not turn \"y\" into \"yes\"."
   (if (file-ops-destructive-p path)
     (message (concat "delete-file: refusing to delete protected path " path))
     (progn
       (setq delete-file-pending-path path)
-      (completing-read
-    (concat "Delete " path "? ")
-    "file-ops-yes-no-table"
-    nil
-    t
-    ""
+      (read-from-minibuffer
+    (concat "Delete " path "? Type yes to confirm: ")
+    "no"
     "file-ops-history"
     "delete-file-do"))))
 
@@ -385,15 +384,14 @@ non-directory operand reports visibly instead of crashing on read-dir
             (message (concat "delete-directory: cannot read " p))))))))
 
 (defun delete-directory-open-confirm (path kind prompt)
-  "Prime the pending PATH/KIND and open the yes/no confirm (ADR-0168)."
+  "Prime the pending PATH/KIND and open the literal confirm (ADR-0168;
+coach r10: free-form input — only the exact string \"yes\"
+authorizes; completion must not turn \"y\" into \"yes\")."
   (setq delete-directory-pending-path path)
   (setq delete-directory-pending-kind kind)
-  (completing-read
-    prompt
-    "file-ops-yes-no-table"
-    nil
-    t
-    ""
+  (read-from-minibuffer
+    (concat prompt "Type yes to confirm: ")
+    "no"
     "file-ops-history"
     "delete-directory-confirm-accept"))
 

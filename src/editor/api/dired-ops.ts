@@ -229,17 +229,20 @@ export function createDiredOps(
         .map((v) => v.value as string)
     );
     s.markedForDelete.clear();
-    const currentBuffer = getCurrentBuffer();
-    const bufferValidation = validateBufferExists(currentBuffer);
+    // Coach r10 finding 3: accumulate edits on a local buffer variable,
+    // installing the chain once at the end. Edit failures surface as a
+    // Left instead of silently claiming the mark was restored.
+    let buf = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(buf);
     if (Either.isLeft(bufferValidation)) {
       return Either.left(bufferValidation.left);
     }
-    const lineCountResult = currentBuffer!.getLineCount();
+    const lineCountResult = buf!.getLineCount();
     if (Either.isLeft(lineCountResult)) {
       return Either.left(createBufferError('InvalidOperation', `Failed to get line count: ${lineCountResult.left}`));
     }
     for (let i = 0; i < lineCountResult.right; i++) {
-      const lineResult = currentBuffer!.getLine(i);
+      const lineResult = buf!.getLine(i);
       if (Either.isLeft(lineResult)) continue;
       const text = lineResult.right;
       if (!text.startsWith("  ") && !text.startsWith("D ")) continue;
@@ -247,15 +250,21 @@ export function createDiredOps(
       if (name.length > 0 && names.has(name)) {
         if (!text.startsWith("D")) {
           const deleteRange = { start: { line: i, column: 0 }, end: { line: i, column: text.length } };
-          const deleteResult = currentBuffer!.delete(deleteRange);
-          if (Either.isLeft(deleteResult)) continue;
-          const insertResult = deleteResult.right.insert({ line: i, column: 0 }, "D" + text.substring(1));
-          if (Either.isLeft(insertResult)) continue;
-          setCurrentBuffer(insertResult.right);
+          const deleteResult = buf!.delete(deleteRange);
+          if (Either.isLeft(deleteResult)) {
+            return Either.left(createBufferError('InvalidOperation', `dired-mark-rows: edit failed at line ${i}: ${deleteResult.left}`));
+          }
+          buf = deleteResult.right;
+          const insertResult = buf.insert({ line: i, column: 0 }, "D" + text.substring(1));
+          if (Either.isLeft(insertResult)) {
+            return Either.left(createBufferError('InvalidOperation', `dired-mark-rows: edit failed at line ${i}: ${insertResult.left}`));
+          }
+          buf = insertResult.right;
         }
         s.markedForDelete.add(i);
       }
     }
+    setCurrentBuffer(buf!);
     return Either.right(createNil());
   });
 

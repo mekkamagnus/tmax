@@ -31,8 +31,16 @@
 
 (defvar dired-rename-source nil "Entry path awaiting rename-file's destination prompt.")
 (defvar dired-copy-source nil "Entry path awaiting copy-file's destination prompt.")
-(defvar dired-pending-deletions nil "Marked entry names awaiting the batch delete confirm.")
+(defvar dired-pending-deletions nil "Plan snapshot awaiting the batch delete confirm.")
 (defvar dired-pending-dir nil "The listing directory captured at x-time — the accept must not be redirected by a changed buffer (coach r7 finding 2).")
+(defvar dired-pending-dir-id nil "The listing directory's lstat identity at x-time (coach r10).")
+(defvar dired-marks (list)
+  "Mark records (coach r10): a list of hashmaps, each with the entry's
+NAME, KIND, and lstat ID captured AT MARK TIME. The plan and the
+confirmation are built from these records; a removal refuses any entry
+whose current identity no longer matches. Marks are entry identity —
+never line numbers, never display text.")
+(defvar dired-refreshing nil "Flag: dired-render is called from dired-refresh, which prunes and re-applies mark records.")
 
 ;; ── helpers ───────────────────────────────────────────────────────────
 
@@ -156,7 +164,12 @@ name lives in the cwd; dired-dirname would say \"/\") — or the cwd."
 (defun dired-render (dir)
   "Build and install the listing for DIR in the *Dired* buffer.
 Returns t on success; on an unreadable directory the old listing is
-left intact and the failure is messaged (coach r7 finding 3)."
+left intact and the failure is messaged (coach r7 finding 3). Marks do
+not cross directories: a render outside dired-refresh clears the
+records (navigation never carries marks — coach r10)."
+  (if (not dired-refreshing)
+    (setq dired-marks (list))
+    t)
   (let ((real (file-realpath dir)))
     (if (or (string= real "") (not (dired-real-directory-p real)))
       (progn
@@ -213,8 +226,10 @@ directory, find-file a regular file, go up on \"..\"."
       (dired-render (dired-dirname dir)))))
 
 (defun dired-quit ()
-  "Close the listing and return to the previous buffer (q)."
+  "Close the listing and return to the previous buffer (q). Mark
+records are cleared — they belong to this listing."
   (interactive)
+  (setq dired-marks (list))
   (let ((prev dired-return-buffer))
     (setq dired-return-buffer nil)
     (if (and prev (not (string= prev "*Dired*")))
@@ -225,16 +240,41 @@ directory, find-file a regular file, go up on \"..\"."
 ;; ── marks and deletion ────────────────────────────────────────────────
 
 (defun dired-mark-delete ()
-  "Mark the current entry for deletion and move down (d)."
+  "Mark the current entry for deletion and move down (d). The entry's
+decoded NAME, KIND, and lstat IDENTITY are captured NOW (coach r10):
+the confirmation describes this record and the removal refuses any
+entry the disk has since replaced."
   (interactive)
-  (dired-toggle-mark "D")
-  (line-next 1))
+  (let* ((name (dired-current-name))
+         (path (concat (buffer-filename) "/" name)))
+    (if (string= name "..")
+      (message "dired: cannot mark ..")
+      (progn
+        (setq dired-marks (dired-records-put dired-marks name
+          (dired-entry-kind path) (file-entry-id path)))
+        (dired-toggle-mark "D")
+        (line-next 1)))))
 
 (defun dired-unmark ()
-  "Remove the deletion mark and move down (u)."
+  "Remove the deletion mark and its record, and move down (u)."
   (interactive)
+  (setq dired-marks (dired-records-remove dired-marks (dired-current-name)))
   (dired-toggle-mark " ")
   (line-next 1))
+
+(defun dired-records-put (records name kind id)
+  "RECORDS with NAME's record set to KIND/ID (replacing any prior)."
+  (append (dired-records-remove records name)
+    (list (hashmap "name" name "kind" kind "id" id))))
+
+(defun dired-records-remove (records name)
+  "RECORDS without NAME's record. Never returns nil — nil is not a
+list in T-Lisp and every dolist over the marks must keep working."
+  (if (null records)
+    (list)
+    (if (string= (hashmap-get (car records) "name") name)
+      (dired-records-remove (cdr records) name)
+      (cons (car records) (dired-records-remove (cdr records) name)))))
 
 (defun dired-destructive-p (path)
   "Refuse the protected trees (same rule as the file-ops family): /,
@@ -251,31 +291,25 @@ the batch (phase 1 shape; each entry still passes the protected-path
 guard, and \"..\" is never deleted). The listing directory is
 captured HERE so a changed buffer cannot redirect the batch."
   (interactive)
-  (let ((marked (dired-get-marked)))
-    (if (= (length marked) 0)
+  (let ((names (dired-marked-names)))
+    (if (= (length names) 0)
       (message "No marked entries")
       (let ((dir (buffer-filename))
             (plan (list)))
-        (dolist (name marked)
-          (setq plan (append plan
-            (list (hashmap "name" name
-                           "kind" (dired-entry-kind (concat dir "/" name)))))))
+        (dolist (r dired-marks)
+          (setq plan (append plan (list r))))
         (setq dired-pending-deletions plan)
         (setq dired-pending-dir dir)
-        (let ((trees (dired-plan-count-kind plan "tree")))
-          (completing-read
-            (concat "Delete " (number-to-string (length marked)) " marked entries"
-              (if (> trees 0)
-                (concat " (" (number-to-string trees) " tree"
-                  (if (> trees 1) "s" "") " recursively)")
-                "")
-              "? ")
-            "file-ops-yes-no-table"
-            nil
-            t
-            ""
-            "file-ops-history"
-            "dired-execute-accept"))))))
+        (setq dired-pending-dir-id (file-entry-id dir))
+        ;; The confirmation DESCRIBES the captured plan (coach r10 finding 2):
+        ;; every (escaped) name with its type; populated directories say so.
+        ;; Literal input: only the exact string "yes" authorizes.
+        (read-from-minibuffer
+          (concat "Delete " (number-to-string (length plan)) " marked entries — "
+            (dired-plan-describe plan) " ? Type yes to confirm: ")
+          "no"
+          "file-ops-history"
+          "dired-execute-accept")))))
 
 (defun dired-entry-kind (path)
   "The entry's kind for the deletion plan: symlink, file, empty, tree,
@@ -294,6 +328,18 @@ unreadable, or missing. A failed read-dir is NEVER treated as empty
             "file")
           "missing")))))
 
+(defun dired-row-exists-p (name)
+  "Whether the current listing has a row for the decoded NAME."
+  (let ((i 0)
+        (found nil))
+    (while (< i (buffer-line-count))
+      (if (string= (dired-entry-name-at (buffer-get-line i)) name)
+        (progn
+          (set! found t)
+          (set! i (buffer-line-count)))
+        (set! i (+ i 1))))
+    found))
+
 (defun dired-plan-count-kind (plan kind)
   "How many plan entries carry KIND."
   (let ((n 0))
@@ -301,6 +347,39 @@ unreadable, or missing. A failed read-dir is NEVER treated as empty
       (if (string= (hashmap-get e "kind") kind)
         (set! n (+ n 1))))
     n))
+
+(defun dired-marked-names ()
+  "The names of the live mark records (the records are the source of
+truth, not the display)."
+  (let ((names (list)))
+    (dolist (r dired-marks)
+      (setq names (append names (list (hashmap-get r "name")))))
+    names))
+
+(defun dired-plan-describe (plan)
+  "One reviewable line per plan entry (coach r10 finding 2): the
+escaped name and its captured type, populated directories explicitly
+recursive. No truncation."
+  (let ((parts (list)))
+    (dolist (e plan)
+      (let ((name (dired-encode-name (hashmap-get e "name")))
+            (kind (hashmap-get e "kind")))
+        (setq parts (append parts (list (concat name " ("
+          (cond
+            ((string= kind "tree") "directory, deleted RECURSIVELY")
+            ((string= kind "empty") "empty directory")
+            ((string= kind "symlink") "symlink")
+            ((string= kind "unreadable") "UNREADABLE - will be refused")
+            (t "file"))
+          ")"))))))
+    (dired-join-strings parts ", ")))
+
+(defun dired-join-strings (parts sep)
+  (if (null parts)
+    ""
+    (if (null (cdr parts))
+      (car parts)
+      (concat (car parts) sep (dired-join-strings (cdr parts) sep)))))
 
 (defun dired-remove-entry (path)
   "Remove one entry by its ACTUAL type (coach r7 finding 2): symlinks
@@ -321,42 +400,52 @@ remove non-recursively (content added during the prompt survives);
 confirmed symlinks unlink; confirmed trees remove recursively. The
 summary keeps refusals and failures visible."
   (let ((plan dired-pending-deletions)
-        (dir dired-pending-dir))
+        (dir dired-pending-dir)
+        (dir-id dired-pending-dir-id))
     (setq dired-pending-deletions nil)
     (setq dired-pending-dir nil)
+    (setq dired-pending-dir-id nil)
     (if (string= answer "yes")
-      (let ((deleted 0)
-            (refused 0)
-            (failed 0))
-        (dolist (e plan)
-          (let* ((name (hashmap-get e "name"))
-                 (kind (hashmap-get e "kind"))
-                 (path (concat dir "/" name))
-                 (now (dired-entry-kind path)))
-            (cond
-              ((string= name "..")
-                (set! refused (+ refused 1)))
-              ((dired-destructive-p path)
-                (set! refused (+ refused 1)))
-              ((not (string= now kind))
-                (set! refused (+ refused 1)))
-              (t
-                (let ((ok
-                        (cond
-                          ((string= kind "symlink") (file-remove path))
-                          ((string= kind "file") (file-remove path))
-                          ((string= kind "empty") (file-rmdir path))
-                          ((string= kind "tree") (file-remove path t))
-                          (t nil))))
-                  (if ok
-                    (set! deleted (+ deleted 1))
-                    (set! failed (+ failed 1))))))))
-        (if (string= (buffer-current) "*Dired*")
-          (dired-refresh)
-          t)
-        (message (concat "Deleted " (number-to-string deleted)
-          " entries (" (number-to-string refused) " refused, "
-          (number-to-string failed) " failed)")))
+      (if (not (string= (file-entry-id dir) (or dir-id "")))
+        (message "dired: the listing directory changed — nothing deleted")
+        (let ((deleted 0)
+              (refused 0)
+              (failed 0))
+          (dolist (e plan)
+            (let* ((name (hashmap-get e "name"))
+                   (kind (hashmap-get e "kind"))
+                   (id (hashmap-get e "id"))
+                   (path (concat dir "/" name)))
+              (cond
+                ((string= name "..")
+                  (set! refused (+ refused 1)))
+                ((dired-destructive-p path)
+                  (set! refused (+ refused 1)))
+                ((not (string= (file-entry-id path) (or id "")))
+                  ;; The disk entry is not the one that was marked (coach
+                  ;; r10 finding 1): refuse; the replacement survives.
+                  (set! refused (+ refused 1)))
+                ((not (string= (dired-entry-kind path) kind))
+                  (set! refused (+ refused 1)))
+                (t
+                  (let ((ok
+                          (cond
+                            ((string= kind "symlink") (file-remove path))
+                            ((string= kind "file") (file-remove path))
+                            ((string= kind "empty") (file-rmdir path))
+                            ((string= kind "tree") (file-remove path t))
+                            (t nil))))
+                    (if ok
+                      (progn
+                        (set! deleted (+ deleted 1))
+                        (setq dired-marks (dired-records-remove dired-marks name)))
+                      (set! failed (+ failed 1))))))))
+          (if (string= (buffer-current) "*Dired*")
+            (dired-refresh)
+            t)
+          (message (concat "Deleted " (number-to-string deleted)
+            " entries (" (number-to-string refused) " refused, "
+            (number-to-string failed) " failed)"))))
       (message "Cancelled"))))
 
 ;; ── file operations (delegate to the file-ops family) ─────────────────
@@ -434,11 +523,24 @@ when it still exists (g); otherwise back to the top. A failed re-read
 keeps the old listing and reports (coach r7 finding 3)."
   (interactive)
   (let ((name (dired-current-name))
-        (dir (buffer-filename))
-        (marked (dired-get-marked)))
-    (if (dired-render dir)
+        (dir (buffer-filename)))
+    (setq dired-refreshing t)
+    (let ((ok (dired-render dir)))
+      (setq dired-refreshing nil)
+      (if ok
       (progn
-        (dired-mark-rows marked)
+        ;; Prune the mark records (coach r10): keep only entries still
+        ;; listed whose CURRENT lstat identity matches the record. A
+        ;; replaced entry never inherits the mark.
+        (let ((kept (list)))
+          (dolist (r dired-marks)
+            (let ((rname (hashmap-get r "name")))
+              (if (and (dired-row-exists-p rname)
+                       (string= (file-entry-id (concat dir "/" rname))
+                                (or (hashmap-get r "id") "")))
+                (setq kept (append kept (list r))))))
+          (setq dired-marks kept)
+          (dired-mark-rows (dired-marked-names)))
         (let ((i 0)
               (found -1))
           (while (< i (buffer-line-count))
@@ -448,7 +550,7 @@ keeps the old listing and reports (coach r7 finding 3)."
                 (set! i (buffer-line-count)))
               (set! i (+ i 1))))
           (cursor-move (if (>= found 0) found 0) 0)))
-      nil)))
+      nil))))
 
 ;; ── keymap (vim-motion; BUFFER-LOCAL, the shadow tier) ────────────────
 ;; Major-mode-scoped key-binds resolve AFTER the normal-mode T-Lisp keymap

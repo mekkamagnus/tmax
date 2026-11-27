@@ -402,3 +402,38 @@ describe("Enter on an empty confirmation cancels (the preselected-yes fix)", () 
     expect(existsSync(f)).toBe(false);
   });
 });
+
+describe("#361/#360 coach r10: literal confirmation input", () => {
+  test("delete-file: typing y (not yes) leaves the file", async () => {
+    const f = join(vault, "lit-y.txt");
+    mkdirSync(vault, { recursive: true });
+    writeFileSync(f, "keep");
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-file "${f}")`);
+    executeTlisp(editor, '(minibuffer-set-input "y")');
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(f)).toBe(true);
+  });
+
+  test("delete-file: ye and YES also refuse; only exact yes deletes", async () => {
+    const a = join(vault, "lit-ye.txt");
+    writeFileSync(a, "keep");
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-file "${a}")`);
+    executeTlisp(editor, '(minibuffer-set-input "ye")');
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(a)).toBe(true);
+    const b = join(vault, "lit-YES.txt");
+    writeFileSync(b, "keep");
+    executeTlisp(editor, `(delete-file "${b}")`);
+    executeTlisp(editor, '(minibuffer-set-input "YES")');
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(b)).toBe(true);
+    const c = join(vault, "lit-exact.txt");
+    writeFileSync(c, "gone");
+    executeTlisp(editor, `(delete-file "${c}")`);
+    executeTlisp(editor, '(minibuffer-set-input "yes")');
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(c)).toBe(false);
+  });
+});

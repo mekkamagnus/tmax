@@ -437,7 +437,8 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
       }
     }
     await ed.handleKey("x");
-    expect(ed.getState().minibufferView?.prompt).toContain("1 tree");
+    // coach r10 supersedes the r8 wording: every entry + type, recursion explicit.
+    expect(ed.getState().minibufferView?.prompt).toContain("RECURSIVELY");
     executeTlisp(ed, '(minibuffer-set-input "no")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
   });
@@ -658,6 +659,120 @@ describe("Enter on an empty dired batch confirmation cancels", () => {
     const rows2 = Number(tl(ed, "(buffer-line-count)"));
     let still = false;
     for (let i = 0; i < rows2; i++) if (line(ed, i) === "D dired-enter-guard.txt") still = true;
+    expect(still).toBe(true);
+  });
+});
+
+describe("#360 coach round 10: mark-time identity, plan prompt, literal input", () => {
+  const markRow = async (ed: Awaited<ReturnType<typeof createStartedEditor>>, want: string): Promise<void> => {
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === want || line(ed, i) === `  ${want}`) {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        return;
+      }
+    }
+    throw new Error(`row not found: ${want}`);
+  };
+
+  test("C10-1a: a file replaced by a populated directory BEFORE x survives", async () => {
+    writeFileSync(join(vault, "c10-swap.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    await markRow(ed, "c10-swap.txt");
+    rmSync(join(vault, "c10-swap.txt"));
+    mkdirSync(join(vault, "c10-swap.txt", "kept"), { recursive: true });
+    writeFileSync(join(vault, "c10-swap.txt", "kept", "f"), "safe");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c10-swap.txt", "kept", "f"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refused");
+  });
+
+  test("C10-1b: a marked file replaced DURING the confirmation survives", async () => {
+    writeFileSync(join(vault, "c10-mid.txt"), "original");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    await markRow(ed, "c10-mid.txt");
+    await ed.handleKey("x");
+    rmSync(join(vault, "c10-mid.txt"));
+    writeFileSync(join(vault, "c10-mid.txt"), "replacement");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c10-mid.txt"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refused");
+  });
+
+  test("C10-1c: a replacement after g drops the mark (identity changed)", async () => {
+    writeFileSync(join(vault, "c10-afterg.txt"), "one");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    await markRow(ed, "c10-afterg.txt");
+    rmSync(join(vault, "c10-afterg.txt"));
+    writeFileSync(join(vault, "c10-afterg.txt"), "two");
+    await ed.handleKey("g");
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let still = false;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "D c10-afterg.txt") still = true;
+    expect(still).toBe(false); // the replacement did not inherit the mark
+  });
+
+  test("C10-2a: the confirmation enumerates every entry with its type; cancel keeps all", async () => {
+    writeFileSync(join(vault, "my c10 file"), "x");
+    writeFileSync(join(vault, "plain-c10.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    await markRow(ed, "my c10 file");
+    await markRow(ed, "plain-c10.txt");
+    await ed.handleKey("x");
+    const prompt = ed.getState().minibufferView?.prompt ?? "";
+    expect(prompt).toContain("my c10 file");
+    expect(prompt).toContain("plain-c10.txt");
+    executeTlisp(ed, '(minibuffer-set-input "")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "my c10 file"))).toBe(true);
+    expect(existsSync(join(vault, "plain-c10.txt"))).toBe(true);
+  });
+
+  test("C10-3a: two marks survive g; a disappeared entry loses its mark; x deletes the survivor", async () => {
+    writeFileSync(join(vault, "c10-a.txt"), "a");
+    writeFileSync(join(vault, "c10-b.txt"), "b");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    await markRow(ed, "c10-a.txt");
+    await markRow(ed, "c10-b.txt");
+    unlinkSync(join(vault, "c10-b.txt"));
+    await ed.handleKey("g");
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let a = false;
+    let b = false;
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "D c10-a.txt") a = true;
+      if (line(ed, i) === "D c10-b.txt") b = true;
+    }
+    expect(a).toBe(true);
+    expect(b).toBe(false);
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c10-a.txt"))).toBe(false);
+  });
+
+  test("C10-4a: dired x with literal y does not delete; marks kept", async () => {
+    writeFileSync(join(vault, "c10-lity.txt"), "keep");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    await markRow(ed, "c10-lity.txt");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "y")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c10-lity.txt"))).toBe(true);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let still = false;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "D c10-lity.txt") still = true;
     expect(still).toBe(true);
   });
 });

@@ -441,6 +441,42 @@ export function createFileOps(
     return Either.right(createBoolean(isLink(path)));
   });
 
+  // #360 coach r10: non-following entry identity for the dired mark
+  // records — "type:dev:ino" from lstat (dangling links included; the
+  // following file-stat exposes no dev/ino). Two entries at the same name
+  // are the same entry only when this string matches. nil when missing.
+  api.set("file-entry-id", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "file-entry-id");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const pathArg = args[0]!;
+    const typeValidation = validateArgType(pathArg, "string", 0, "file-entry-id");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+    const path = expandHomePath(pathArg.value as string);
+    const idOf = (p: string): string | null => {
+      try {
+        const st = fs.lstatSync(p);
+        const kind = st.isSymbolicLink() ? "symlink" : st.isDirectory() ? "dir" : "file";
+        return `${kind}:${st.dev}:${st.ino}`;
+      } catch {
+        return null;
+      }
+    };
+    if (isAsyncMode(context)) {
+      return Either.right(createPromise(fs.promises.lstat(path)
+        .then((st) => {
+          const kind = st.isSymbolicLink() ? "symlink" : st.isDirectory() ? "dir" : "file";
+          return createString(`${kind}:${st.dev}:${st.ino}`);
+        })
+        .catch(() => createNil())));
+    }
+    const id = idOf(path);
+    return Either.right(id === null ? createNil() : createString(id));
+  });
+
   // #361 codex r1 finding 2: non-recursive directory removal for
   // delete-directory's fast path. rmdir fails with ENOTEMPTY the moment
   // anything exists in the directory, so the emptiness CHECK and the
