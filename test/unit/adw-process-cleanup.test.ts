@@ -17,7 +17,7 @@
  * this exercises the shared `runAdwEntrypoint` finalizer + supervisor wiring
  * shared by all 11 runners without invoking real Claude/Codex/GitHub.
  */
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach, afterAll } from "bun:test";
 import { spawn, spawnSync, type ChildProcess } from "child_process";
 
 const RUNNERS = [
@@ -38,11 +38,35 @@ const RUNNERS = [
 const MARKER = `adw-process-cleanup-probe-${process.pid}`;
 
 const spawned: ChildProcess[] = [];
-afterEach(() => {
+
+/**
+ * SIGKILL every process still carrying OUR marker in its argv (#357).
+ * The probe grandchildren ignore SIGTERM by design, so when a runner fails
+ * to reap them (or an assertion fails mid-test and afterEach SIGKILLs the
+ * runner first), they would otherwise outlive the test forever. The marker
+ * is unique to this test process, so only our own probes can match.
+ */
+const reapOwnProbes = (): void => {
+  const res = spawnSync("ps", ["-Ao", "pid=,command="], { encoding: "utf8" });
+  if (res.error) return;
+  for (const line of res.stdout.split("\n")) {
+    if (!line.includes(MARKER)) continue;
+    const pid = Number(line.trim().split(/\s+/, 1)[0]);
+    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue;
+    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+};
+
+/** Kill the runners we spawned, then sweep any surviving probes (#357). */
+const teardown = (): void => {
   for (const child of spawned.splice(0)) {
     try { child.kill("SIGKILL"); } catch { /* gone */ }
   }
-});
+  reapOwnProbes();
+};
+
+afterEach(teardown);
+afterAll(teardown);
 
 const countMarkers = (): number => {
   const res = spawnSync("ps", ["-Ao", "command="], { encoding: "utf8" });
