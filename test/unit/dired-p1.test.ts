@@ -8,7 +8,7 @@
  * ".." first, hidden files shown. One *Dired* buffer updated in place.
  */
 import { describe, test, expect, beforeAll } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -774,5 +774,122 @@ describe("#360 coach round 10: mark-time identity, plan prompt, literal input", 
     let still = false;
     for (let i = 0; i < rows; i++) if (line(ed, i) === "D c10-lity.txt") still = true;
     expect(still).toBe(true);
+  });
+});
+
+describe("#360 coach round 11: R/C identity capture, fail-closed matching", () => {
+  test("C11-1a: R on a source replaced during the prompt refuses; contents intact, no destination", async () => {
+    writeFileSync(join(vault, "c11-r-src.txt"), "original");
+    const dest = join(vault, "c11-r-dest.txt");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let rLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  c11-r-src.txt") rLine = i;
+    executeTlisp(ed, `(cursor-move ${rLine} 0)`);
+    await ed.handleKey("R");
+    expect(ed.getState().mode).toBe("mx");
+    renameSync(join(vault, "c11-r-src.txt"), join(vault, "c11-r-saved.txt"));
+    writeFileSync(join(vault, "c11-r-src.txt"), "replacement");
+    executeTlisp(ed, `(minibuffer-set-input "${dest}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(dest)).toBe(false);
+    expect(existsSync(join(vault, "c11-r-saved.txt"))).toBe(true);
+    expect(existsSync(join(vault, "c11-r-src.txt"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refus");
+  });
+
+  test("C11-1b: C on a source replaced during the prompt refuses", async () => {
+    writeFileSync(join(vault, "c11-c-src.txt"), "original");
+    const dest = join(vault, "c11-c-dest.txt");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let cLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  c11-c-src.txt") cLine = i;
+    executeTlisp(ed, `(cursor-move ${cLine} 0)`);
+    await ed.handleKey("C");
+    renameSync(join(vault, "c11-c-src.txt"), join(vault, "c11-c-saved.txt"));
+    writeFileSync(join(vault, "c11-c-src.txt"), "replacement");
+    executeTlisp(ed, `(minibuffer-set-input "${dest}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(dest)).toBe(false);
+    expect(existsSync(join(vault, "c11-c-saved.txt"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refus");
+  });
+
+  test("C11-1c: R with an UNCHANGED source still renames (control)", async () => {
+    writeFileSync(join(vault, "c11-r-ok.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let rLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  c11-r-ok.txt") rLine = i;
+    executeTlisp(ed, `(cursor-move ${rLine} 0)`);
+    await ed.handleKey("R");
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "c11-r-ok2.txt")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c11-r-ok2.txt"))).toBe(true);
+    expect(existsSync(join(vault, "c11-r-ok.txt"))).toBe(false);
+  });
+
+  test("C11-1d: R on a source that disappears during the prompt refuses", async () => {
+    writeFileSync(join(vault, "c11-gone.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let rLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  c11-gone.txt") rLine = i;
+    executeTlisp(ed, `(cursor-move ${rLine} 0)`);
+    await ed.handleKey("R");
+    unlinkSync(join(vault, "c11-gone.txt"));
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "c11-gone-dest.txt")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c11-gone-dest.txt"))).toBe(false);
+    expect(ed.getState().statusMessage).toContain("refus");
+  });
+
+  test("C11-2a: mark a and b, x, unlink a, yes — b deleted with the exact refusal summary", async () => {
+    writeFileSync(join(vault, "c11-a.txt"), "a");
+    writeFileSync(join(vault, "c11-b.txt"), "b");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (n === "c11-a.txt" || n === "c11-b.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    unlinkSync(join(vault, "c11-a.txt"));
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c11-b.txt"))).toBe(false);
+    expect(ed.getState().statusMessage).toContain("Deleted 1 entries (1 refused, 0 failed)");
+  });
+
+  test("C11-2b: the listing directory renamed aside during the confirm refuses everything", async () => {
+    const sub = join(vault, "c11-subdir");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "keep.txt"), "keep");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${sub}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  keep.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    renameSync(sub, join(vault, "c11-subdir-aside"));
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c11-subdir-aside", "keep.txt"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("listing directory changed");
   });
 });

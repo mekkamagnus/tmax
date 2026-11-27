@@ -51,7 +51,8 @@ steps:
   - name: create the isolated sandbox directory
     eval: '(file-mkdir (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox"))'
     expect:
-      result_contains: 'null'
+      # #359: file-mkdir returns an honest boolean (was nil on both paths).
+      result_contains: 'true'
 
   # ----------------------------------------- seed disposable files in the sandbox
   - name: seed alpha.txt in the sandbox
@@ -96,7 +97,8 @@ steps:
   - name: file-remove unlinks alpha.txt
     eval: '(file-remove (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/alpha.txt"))'
     expect:
-      result_contains: 'null'
+      # #361: honest boolean (failures were swallowed as nil before).
+      result_contains: 'true'
 
   - name: alpha.txt is gone from disk after file-remove
     eval: '(file-exists-p (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/alpha.txt"))'
@@ -106,7 +108,7 @@ steps:
   - name: file-remove unlinks beta.txt
     eval: '(file-remove (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/beta.txt"))'
     expect:
-      result_contains: 'null'
+      result_contains: 'true'
 
   - name: beta.txt is gone from disk after file-remove
     eval: '(file-exists-p (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/beta.txt"))'
@@ -122,7 +124,7 @@ steps:
   - name: file-remove gamma.dat to drain the sandbox
     eval: '(file-remove (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/gamma.dat"))'
     expect:
-      result_contains: 'null'
+      result_contains: 'true'
 
   # ------------------------------------------------------------ BUG-62: dired surface
   # (dired <dir>) crashes on every call (see description above). The intended

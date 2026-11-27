@@ -30,7 +30,9 @@
   "The buffer to restore on q (set when dired opens from another buffer).")
 
 (defvar dired-rename-source nil "Entry path awaiting rename-file's destination prompt.")
+(defvar dired-rename-source-id nil "The source's lstat identity at prompt time (coach r11).")
 (defvar dired-copy-source nil "Entry path awaiting copy-file's destination prompt.")
+(defvar dired-copy-source-id nil "The source's lstat identity at prompt time (coach r11).")
 (defvar dired-pending-deletions nil "Plan snapshot awaiting the batch delete confirm.")
 (defvar dired-pending-dir nil "The listing directory captured at x-time — the accept must not be redirected by a changed buffer (coach r7 finding 2).")
 (defvar dired-pending-dir-id nil "The listing directory's lstat identity at x-time (coach r10).")
@@ -328,6 +330,14 @@ unreadable, or missing. A failed read-dir is NEVER treated as empty
             "file")
           "missing")))))
 
+(defun dired-id-matches (a b)
+  "Total identity match (coach r11): both values must be STRINGS and
+equal. Two missing identities NEVER match — a failed lstat fails
+closed everywhere. No coercion to empty strings, no nil-equal."
+  (if (or (not (stringp a)) (not (stringp b)))
+    nil
+    (string= a b)))
+
 (defun dired-row-exists-p (name)
   "Whether the current listing has a row for the decoded NAME."
   (let ((i 0)
@@ -406,7 +416,7 @@ summary keeps refusals and failures visible."
     (setq dired-pending-dir nil)
     (setq dired-pending-dir-id nil)
     (if (string= answer "yes")
-      (if (not (string= (file-entry-id dir) (or dir-id "")))
+      (if (not (dired-id-matches (file-entry-id dir) dir-id))
         (message "dired: the listing directory changed — nothing deleted")
         (let ((deleted 0)
               (refused 0)
@@ -421,9 +431,10 @@ summary keeps refusals and failures visible."
                   (set! refused (+ refused 1)))
                 ((dired-destructive-p path)
                   (set! refused (+ refused 1)))
-                ((not (string= (file-entry-id path) (or id "")))
+                ((not (dired-id-matches (file-entry-id path) id))
                   ;; The disk entry is not the one that was marked (coach
-                  ;; r10 finding 1): refuse; the replacement survives.
+                  ;; r10/r11): refuse — including a MISSING identity; the
+                  ;; replacement (or nothing) survives.
                   (set! refused (+ refused 1)))
                 ((not (string= (dired-entry-kind path) kind))
                   (set! refused (+ refused 1)))
@@ -476,6 +487,7 @@ source filled in, destination prompted, then refresh)."
   (interactive)
   (let ((src (dired-current-path)))
     (setq dired-rename-source src)
+    (setq dired-rename-source-id (file-entry-id src))
     (completing-read
       (concat "Rename " src " to: ")
       "file-completion-table"
@@ -486,12 +498,19 @@ source filled in, destination prompted, then refresh)."
       "dired-rename-accept")))
 
 (defun dired-rename-accept (dest)
-  (let ((src dired-rename-source))
+  "Destination accept: the SOURCE is revalidated by identity (coach
+r11) — a missing or replaced source refuses without touching the
+destination. Dangling links remain renameable (their lstat identity is
+a string)."
+  (let ((src dired-rename-source)
+        (id dired-rename-source-id))
     (setq dired-rename-source nil)
-    ;; rename-file-do returns its outcome message; show it AFTER refresh.
-    (let ((res (funcall "rename-file-do" src dest)))
-      (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
-      (message (if (stringp res) res "rename-file: done")))))
+    (setq dired-rename-source-id nil)
+    (if (not (dired-id-matches (file-entry-id src) id))
+      (message (concat "dired: rename refused — the source changed: " src))
+      (let ((res (funcall "rename-file-do" src dest)))
+        (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
+        (message (if (stringp res) res "rename-file: done"))))))
 
 (defun dired-copy-entry ()
   "Copy the entry under the cursor (C — the #361 copy-file flow,
@@ -499,6 +518,7 @@ source filled in, destination prompted, then refresh)."
   (interactive)
   (let ((src (dired-current-path)))
     (setq dired-copy-source src)
+    (setq dired-copy-source-id (file-entry-id src))
     (completing-read
       (concat "Copy " src " to: ")
       "file-completion-table"
@@ -509,11 +529,18 @@ source filled in, destination prompted, then refresh)."
       "dired-copy-accept")))
 
 (defun dired-copy-accept (dest)
-  (let ((src dired-copy-source))
+  "Destination accept: the SOURCE is revalidated by identity (coach
+r11); a missing or replaced source refuses without creating the
+destination."
+  (let ((src dired-copy-source)
+        (id dired-copy-source-id))
     (setq dired-copy-source nil)
-    (let ((res (funcall "copy-file-do" src dest)))
-      (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
-      (message (if (stringp res) res "copy-file: done")))))
+    (setq dired-copy-source-id nil)
+    (if (not (dired-id-matches (file-entry-id src) id))
+      (message (concat "dired: copy refused — the source changed: " src))
+      (let ((res (funcall "copy-file-do" src dest)))
+        (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
+        (message (if (stringp res) res "copy-file: done"))))))
 
 ;; ── refresh ───────────────────────────────────────────────────────────
 
@@ -536,8 +563,8 @@ keeps the old listing and reports (coach r7 finding 3)."
           (dolist (r dired-marks)
             (let ((rname (hashmap-get r "name")))
               (if (and (dired-row-exists-p rname)
-                       (string= (file-entry-id (concat dir "/" rname))
-                                (or (hashmap-get r "id") "")))
+                       (dired-id-matches (file-entry-id (concat dir "/" rname))
+                                         (hashmap-get r "id")))
                 (setq kept (append kept (list r))))))
           (setq dired-marks kept)
           (dired-mark-rows (dired-marked-names)))
