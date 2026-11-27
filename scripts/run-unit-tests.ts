@@ -127,6 +127,19 @@ function disposeRunDir(runDir: string, label: string): void {
   if (currentRunDir === runDir) currentRunDir = undefined;
 }
 
+// #356: refuse a Bun older than 1.4.0 — per-file module isolation
+// (--isolate/--parallel) does not exist below 1.4, so suite hygiene and
+// timings silently change (measured: a 6-file sample 146s on 1.3.9 vs 10s on
+// 1.4.4; fixture-temp children leak in every mode). Matches the
+// "packageManager" range in package.json.
+{
+  const [major = 0, minor = 0] = Bun.version.split(".").map(Number);
+  if (major < 1 || (major === 1 && minor < 4)) {
+    process.stderr.write(`run-unit-tests: Bun >= 1.4.0 is required (found ${Bun.version}); upgrade Bun or adjust PATH\n`);
+    process.exit(1);
+  }
+}
+
 sweepStaleRunDirs();
 
 // Catchable wrapper terminations must not leave the live run directory.
