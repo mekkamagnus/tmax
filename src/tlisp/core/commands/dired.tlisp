@@ -33,6 +33,7 @@
 (defvar dired-rename-source-id nil "The source's lstat identity at prompt time (coach r11).")
 (defvar dired-copy-source nil "Entry path awaiting copy-file's destination prompt.")
 (defvar dired-copy-source-id nil "The source's lstat identity at prompt time (coach r11).")
+(defvar dired-copy-referent-id nil "The REFERENT's identity at prompt time (round 12 fix 1) — copying follows the link, so the file actually copied must not change either.")
 (defvar dired-pending-deletions nil "Plan snapshot awaiting the batch delete confirm.")
 (defvar dired-pending-dir nil "The listing directory captured at x-time — the accept must not be redirected by a changed buffer (coach r7 finding 2).")
 (defvar dired-pending-dir-id nil "The listing directory's lstat identity at x-time (coach r10).")
@@ -167,11 +168,10 @@ name lives in the cwd; dired-dirname would say \"/\") — or the cwd."
   "Build and install the listing for DIR in the *Dired* buffer.
 Returns t on success; on an unreadable directory the old listing is
 left intact and the failure is messaged (coach r7 finding 3). Marks do
-not cross directories: a render outside dired-refresh clears the
-records (navigation never carries marks — coach r10)."
-  (if (not dired-refreshing)
-    (setq dired-marks (list))
-    t)
+not cross directories — but they are cleared only AFTER a different
+directory's listing installs (round 12 fix 2): a FAILED navigation
+keeps the listing, the D indicators, and the mark records exactly as
+they were."
   (let ((real (file-realpath dir)))
     (if (or (string= real "") (not (dired-real-directory-p real)))
       (progn
@@ -189,6 +189,9 @@ records (navigation never carries marks — coach r10)."
         (buffer-set-read-only t)
         (major-mode-set "dired")
             (dired-ensure-keymap)
+            (if (not dired-refreshing)
+              (setq dired-marks (list))
+              t)
             t)
           (progn
             (message (concat "dired: cannot read " real))
@@ -519,6 +522,7 @@ source filled in, destination prompted, then refresh)."
   (let ((src (dired-current-path)))
     (setq dired-copy-source src)
     (setq dired-copy-source-id (file-entry-id src))
+    (setq dired-copy-referent-id (file-entry-id (file-realpath src)))
     (completing-read
       (concat "Copy " src " to: ")
       "file-completion-table"
@@ -533,10 +537,15 @@ source filled in, destination prompted, then refresh)."
 r11); a missing or replaced source refuses without creating the
 destination."
   (let ((src dired-copy-source)
-        (id dired-copy-source-id))
+        (id dired-copy-source-id)
+        (ref-id dired-copy-referent-id))
     (setq dired-copy-source nil)
     (setq dired-copy-source-id nil)
-    (if (not (dired-id-matches (file-entry-id src) id))
+    (setq dired-copy-referent-id nil)
+    (if (not (and (dired-id-matches (file-entry-id src) id)
+                  (dired-id-matches (file-entry-id (file-realpath src)) ref-id)))
+      ;; Round 12 fix 1: copying follows the link — the LINK and the file
+      ;; it points to must BOTH be what they were when the prompt opened.
       (message (concat "dired: copy refused — the source changed: " src))
       (let ((res (funcall "copy-file-do" src dest)))
         (if (string= (buffer-current) "*Dired*") (dired-refresh) t)

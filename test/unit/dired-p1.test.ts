@@ -893,3 +893,66 @@ describe("#360 coach round 11: R/C identity capture, fail-closed matching", () =
     expect(ed.getState().statusMessage).toContain("listing directory changed");
   });
 });
+
+describe("#360 round 12: copy through a link, marks kept when navigation fails", () => {
+  test("R12-1: C through a symlink whose TARGET changed during the prompt refuses", async () => {
+    const target = join(vault, "r12-target.txt");
+    writeFileSync(target, "original target");
+    symlinkSync(target, join(vault, "r12-link"));
+    const dest = join(vault, "r12-dest.txt");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let lLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i).slice(2).replace(/\/$/, "") === "r12-link") lLine = i;
+    executeTlisp(ed, `(cursor-move ${lLine} 0)`);
+    await ed.handleKey("C");
+    expect(ed.getState().mode).toBe("mx");
+    // Replace the REFERENT while the destination prompt is open.
+    renameSync(target, join(vault, "r12-target-saved.txt"));
+    writeFileSync(target, "replacement contents");
+    executeTlisp(ed, `(minibuffer-set-input "${dest}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(dest)).toBe(false); // the replacement was NOT copied
+    expect(existsSync(join(vault, "r12-target-saved.txt"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refus");
+  });
+
+  test("R12-2: failed navigation keeps the listing, the D indicators, and the mark records", async () => {
+    writeFileSync(join(vault, "r12-a.txt"), "a");
+    writeFileSync(join(vault, "r12-b.txt"), "b");
+    const noread = join(vault, "r12-noread");
+    mkdirSync(noread, { recursive: true });
+    chmodSync(noread, 0o000);
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (n === "r12-a.txt" || n === "r12-b.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    const before = tl(ed, "(buffer-text)");
+    // descend into the unreadable directory — navigation FAILS
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === "r12-noread") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("l");
+      }
+    }
+    expect(ed.getState().statusMessage).toContain("cannot read");
+    expect(tl(ed, "(buffer-text)")).toBe(before); // the listing survived
+    expect(tl(ed, "(buffer-text)")).toContain("D r12-a.txt");
+    expect(tl(ed, "(buffer-text)")).toContain("D r12-b.txt");
+    // x still sees the marks — it must open the confirm, not say "No marked entries"
+    await ed.handleKey("x");
+    expect(ed.getState().mode).toBe("mx");
+    executeTlisp(ed, '(minibuffer-set-input "no")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "r12-a.txt"))).toBe(true);
+    chmodSync(noread, 0o755);
+  });
+});
