@@ -66,7 +66,15 @@ const MAX_CONCURRENCY = process.env.TMAX_UNIT_MAX_CONCURRENCY;
 // removes those (entries are addressed by the exact prefix below, and only
 // when the pid embedded in the name is dead — a live run's directory is never
 // touched).
-const RUN_DIR_PREFIX = "tmax-unit-run-";
+//
+// The prefix is deliberately SHORT: the run directory deepens every temp path
+// the children create, and macOS truncates unix-socket paths past ~100 chars
+// (kernel sun_path) — bind silently creates a different path and lsof can no
+// longer resolve the socket's holder (measured: lsof OK at 100 chars, broken
+// at 101+; it broke test/unit/stop-sequence-deps.test.ts in the first #358
+// full run). `tmax-ur-<pid>-XXXXXX` keeps a tmpdir()-based socket such as
+// i276d-*/a.sock at ≤91 chars even on the longest macOS TMPDIR.
+const RUN_DIR_PREFIX = "tmax-ur-";
 
 /** Remove run directories left by earlier KILLED wrapper runs (RFC-039 §2.4). */
 function sweepStaleRunDirs(): void {
