@@ -135,7 +135,9 @@ delete-directory is the directory command."
       (cond
         ((string= path "")
           (message "delete-file: empty path"))
-        ((not (file-exists-p path))
+        ((and (not (file-exists-p path)) (not (file-symlink-p path)))
+          ;; file-exists-p FOLLOWS links — a dangling symlink still exists
+          ;; as a directory entry and is deletable (codex r2 finding 3).
           (message (concat "delete-file: no such file " path)))
         ((file-remove path)
           (message (concat "Deleted " path)))
@@ -258,7 +260,23 @@ boolean (#361 fixed the swallowed sync-path failures)."
 ;; ── delete-directory (#361 tier 2, guarded) ───────────────────────────
 
 (defvar delete-directory-pending-path nil
-  "The path awaiting the recursive-delete confirm (ADR-0168).")
+  "The path awaiting the delete confirm (ADR-0168).")
+
+(defvar delete-directory-pending-kind nil
+  "What the pending confirm promises to remove: \"symlink\", \"empty\",
+or \"tree\". The removal primitive is chosen from the CONFIRMED kind,
+never re-derived (codex r2 finding 2).")
+
+(defun file-ops-strip-trailing-slashes (path)
+  "Drop trailing / separators; the root \"/\" is preserved (the guard
+must keep seeing it). A trailing slash defeats symlink-as-link removal
+(codex r2 finding 1): fs.rm follows a slashed operand into the target."
+  (if (string= path "/")
+    "/"
+    (let ((p path))
+      (while (and (> (length p) 1) (string= (substring p (- (length p) 1)) "/"))
+        (set! p (substring p 0 (- (length p) 1))))
+      p)))
 
 (defun file-ops-destructive-p (path)
   "Refuse the three protected trees (#361): /, $HOME, and the process
@@ -288,11 +306,12 @@ file-stat returns. nil when the key is absent."
       nil)))
 
 (defun delete-directory (&optional path)
-  "Delete a directory (#361). Empty directories go directly; a
-non-empty tree asks for an explicit yes/no confirm first. Refuses /,
-$HOME, and the process working directory. ~ expands to $HOME.
-A SYMLINK operand removes the LINK itself, never its target tree
-(codex r1 finding 1)."
+  "Delete a directory (#361). EVERY deletion confirms first through
+the minibuffer (RFC-041 §3.4 — empty directories included, codex r2
+finding 2): the prompt states what will be removed. Refuses /, $HOME,
+and the process working directory. ~ expands to $HOME. A SYMLINK
+operand — with or without a trailing slash — removes the LINK itself,
+never its target tree."
   (interactive)
   (if path
     (delete-directory-check path)
@@ -310,52 +329,76 @@ A SYMLINK operand removes the LINK itself, never its target tree
   (delete-directory-check path))
 
 (defun delete-directory-check (path)
-  "Guard PATH, then fast-path or confirm. The OPERAND is always the
-path as the user gave it — realpath forms feed only the safety guard,
-so a symlink deletes the link, never its target tree (codex r1
-finding 1). The fast path is non-recursive file-rmdir (finding 2): it
-FAILS on non-empty, so content appearing between check and removal
-falls through to the explicit tree confirmation instead of being
-destroyed. A non-directory operand reports visibly instead of
-crashing on read-dir (finding 3)."
-  (cond
-    ((string= path "")
-      (message "delete-directory: empty path"))
-    ((file-ops-destructive-p path)
-      (message (concat "delete-directory: refusing to delete protected path " path)))
-    ((not (file-exists-p path))
-      (message (concat "delete-directory: no such directory " path)))
-    ((not (file-ops-directory-p path))
-      (message (concat "delete-directory: not a directory: " path)))
-    ((file-rmdir path)
-      (message (concat "Deleted directory " path)))
-    (t
-      (progn
-        (setq delete-directory-pending-path path)
-        (completing-read
-          (concat "Recursively delete " path "? ")
-          "file-ops-yes-no-table"
-          nil
-          t
-          ""
-          "file-ops-history"
-          "delete-directory-confirm-accept")))))
+  "Guard PATH, then open the confirm stating what will be removed.
+The OPERAND is the user's path with trailing separators stripped
+(codex r2 finding 1 — a slashed symlink operand must not resolve into
+its target); realpath forms feed only the safety guard. Every case
+confirms (r2 finding 2): symlink, empty directory, or tree. A
+non-directory operand reports visibly instead of crashing on read-dir
+(r1 finding 3)."
+  (let ((p (file-ops-strip-trailing-slashes path)))
+    (cond
+      ((string= p "")
+        (message "delete-directory: empty path"))
+      ((file-ops-destructive-p p)
+        (message (concat "delete-directory: refusing to delete protected path " p)))
+      ((file-symlink-p p)
+        (delete-directory-open-confirm p "symlink"
+          (concat "Delete symlink " p " (the link itself)? ")))
+      ((not (file-exists-p p))
+        (message (concat "delete-directory: no such directory " p)))
+      ((not (file-ops-directory-p p))
+        (message (concat "delete-directory: not a directory: " p)))
+      ((= (length (read-dir p)) 0)
+        (delete-directory-open-confirm p "empty"
+          (concat "Delete empty directory " p "? ")))
+      (t
+        (delete-directory-open-confirm p "tree"
+          (concat "Recursively delete " p " ("
+            (number-to-string (length (read-dir p))) " entries)? "))))))
+
+(defun delete-directory-open-confirm (path kind prompt)
+  "Prime the pending PATH/KIND and open the yes/no confirm (ADR-0168)."
+  (setq delete-directory-pending-path path)
+  (setq delete-directory-pending-kind kind)
+  (completing-read
+    prompt
+    "file-ops-yes-no-table"
+    nil
+    t
+    ""
+    "file-ops-history"
+    "delete-directory-confirm-accept"))
 
 (defun delete-directory-confirm-accept (answer)
-  "Confirm accept handler: on \"yes\", remove the pending tree."
-  (let ((path delete-directory-pending-path))
+  "Confirm accept handler: on \"yes\", remove per the confirmed kind."
+  (let ((path delete-directory-pending-path)
+        (kind delete-directory-pending-kind))
     (setq delete-directory-pending-path nil)
+    (setq delete-directory-pending-kind nil)
     (if (string= answer "yes")
-      (delete-directory-do path t)
+      (delete-directory-do path kind)
       (message "Cancelled"))))
 
-(defun delete-directory-do (path recursive-p)
-  "Remove PATH (recursively when RECURSIVE-P) and report.
-file-remove's optional recursive flag (#361 tier 2) does the tree
-removal; both paths return an honest boolean."
-  (if (file-remove path recursive-p)
-    (message (concat "Deleted directory " path))
-    (message (concat "delete-directory: failed to delete " path))))
+(defun delete-directory-do (path kind)
+  "Remove PATH per the CONFIRMED KIND and report.
+symlink: plain unlink (a link is a file to the filesystem). empty:
+non-recursive file-rmdir — content that appeared after the confirm is
+REFUSED, never silently destroyed (the TOCTOU contract). tree:
+recursive file-remove."
+  (cond
+    ((string= kind "symlink")
+      (if (file-remove path)
+        (message (concat "Deleted symlink " path))
+        (message (concat "delete-directory: failed to delete " path))))
+    ((string= kind "empty")
+      (if (file-rmdir path)
+        (message (concat "Deleted directory " path))
+        (message (concat "delete-directory: " path " is no longer empty — not deleted (retry to remove the tree)"))))
+    (t
+      (if (file-remove path t)
+        (message (concat "Deleted directory " path))
+        (message (concat "delete-directory: failed to delete " path))))))
 
 (provide "file-ops")
 )  ;; end of defmodule editor/commands/file-ops (BUG-74/#126: keep the close at EOF, not at the export clause)

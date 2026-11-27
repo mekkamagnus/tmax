@@ -1,4 +1,5 @@
 # Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
+# #361 codex r2: 442 -> 443 — file-symlink-p (lstat entry test; slashed-symlink + dangling-link deletes).
 # #361 codex r1: 441 -> 442 — file-rmdir (the non-recursive fast-path primitive).
 # #361: 440 -> 441 — process-cwd (the delete-directory guard's fact primitive).
 # r88 L2-token arc's primitive landed without the refreeze — caught at the #318
@@ -194,6 +195,7 @@ file-remove
 file-rename
 file-rmdir
 file-stat
+file-symlink-p
 find-char-position
 find-heading-ranges
 find-references

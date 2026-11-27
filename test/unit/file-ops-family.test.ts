@@ -97,11 +97,14 @@ describe("#361 tier 1: rename-file / copy-file", () => {
 });
 
 describe("#361 tier 2: delete-directory", () => {
-  test("empty directory goes without a confirm", async () => {
+  test("empty directory requires confirmation and is removed non-recursively on yes (superseded r2 contract)", async () => {
     const d = join(vault, "empty-dir");
     mkdirSync(d, { recursive: true });
     const editor = await createStartedEditor("");
     executeTlisp(editor, `(delete-directory "${d}")`);
+    // RFC-041 §3.4 via codex r2 F2: empty directories confirm too.
+    expect(editor.getState().mode).toBe("mx");
+    feed(editor, "yes");
     expect(existsSync(d)).toBe(false);
     expect(editor.getState().statusMessage).toContain("Deleted directory");
   });
@@ -156,7 +159,7 @@ describe("#361 codex r1: delete-directory operand + fast-path findings", () => {
     feed(editor, "yes");
     expect(existsSync(link)).toBe(false); // the link itself is gone
     expect(existsSync(deep)).toBe(true); // the target tree SURVIVES
-    expect(editor.getState().statusMessage).toContain("Deleted directory");
+    expect(editor.getState().statusMessage).toContain("Deleted symlink");
   });
 
   test("F2: file-rmdir is the non-recursive fast path — fails on non-empty, destroys nothing", async () => {
@@ -191,5 +194,62 @@ describe("#361 codex r1: delete-directory operand + fast-path findings", () => {
     executeTlisp(editor, "(mkdir)");
     expect(editor.getState().minibufferView?.input).toBe("/");
     executeTlisp(editor, '(minibuffer-dispatch-key "Escape")');
+  });
+});
+
+describe("#361 codex r2: trailing slash, confirm-always, dangling links", () => {
+  test("R2-F1: delete-directory link/ (trailing slash) still removes only the link", async () => {
+    const target = join(vault, "slash-target");
+    const deep = join(target, "keep-me.txt");
+    mkdirSync(target, { recursive: true });
+    writeFileSync(deep, "survivor");
+    const link = join(vault, "slashed-link");
+    symlinkSync(target, link);
+    const editor = await createStartedEditor("");
+    // The exact shape codex flagged: the operand carries a trailing slash.
+    executeTlisp(editor, `(delete-directory "${link}/")`);
+    feed(editor, "yes");
+    expect(existsSync(link)).toBe(false); // the link itself is gone
+    expect(existsSync(deep)).toBe(true); // the target's contents SURVIVE
+  });
+
+  test("R2-F2: an EMPTY directory also requires confirmation (RFC-041 §3.4)", async () => {
+    const d = join(vault, "confirm-empty");
+    mkdirSync(d, { recursive: true });
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-directory "${d}")`);
+    // A confirm prompt is open — the directory is NOT gone yet.
+    expect(editor.getState().mode).toBe("mx");
+    expect(editor.getState().minibufferView?.prompt).toContain("empty directory");
+    feed(editor, "no");
+    expect(existsSync(d)).toBe(true);
+    executeTlisp(editor, `(delete-directory "${d}")`);
+    feed(editor, "yes");
+    expect(existsSync(d)).toBe(false);
+    expect(editor.getState().statusMessage).toContain("Deleted directory");
+  });
+
+  test("R2-F2: confirmed-empty removal stays non-recursive — late content is refused", async () => {
+    const d = join(vault, "late-content");
+    mkdirSync(d, { recursive: true });
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-directory "${d}")`);
+    // Content appears AFTER the empty confirm opened, BEFORE Enter.
+    writeFileSync(join(d, "late.txt"), "x");
+    feed(editor, "yes");
+    expect(existsSync(join(d, "late.txt"))).toBe(true); // not destroyed
+    expect(editor.getState().statusMessage).toContain("no longer empty");
+  });
+
+  test("R2-F3: a dangling symlink is deletable through delete-file after confirm", async () => {
+    const missing = join(vault, "never-existed");
+    const broken = join(vault, "broken-link");
+    mkdirSync(vault, { recursive: true });
+    symlinkSync(missing, broken); // dangling by construction
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-file "${broken}")`);
+    feed(editor, "yes");
+    expect(existsSync(broken)).toBe(false); // the link entry is gone
+    expect(editor.getState().statusMessage).toContain("Deleted");
   });
 });

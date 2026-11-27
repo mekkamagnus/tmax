@@ -408,6 +408,39 @@ export function createFileOps(
     return Either.right(createString(process.cwd()));
   });
 
+  // #361 codex r2 findings 1+3: lstat-style symlink test — the directory
+  // ENTRY, without following the link (file-stat/file-exists-p follow).
+  // delete-file uses it to delete dangling links; delete-directory uses it
+  // to remove a symlink as a LINK whatever its shape (trailing slash
+  // included). Boolean like the family.
+  api.set("file-symlink-p", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "file-symlink-p");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const pathArg = args[0]!
+    const typeValidation = validateArgType(pathArg, "string", 0, "file-symlink-p");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+
+    const path = expandHomePath(pathArg.value as string);
+    const isLink = (p: string): boolean => {
+      try {
+        return fs.lstatSync(p).isSymbolicLink();
+      } catch {
+        return false;
+      }
+    };
+    if (isAsyncMode(context)) {
+      return Either.right(createPromise(fs.promises.lstat(path)
+        .then((st) => createBoolean(st.isSymbolicLink()))
+        .catch(() => createBoolean(false))));
+    }
+    return Either.right(createBoolean(isLink(path)));
+  });
+
   // #361 codex r1 finding 2: non-recursive directory removal for
   // delete-directory's fast path. rmdir fails with ENOTEMPTY the moment
   // anything exists in the directory, so the emptiness CHECK and the

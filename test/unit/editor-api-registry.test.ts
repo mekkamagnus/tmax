@@ -64,7 +64,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // #361: 440 → 441 — process-cwd (the delete-directory guard's fact
     // primitive; refrozen with the U2 full-suite catch).
     // #361 codex r1: 441 → 442 — file-rmdir (the non-recursive fast path).
-    expect(live.length).toBe(442);
+    // #361 codex r2: 442 → 443 — file-symlink-p (lstat entry test).
+    expect(live.length).toBe(443);
     expect(live).toEqual(expected);
   });
 
