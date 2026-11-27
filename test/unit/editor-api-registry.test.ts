@@ -65,7 +65,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // primitive; refrozen with the U2 full-suite catch).
     // #361 codex r1: 441 → 442 — file-rmdir (the non-recursive fast path).
     // #361 codex r2: 442 → 443 — file-symlink-p (lstat entry test).
-    expect(live.length).toBe(443);
+    // #360 p1: 443 → 444 — dired-insert-lines (pre-formatted listing write).
+    expect(live.length).toBe(444);
     expect(live).toEqual(expected);
   });
 

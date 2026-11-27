@@ -100,6 +100,72 @@ export function createDiredOps(
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
+  // (dired-insert-lines LINES) — #360 phase 1: replace the current buffer's
+  // entire content with the given list of lines. Pure display mechanics —
+  // the listing FORMAT is composed in T-Lisp (dired.tlisp); this only
+  // writes it. Unlike dired-insert-listing, it takes pre-formatted strings.
+  api.set("dired-insert-lines", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "dired-insert-lines");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const linesArg = args[0]!;
+    const linesValidation = validateArgType(linesArg, "list", 0, "dired-insert-lines");
+    if (Either.isLeft(linesValidation)) {
+      return Either.left(linesValidation.left);
+    }
+
+    const lines = (linesArg.value as TLispValue[])
+      .filter((l): l is { type: "string"; value: string } => l.type === "string")
+      .map((l) => l.value);
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const formatted = lines.join("\n");
+    const lineCountResult = currentBuffer!.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get line count: ${lineCountResult.left}`));
+    }
+
+    // A freshly created buffer reports one EMPTY line; deleting even an
+    // empty range on it throws out-of-bounds. Guard on actual content.
+    const contentResult = currentBuffer!.getContent();
+    const hasContent = Either.isRight(contentResult) && contentResult.right.length > 0;
+
+    if (lineCountResult.right > 0 && hasContent) {
+      const lastLineResult = currentBuffer!.getLine(lineCountResult.right - 1);
+      const deleteRange = {
+        start: { line: 0, column: 0 },
+        end: {
+          line: lineCountResult.right - 1,
+          column: Either.isRight(lastLineResult) ? lastLineResult.right.length : 0,
+        },
+      };
+      const deleteResult = currentBuffer!.delete(deleteRange);
+      if (Either.isLeft(deleteResult)) {
+        return Either.left(createBufferError('InvalidOperation', `Failed to clear buffer: ${deleteResult.left}`));
+      }
+      const insertResult = deleteResult.right.insert({ line: 0, column: 0 }, formatted);
+      if (Either.isLeft(insertResult)) {
+        return Either.left(createBufferError('InvalidOperation', `Failed to insert listing: ${insertResult.left}`));
+      }
+      setCurrentBuffer(insertResult.right);
+    } else {
+      const insertResult = currentBuffer!.insert({ line: 0, column: 0 }, formatted);
+      if (Either.isLeft(insertResult)) {
+        return Either.left(createBufferError('InvalidOperation', `Failed to insert listing: ${insertResult.left}`));
+      }
+      setCurrentBuffer(insertResult.right);
+    }
+
+    return Either.right(createNil());
+  });
+
   // (dired-format-listing PATH ENTRIES)
   api.set("dired-format-listing", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 2, "dired-format-listing");

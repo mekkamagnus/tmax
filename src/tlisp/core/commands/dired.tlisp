@@ -1,51 +1,342 @@
 (defmodule editor/commands/dired
-  (export dired dired-open-file dired-up-directory dired-mark-delete dired-unmark dired-execute-deletions)
+  (export dired dired-open-entry dired-up dired-mark-delete dired-unmark
+          dired-execute-deletions dired-quit dired-refresh dired-rename-entry
+          dired-copy-entry dired-create-directory dired-next-entry dired-prev-entry
+          dired-render dired-format-entry dired-execute-accept
+          dired-mkdir-accept dired-rename-accept dired-copy-accept)
 
-;; dired.tlisp — directory editor commands
+;; dired.tlisp — directory editor, RFC-041 #360 PHASE 1 (minimum usable
+;; dired). Vim-motion keymap (user-fixed): j/k entry motion, l descend/open,
+;; h parent, RET/o alias l, q quit, + mkdir, d/u/x delete marks, R rename,
+;; C copy, g refresh-keeping-cursor. Out of scope by order: sort, hiding
+;; dotfiles, folders-first, mark-by-pattern, second window, preview.
+;;
+;; Architecture: T-Lisp owns the logic. TS contributes only display
+;; mechanics (dired-insert-lines / dired-toggle-mark / dired-get-marked)
+;; and the generic fs primitives (read-dir, file-remove, file-symlink-p).
+;;
+;; Listing format (phase 1): two-char mark field, then the name — name
+;; FIRST per the order, with a trailing / for directories. ".." is the
+;; first entry; hidden files are shown; read-dir order otherwise (no sort).
+;;
+;; Buffer policy: ONE *Dired* buffer, updated in place on navigation
+;; (descend and parent re-render the same buffer); q restores the buffer
+;; that was current when dired was opened.
+
+(major-mode-register "dired" '() nil '() '())
+(major-mode-doc "dired" "Directory editor (RFC-041 #360 phase 1): vim-motion file management over a read-only listing.")
+
+(defvar dired-return-buffer nil
+  "The buffer to restore on q (set when dired opens from another buffer).")
+
+(defvar dired-rename-source nil "Entry path awaiting rename-file's destination prompt.")
+(defvar dired-copy-source nil "Entry path awaiting copy-file's destination prompt.")
+(defvar dired-pending-deletions nil "Marked entry names awaiting the batch delete confirm.")
+
+;; ── helpers ───────────────────────────────────────────────────────────
+
+(defun dired-dirname (path)
+  "Directory portion of PATH; \"/\" at root. (Local copy of the
+file-ops/markdown convention — cross-module bare names do not resolve.)"
+  (let ((i (- (length path) 1)))
+    (while (and (> i 0) (not (string= (substring path i (+ i 1)) "/")))
+      (set! i (- i 1)))
+    (if (> i 0)
+      (substring path 0 i)
+      "/")))
+
+(defun dired-entry-name-at (text)
+  "The entry name in a listing line: columns after the two-char mark
+field (the name may contain spaces; a trailing / marks a directory)."
+  (substring text 2))
+
+(defun dired-entry-dir-p-at (text)
+  "Whether a listing line's entry is a directory (trailing /)."
+  (string= (substring text (- (length text) 1)) "/"))
+
+(defun dired-current-line-text ()
+  (buffer-get-line (cursor-line)))
+
+(defun dired-current-name ()
+  (dired-entry-name-at (dired-current-line-text)))
+
+(defun dired-current-dir-p ()
+  (dired-entry-dir-p-at (dired-current-line-text)))
+
+(defun dired-current-path ()
+  "Full path of the entry under the cursor (no trailing slash)."
+  (let ((name (dired-current-name)))
+    (concat (buffer-filename) "/"
+      (if (dired-current-dir-p)
+        (substring name 0 (- (length name) 1))
+        name))))
+
+(defun dired-format-entry (entry)
+  "One listing line for a read-dir hashmap entry: mark field + name
+(+ trailing / for directories)."
+  (concat "  " (hashmap-get entry "name")
+    (if (hashmap-get entry "isDirectory") "/" "")))
+
+(defun dired-listing-lines (dir)
+  "All listing lines for DIR: \"..\" first, then every read-dir entry
+(hidden files included, read-dir order — phase 1 has no sort). nil when
+DIR cannot be read."
+  (let ((entries (read-dir dir)))
+    (if entries
+      (cons "  .." (mapcar "dired-format-entry" entries))
+      nil)))
+
+;; ── entry point ───────────────────────────────────────────────────────
+
 (defun dired (&optional path)
-  "Open directory editor."
+  "Open a directory listing (RFC-041 #360 phase 1).
+With PATH, list it; with a file visited, list the file's directory;
+otherwise list the process working directory. The listing buffer is
+read-only with dired-mode active; q returns to the previous buffer."
   (interactive)
-  (let ((dir (or path (buffer-filename) ".")))
-    (let ((entries (read-dir dir)))
-      (buffer-create "*Dired*")
-      (buffer-switch "*Dired*")
-      (set-buffer-filename dir)
-      (dired-insert-listing dir entries)
-      (set-buffer-modified-p nil)
-      (message (concat "Dired: " dir)))))
+  (let ((dir (or path
+               (let ((fn (buffer-filename)))
+                 (if fn (dired-dirname fn) (process-cwd))))))
+    (unless (string= (buffer-current) "*Dired*")
+      (setq dired-return-buffer (buffer-current)))
+    (dired-render dir)))
 
-(defun dired-open-file ()
-  "Open file or enter directory under cursor."
-  (interactive)
-  (let ((entry (dired-parse-current-entry)))
-    (if (dired-is-directory-p entry)
-      (dired (concat (buffer-filename) "/" entry))
-      (find-file (concat (buffer-filename) "/" entry)))))
+(defun dired-render (dir)
+  "Build and install the listing for DIR in the *Dired* buffer."
+  (let ((lines (dired-listing-lines dir)))
+    (if lines
+      (progn
+        (buffer-create "*Dired*")
+        (buffer-switch "*Dired*")
+        (set-buffer-filename dir)
+        (dired-insert-lines lines)
+        (cursor-move 0 0)
+        (set-buffer-modified-p nil)
+        (buffer-set-read-only t)
+        (major-mode-set "dired")
+        (dired-ensure-keymap)
+        (message (concat "Dired: " dir)))
+      (message (concat "dired: cannot read " dir)))))
 
-(defun dired-up-directory ()
-  "Go to parent directory."
+;; ── navigation ────────────────────────────────────────────────────────
+
+(defun dired-next-entry ()
+  "Move one entry down (j)."
   (interactive)
-  (let ((parent (file-dirname (buffer-filename))))
-    (when parent (dired parent))))
+  (line-next 1))
+
+(defun dired-prev-entry ()
+  "Move one entry up (k)."
+  (interactive)
+  (line-previous 1))
+
+(defun dired-open-entry ()
+  "Go into the thing under the cursor (l / RET / o): descend into a
+directory, find-file a regular file, go up on \"..\"."
+  (interactive)
+  (let ((name (dired-current-name)))
+    (cond
+      ((string= name "..")
+        (dired-up))
+      ((dired-current-dir-p)
+        (dired-render (dired-current-path)))
+      (t
+        (find-file-open (dired-current-path))))))
+
+(defun dired-up ()
+  "Go up to the parent directory (h)."
+  (interactive)
+  (let ((dir (buffer-filename)))
+    (if (string= dir "/")
+      (message "dired: already at root")
+      (dired-render (dired-dirname dir)))))
+
+(defun dired-quit ()
+  "Close the listing and return to the previous buffer (q)."
+  (interactive)
+  (let ((prev dired-return-buffer))
+    (setq dired-return-buffer nil)
+    (if (and prev (not (string= prev "*Dired*")))
+      (funcall "switch-to-buffer" prev)
+      (funcall "switch-to-buffer" "*scratch*"))
+    (funcall "buffer-kill" "*Dired*")))
+
+;; ── marks and deletion ────────────────────────────────────────────────
 
 (defun dired-mark-delete ()
-  "Mark current file for deletion."
+  "Mark the current entry for deletion and move down (d)."
   (interactive)
   (dired-toggle-mark "D")
   (line-next 1))
 
 (defun dired-unmark ()
-  "Remove mark from current file."
+  "Remove the deletion mark and move down (u)."
   (interactive)
-  (dired-toggle-mark nil)
+  (dired-toggle-mark " ")
   (line-next 1))
 
+(defun dired-destructive-p (path)
+  "Refuse the protected trees (same rule as the file-ops family): /,
+$HOME, and the process working directory, compared on realpath."
+  (let ((real (file-realpath path)))
+    (or
+      (string= real "/")
+      (string= real (file-realpath "~"))
+      (string= real (file-realpath (process-cwd))))))
+
 (defun dired-execute-deletions ()
-  "Delete all marked files."
+  "Carry out the marked deletions (x), behind ONE yes/no confirm for
+the batch (phase 1 shape; each entry still passes the protected-path
+guard, and \"..\" is never deleted). Directories are removed
+recursively, files with plain unlink."
   (interactive)
   (let ((marked (dired-get-marked)))
-    (dolist (file marked)
-      (file-remove (concat (buffer-filename) "/" file)))
-    (dired-refresh)
-    (message (concat "Deleted " (length marked) " files"))))
-)
+    (if (= (length marked) 0)
+      (message "No marked entries")
+      (progn
+        (setq dired-pending-deletions marked)
+        (completing-read
+          (concat "Delete " (number-to-string (length marked)) " marked entries? ")
+          "file-ops-yes-no-table"
+          nil
+          t
+          ""
+          "file-ops-history"
+          "dired-execute-accept")))))
+
+(defun dired-execute-accept (answer)
+  "Batch-delete confirm accept: on \"yes\", remove every marked entry
+that passes the guard, then refresh."
+  (let ((names dired-pending-deletions))
+    (setq dired-pending-deletions nil)
+    (if (string= answer "yes")
+      (let ((deleted 0))
+        (dolist (name names)
+          (let ((path (concat (buffer-filename) "/" name)))
+            (cond
+              ((string= name "..")
+                (message "dired: refusing to delete .."))
+              ((dired-destructive-p path)
+                (message (concat "dired: refusing to delete protected path " path)))
+              (t
+                (if (file-remove path (file-symlink-p path))
+                  (set! deleted (+ deleted 1))
+                  (message (concat "dired: failed to delete " path)))))))
+        (dired-refresh)
+        (message (concat "Deleted " (number-to-string deleted) " entries")))
+      (message "Cancelled"))))
+
+;; ── file operations (delegate to the file-ops family) ─────────────────
+
+(defun dired-create-directory ()
+  "Create a directory inside the listed one (+ — the #359 mkdir
+command, prefilled with the listing's directory)."
+  (interactive)
+  (completing-read
+    "Make directory: "
+    "file-completion-table"
+    nil
+    nil
+    (concat (buffer-filename) "/")
+    "mkdir-history"
+    "dired-mkdir-accept"))
+
+(defun dired-mkdir-accept (path)
+  (funcall "mkdir-do" path)
+  (dired-refresh))
+
+(defun dired-rename-entry ()
+  "Rename the entry under the cursor (R — the #361 rename-file flow,
+source filled in, destination prompted, then refresh)."
+  (interactive)
+  (let ((src (dired-current-path)))
+    (setq dired-rename-source src)
+    (completing-read
+      (concat "Rename " src " to: ")
+      "file-completion-table"
+      nil
+      nil
+      (concat (buffer-filename) "/")
+      "rename-file-history"
+      "dired-rename-accept")))
+
+(defun dired-rename-accept (dest)
+  (let ((src dired-rename-source))
+    (setq dired-rename-source nil)
+    (funcall "rename-file-do" src dest)
+    (dired-refresh)))
+
+(defun dired-copy-entry ()
+  "Copy the entry under the cursor (C — the #361 copy-file flow,
+source filled in, destination prompted, then refresh)."
+  (interactive)
+  (let ((src (dired-current-path)))
+    (setq dired-copy-source src)
+    (completing-read
+      (concat "Copy " src " to: ")
+      "file-completion-table"
+      nil
+      nil
+      (concat (buffer-filename) "/")
+      "copy-file-history"
+      "dired-copy-accept")))
+
+(defun dired-copy-accept (dest)
+  (let ((src dired-copy-source))
+    (setq dired-copy-source nil)
+    (funcall "copy-file-do" src dest)
+    (dired-refresh)))
+
+;; ── refresh ───────────────────────────────────────────────────────────
+
+(defun dired-refresh ()
+  "Re-read the listed directory and keep the cursor on the same entry
+when it still exists (g); otherwise back to the top."
+  (interactive)
+  (let ((name (dired-current-name))
+        (dir (buffer-filename)))
+    (dired-render dir)
+    (let ((i 0)
+          (found -1))
+      (while (< i (buffer-line-count))
+        (if (string= (dired-entry-name-at (buffer-get-line i)) name)
+          (progn
+            (set! found i)
+            (set! i (buffer-line-count)))
+          (set! i (+ i 1))))
+      (cursor-move (if (>= found 0) found 0) 0))))
+
+;; ── keymap (vim-motion; BUFFER-LOCAL, the shadow tier) ────────────────
+;; Major-mode-scoped key-binds resolve AFTER the normal-mode T-Lisp keymap
+;; (last resort), so vim's j/k/l/h would shadow them. The buffer-local
+;; keymap tier is innermost and wins — the grep-results-mode mechanism.
+;; Built once per *Dired* buffer in dired-render.
+
+(defun dired-ensure-keymap ()
+  "Attach the dired keymap to the *Dired* buffer (idempotent)."
+  (let ((kmap (editor/keymaps/buffer-keymap "*Dired*")))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "dired"))
+        (editor/keymaps/keymap-set-key kmap "j" "(editor/commands/dired/dired-next-entry)")
+        (editor/keymaps/keymap-set-key kmap "k" "(editor/commands/dired/dired-prev-entry)")
+        (editor/keymaps/keymap-set-key kmap "l" "(editor/commands/dired/dired-open-entry)")
+        (editor/keymaps/keymap-set-key kmap "Enter" "(editor/commands/dired/dired-open-entry)")
+        (editor/keymaps/keymap-set-key kmap "o" "(editor/commands/dired/dired-open-entry)")
+        (editor/keymaps/keymap-set-key kmap "h" "(editor/commands/dired/dired-up)")
+        (editor/keymaps/keymap-set-key kmap "q" "(editor/commands/dired/dired-quit)")
+        (editor/keymaps/keymap-set-key kmap "+" "(editor/commands/dired/dired-create-directory)")
+        (editor/keymaps/keymap-set-key kmap "d" "(editor/commands/dired/dired-mark-delete)")
+        (editor/keymaps/keymap-set-key kmap "u" "(editor/commands/dired/dired-unmark)")
+        (editor/keymaps/keymap-set-key kmap "x" "(editor/commands/dired/dired-execute-deletions)")
+        (editor/keymaps/keymap-set-key kmap "R" "(editor/commands/dired/dired-rename-entry)")
+        (editor/keymaps/keymap-set-key kmap "C" "(editor/commands/dired/dired-copy-entry)")
+        (editor/keymaps/keymap-set-key kmap "g" "(editor/commands/dired/dired-refresh)")
+        (editor/keymaps/buffer-set-keymap "*Dired*" kmap))))
+  t)
+
+;; Global entry point (SPC d d was free in normal mode).
+(key-bind "SPC d d" "(dired)" "normal")
+
+(provide "dired")
+)  ;; end of defmodule editor/commands/dired (BUG-74/#126: keep the close at EOF, not at the export clause)
