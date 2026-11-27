@@ -210,17 +210,29 @@ they were."
   (line-previous 1))
 
 (defun dired-open-entry ()
-  "Go into the thing under the cursor (l / RET / o): descend into a
-directory, find-file a regular file, go up on \"..\"."
+  "Go into the thing under the cursor (l / RET / o). The entry's type
+is read from the DISK at this moment (round 13 fix): the listing's
+directory suffix may be stale — a listed file may have become a
+folder, and a listed folder may have become a file. A missing entry
+messages and changes nothing."
   (interactive)
   (let ((name (dired-current-name)))
-    (cond
-      ((string= name "..")
-        (dired-up))
-      ((dired-current-dir-p)
-        (dired-render (dired-current-path)))
-      (t
-        (find-file-open (dired-current-path))))))
+    (if (string= name "..")
+      (dired-up)
+      (let* ((path (dired-current-path)))
+        (cond
+          ((not (file-entry-id path))
+            ;; lstat fails: the entry is GONE (round 13) — say so, change
+            ;; nothing. (A dangling link still HAS an id and opens, per r7.)
+            (message (concat "dired: no such entry: " name)))
+          ((dired-real-directory-p path)
+            ;; FOLLOWING stat: real directories (readable or not) AND
+            ;; symlinks to directories (r7: l enters the target). An
+            ;; unreadable directory fails visibly inside render — which
+            ;; keeps the listing and the marks (round 12 fix 2).
+            (dired-render path))
+          (t
+            (find-file-open path)))))))
 
 (defun dired-up ()
   "Go up to the parent directory (h)."
@@ -504,16 +516,21 @@ source filled in, destination prompted, then refresh)."
   "Destination accept: the SOURCE is revalidated by identity (coach
 r11) — a missing or replaced source refuses without touching the
 destination. Dangling links remain renameable (their lstat identity is
-a string)."
+a string). A destination that already exists is REFUSED (safety
+pass): renameSync would silently overwrite it."
   (let ((src dired-rename-source)
         (id dired-rename-source-id))
     (setq dired-rename-source nil)
     (setq dired-rename-source-id nil)
-    (if (not (dired-id-matches (file-entry-id src) id))
-      (message (concat "dired: rename refused — the source changed: " src))
-      (let ((res (funcall "rename-file-do" src dest)))
-        (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
-        (message (if (stringp res) res "rename-file: done"))))))
+    (cond
+      ((not (dired-id-matches (file-entry-id src) id))
+        (message (concat "dired: rename refused — the source changed: " src)))
+      ((file-exists-p dest)
+        (message (concat "dired: rename refused — destination exists: " dest)))
+      (t
+        (let ((res (funcall "rename-file-do" src dest)))
+          (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
+          (message (if (stringp res) res "rename-file: done")))))))
 
 (defun dired-copy-entry ()
   "Copy the entry under the cursor (C — the #361 copy-file flow,
@@ -534,22 +551,28 @@ source filled in, destination prompted, then refresh)."
 
 (defun dired-copy-accept (dest)
   "Destination accept: the SOURCE is revalidated by identity (coach
-r11); a missing or replaced source refuses without creating the
-destination."
+r11) — link AND referent (round 12 fix 1); a missing or replaced
+source refuses without creating the destination. A destination that
+already exists is REFUSED (safety pass): copyFileSync would silently
+overwrite it."
   (let ((src dired-copy-source)
         (id dired-copy-source-id)
         (ref-id dired-copy-referent-id))
     (setq dired-copy-source nil)
     (setq dired-copy-source-id nil)
     (setq dired-copy-referent-id nil)
-    (if (not (and (dired-id-matches (file-entry-id src) id)
-                  (dired-id-matches (file-entry-id (file-realpath src)) ref-id)))
-      ;; Round 12 fix 1: copying follows the link — the LINK and the file
-      ;; it points to must BOTH be what they were when the prompt opened.
-      (message (concat "dired: copy refused — the source changed: " src))
-      (let ((res (funcall "copy-file-do" src dest)))
-        (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
-        (message (if (stringp res) res "copy-file: done"))))))
+    (cond
+      ((not (and (dired-id-matches (file-entry-id src) id)
+                 (dired-id-matches (file-entry-id (file-realpath src)) ref-id)))
+        ;; Round 12 fix 1: copying follows the link — the LINK and the file
+        ;; it points to must BOTH be what they were when the prompt opened.
+        (message (concat "dired: copy refused — the source changed: " src)))
+      ((file-exists-p dest)
+        (message (concat "dired: copy refused — destination exists: " dest)))
+      (t
+        (let ((res (funcall "copy-file-do" src dest)))
+          (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
+          (message (if (stringp res) res "copy-file: done")))))))
 
 ;; ── refresh ───────────────────────────────────────────────────────────
 

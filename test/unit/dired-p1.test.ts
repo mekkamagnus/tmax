@@ -8,7 +8,7 @@
  * ".." first, hidden files shown. One *Dired* buffer updated in place.
  */
 import { describe, test, expect, beforeAll } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -954,5 +954,134 @@ describe("#360 round 12: copy through a link, marks kept when navigation fails",
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "r12-a.txt"))).toBe(true);
     chmodSync(noread, 0o755);
+  });
+});
+
+describe("#360 round 13 + safety pass: disk-truth navigation, no silent overwrite", () => {
+  test("R13-1: file replaced by a populated folder — l ENTERS the folder, no New-file buffer", async () => {
+    writeFileSync(join(vault, "r13-swap.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    // replace AFTER the listing rendered (the row's suffix is now stale)
+    rmSync(join(vault, "r13-swap.txt"));
+    mkdirSync(join(vault, "r13-swap.txt", "inner"), { recursive: true });
+    writeFileSync(join(vault, "r13-swap.txt", "inner", "f.txt"), "inside");
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let hit = -1;
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === "r13-swap.txt") hit = i;
+    }
+    executeTlisp(ed, `(cursor-move ${hit} 0)`);
+    await ed.handleKey("l");
+    expect(tl(ed, "(buffer-current)")).toBe("*Dired*"); // no New-file buffer
+    expect(tl(ed, "(buffer-text)")).toContain("inner");
+  });
+
+  test("R13-2: folder replaced by a file — Enter OPENS the file", async () => {
+    const d = join(vault, "r13-dirswap");
+    mkdirSync(d, { recursive: true });
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    rmSync(d, { recursive: true });
+    writeFileSync(d, "now a file");
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let hit = -1;
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === "r13-dirswap") hit = i;
+    }
+    executeTlisp(ed, `(cursor-move ${hit} 0)`);
+    await ed.handleKey("Enter");
+    expect(tl(ed, "(buffer-current)")).toBe(d);
+    expect(tl(ed, "(buffer-text)")).toContain("now a file");
+  });
+
+  test("R13-3: entry deleted after listing — l messages and opens nothing", async () => {
+    writeFileSync(join(vault, "r13-gone-l.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    unlinkSync(join(vault, "r13-gone-l.txt"));
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let hit = -1;
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === "r13-gone-l.txt") hit = i;
+    }
+    executeTlisp(ed, `(cursor-move ${hit} 0)`);
+    await ed.handleKey("l");
+    expect(tl(ed, "(buffer-current)")).toBe("*Dired*");
+    expect(ed.getState().statusMessage).toContain("no such entry");
+  });
+
+  test("R13-4: entry deleted after listing — Enter messages and opens nothing", async () => {
+    writeFileSync(join(vault, "r13-gone-e.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    unlinkSync(join(vault, "r13-gone-e.txt"));
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let hit = -1;
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === "r13-gone-e.txt") hit = i;
+    }
+    executeTlisp(ed, `(cursor-move ${hit} 0)`);
+    await ed.handleKey("Enter");
+    expect(tl(ed, "(buffer-current)")).toBe("*Dired*");
+    expect(ed.getState().statusMessage).toContain("no such entry");
+  });
+
+  test("S-1: dired R refuses to overwrite an existing destination", async () => {
+    writeFileSync(join(vault, "s1-src.txt"), "source");
+    writeFileSync(join(vault, "s1-dest.txt"), "PRECIOUS");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  s1-src.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("R");
+      }
+    }
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "s1-dest.txt")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(readFileSync(join(vault, "s1-dest.txt"), "utf8")).toBe("PRECIOUS");
+    expect(existsSync(join(vault, "s1-src.txt"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("exists");
+  });
+
+  test("S-2: dired C refuses to overwrite an existing destination", async () => {
+    writeFileSync(join(vault, "s2-src.txt"), "source");
+    writeFileSync(join(vault, "s2-dest.txt"), "PRECIOUS");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  s2-src.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("C");
+      }
+    }
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "s2-dest.txt")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(readFileSync(join(vault, "s2-dest.txt"), "utf8")).toBe("PRECIOUS");
+    expect(existsSync(join(vault, "s2-src.txt"))).toBe(true);
+  });
+
+  test("S-3: M-x rename-file refuses to overwrite an existing destination", async () => {
+    writeFileSync(join(vault, "s3-src.txt"), "source");
+    writeFileSync(join(vault, "s3-dest.txt"), "PRECIOUS");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(rename-file "${join(vault, "s3-src.txt")}")`);
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "s3-dest.txt")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(readFileSync(join(vault, "s3-dest.txt"), "utf8")).toBe("PRECIOUS");
+    expect(existsSync(join(vault, "s3-src.txt"))).toBe(true);
+  });
+
+  test("S-4: M-x copy-file refuses to overwrite an existing destination", async () => {
+    writeFileSync(join(vault, "s4-src.txt"), "source");
+    writeFileSync(join(vault, "s4-dest.txt"), "PRECIOUS");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(copy-file "${join(vault, "s4-src.txt")}")`);
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "s4-dest.txt")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(readFileSync(join(vault, "s4-dest.txt"), "utf8")).toBe("PRECIOUS");
   });
 });

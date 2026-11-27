@@ -211,6 +211,10 @@ turns them into a visible status-line message."
       ;; file-exists-p FOLLOWS links — a dangling symlink is still a
       ;; renameable directory entry (coach r3).
       (message (concat "rename-file: no such file " source)))
+    ((file-exists-p dest)
+      ;; Safety pass: renameSync SILENTLY OVERWRITES an existing
+      ;; destination — refuse instead of destroying it.
+      (message (concat "rename-file: destination exists — not overwriting " dest)))
     (t
       (condition-case err
         (progn
@@ -267,6 +271,10 @@ boolean (#361 fixed the swallowed sync-path failures)."
       (message "copy-file: empty path"))
     ((not (file-exists-p source))
       (message (concat "copy-file: no such file " source)))
+    ((file-exists-p dest)
+      ;; Safety pass: copyFileSync SILENTLY OVERWRITES an existing
+      ;; destination — refuse instead of destroying it.
+      (message (concat "copy-file: destination exists — not overwriting " dest)))
     ((file-copy source dest)
       (message (concat "Copied " source " to " dest)))
     (t
