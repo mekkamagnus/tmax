@@ -1,6 +1,6 @@
 # RFC-042: Agent-aware workspaces — the herdr-style UI (pre-fikra)
 
-**Status:** Proposed 2026-11-27. §3 (the workspace/tab layer) is an OPEN DECISION — this RFC records the options; nothing in that layer is built until the user picks.
+**Status:** Proposed 2026-11-27. §3 was DECIDED the same day: **layout tabs — vim tab pages** (option A's runtime shape, D's staging). Remaining §3 sub-decisions are listed at the end of §3's issue (#363).
 
 **Related:** RFC-014 (workspace system), RFC-014A (shell-mode — largely BUILT, see §2), SPEC-097, BUG-84, #351 (pty exit status — prerequisite), #362–#366 (this arc's issues), RFC-013/RFC-027 (fikra — the later package this prepares for)
 
