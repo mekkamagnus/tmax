@@ -263,7 +263,9 @@ describe("File Primitives", () => {
     test("creates a directory", () => {
       const dirPath = path.join(tmpDir, "new-dir");
       const result = call("file-mkdir", [createString(dirPath)]);
-      expect(result.type).toBe("nil");
+      // #359: honest boolean return (was nil on both paths).
+      expect(result.type).toBe("boolean");
+      expect(result.value).toBe(true);
       expect(fs.existsSync(dirPath)).toBe(true);
       expect(fs.statSync(dirPath).isDirectory()).toBe(true);
     });
@@ -271,7 +273,9 @@ describe("File Primitives", () => {
     test("creates nested directories with recursive", () => {
       const nestedPath = path.join(tmpDir, "parent", "child", "grandchild");
       const result = call("file-mkdir", [createString(nestedPath)]);
-      expect(result.type).toBe("nil");
+      // #359: honest boolean return (was nil on both paths).
+      expect(result.type).toBe("boolean");
+      expect(result.value).toBe(true);
       expect(fs.existsSync(nestedPath)).toBe(true);
     });
   });
