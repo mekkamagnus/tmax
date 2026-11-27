@@ -42,7 +42,8 @@ const INACTIVITY_TIMEOUT_MS = 120_000;
 // EXCLUDING adw-* tests (they spawn real LLM subprocesses and belong in
 // test:integration, not test:unit — they block the suite under concurrent
 // pipeline load; see BUG-16 scope-closure docs).
-import { readdirSync } from "fs";
+import { readdirSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 
 // Keep cross-file contention low enough that test-local 20s/60s deadlines
@@ -55,6 +56,90 @@ const FILES_PER_BATCH = 5;
 // under concurrency; a lower cap reduces (does not eliminate) the stacking.
 // Set TMAX_UNIT_MAX_CONCURRENCY=N (e.g. 4) to opt in; unset = bun's default.
 const MAX_CONCURRENCY = process.env.TMAX_UNIT_MAX_CONCURRENCY;
+
+// ── RFC-039 §2.4 (#358): private run directory per bun-test child ──────────
+// Every batch child gets TMPDIR=<run directory>, so every temp file the suite
+// creates lands in ONE place that the wrapper owns. The directory is removed
+// on every exit path (child exit of any kind — normal, SIGKILL-after-summary,
+// inactivity kill — plus wrapper exit and catchable signals). A SIGKILLed
+// wrapper leaves its directory behind; the stale sweep at the next start
+// removes those (entries are addressed by the exact prefix below, and only
+// when the pid embedded in the name is dead — a live run's directory is never
+// touched).
+const RUN_DIR_PREFIX = "tmax-unit-run-";
+
+/** Remove run directories left by earlier KILLED wrapper runs (RFC-039 §2.4). */
+function sweepStaleRunDirs(): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(tmpdir());
+  } catch {
+    return; // best-effort only
+  }
+  for (const entry of entries) {
+    if (!entry.startsWith(RUN_DIR_PREFIX)) continue;
+    const pid = Number(entry.slice(RUN_DIR_PREFIX.length).split("-", 1)[0]);
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
+      try {
+        process.kill(pid, 0); // throws ESRCH when the pid is gone
+        continue; // a live wrapper run owns it — never touch
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EPERM") continue; // alive, not ours
+        // ESRCH: dead owner — stale, remove below
+      }
+    }
+    try {
+      rmSync(join(tmpdir(), entry), { recursive: true, force: true });
+    } catch {
+      // best-effort only
+    }
+  }
+}
+
+/** The current batch's run directory, if one is live (for signal cleanup). */
+let currentRunDir: string | undefined;
+
+/** Create this run's private temp directory and remember it for cleanup. */
+function makeRunDir(): string {
+  currentRunDir = mkdtempSync(join(tmpdir(), `${RUN_DIR_PREFIX}${process.pid}-`));
+  return currentRunDir;
+}
+
+/**
+ * Report how many entries the child left in the run directory (RFC-039's
+ * standing leak count), then remove the directory.
+ */
+function disposeRunDir(runDir: string, label: string): void {
+  let left = -1;
+  try {
+    left = readdirSync(runDir).length;
+  } catch {
+    // already gone (child removed its own temp, or the fs dropped it)
+  }
+  if (left >= 0) {
+    process.stdout.write(`run-unit-tests: ${label} left ${left} temp ${left === 1 ? "entry" : "entries"} in its run directory (removed)\n`);
+  }
+  try {
+    rmSync(runDir, { recursive: true, force: true });
+  } catch {
+    // best-effort only
+  }
+  if (currentRunDir === runDir) currentRunDir = undefined;
+}
+
+sweepStaleRunDirs();
+
+// Catchable wrapper terminations must not leave the live run directory.
+const signalCodes = { SIGINT: 130, SIGTERM: 143 } as const;
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    if (currentRunDir) disposeRunDir(currentRunDir, `wrapper ${signal}`);
+    process.exit(signalCodes[signal]);
+  });
+}
+process.on("exit", () => {
+  if (currentRunDir) disposeRunDir(currentRunDir, "wrapper exit");
+});
 
 function buildTestBatches(): string[][] {
   const explicitTarget = process.argv.slice(2).find((a) => !a.startsWith("-"));
@@ -115,7 +200,12 @@ function buildTestBatches(): string[][] {
 function runBatch(args: string[], index: number, total: number): Promise<number> {
   return new Promise((resolve) => {
     process.stdout.write(`\nrun-unit-tests: batch ${index + 1}/${total}\n`);
-    const child = spawn("bun", args, { stdio: ["ignore", "pipe", "pipe"] });
+    // RFC-039 §2.4 (#358): the child's temp files land in this run directory.
+    const runDir = makeRunDir();
+    const child = spawn("bun", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, TMPDIR: runDir },
+    });
     let combined = "";
     let sawSummary = false;
     let forcedAfterSummary = false;
@@ -168,6 +258,9 @@ function runBatch(args: string[], index: number, total: number): Promise<number>
     child.on("exit", (code) => {
       clearInterval(inactivityTimer);
       if (graceTimeout) clearTimeout(graceTimeout);
+      // Every child exit path lands here — normal exit, the SIGKILL-after-
+      // summary force-exit, and the inactivity kill (RFC-039 §2.4).
+      disposeRunDir(runDir, `batch ${index + 1}/${total}`);
       if (forcedAfterSummary) {
         resolve(/\b[1-9]\d* fail\b/.test(combined) ? 1 : 0);
       } else {
