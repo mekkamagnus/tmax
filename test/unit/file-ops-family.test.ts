@@ -9,7 +9,7 @@
  * and the guard refuses /, $HOME, and the process working directory.
  */
 import { describe, test, expect } from "bun:test";
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -251,5 +251,117 @@ describe("#361 codex r2: trailing slash, confirm-always, dangling links", () => 
     feed(editor, "yes");
     expect(existsSync(broken)).toBe(false); // the link entry is gone
     expect(editor.getState().statusMessage).toContain("Deleted");
+  });
+});
+describe("#361 coach round 3: read failure, link semantics, canonical guard", () => {
+  test("C3-1: unreadable directory (mode 000) — visible error, no confirm, no delete", async () => {
+    const d = join(vault, "coach-noread");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "f.txt"), "x");
+    chmodSync(d, 0o000);
+    const editor = await createStartedEditor("");
+    expect(() => executeTlisp(editor, `(delete-directory "${d}")`)).not.toThrow();
+    expect(editor.getState().statusMessage).toContain("cannot read");
+    expect(editor.getState().mode).toBe("normal"); // no confirm opened
+    chmodSync(d, 0o755);
+    expect(existsSync(join(d, "f.txt"))).toBe(true);
+  });
+
+  test("C3-2a: rename-file renames a dangling symlink (the entry)", async () => {
+    const broken = join(vault, "coach-dangling");
+    const renamed = join(vault, "coach-dangling-moved");
+    mkdirSync(vault, { recursive: true });
+    symlinkSync(join(vault, "no-target"), broken);
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(rename-file "${broken}")`);
+    feed(editor, renamed);
+    expect(lstatSync(broken, { throwIfNoEntry: false })).toBeUndefined();
+    expect(lstatSync(renamed, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(editor.getState().statusMessage).toContain("Renamed");
+  });
+
+  test("C3-2b: mkdir on a dangling-link path reports failure, never success", async () => {
+    const link = join(vault, "coach-mkdir-link");
+    mkdirSync(vault, { recursive: true });
+    symlinkSync(join(vault, "no-target"), link);
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(mkdir "${join(link, "sub")}")`);
+    expect(editor.getState().statusMessage).not.toContain("Created");
+    expect(editor.getState().statusMessage).toContain("failed");
+  });
+
+  test("C3-2c: copy-file on a dangling link stays a visible failure", async () => {
+    const link = join(vault, "coach-copy-link");
+    mkdirSync(vault, { recursive: true });
+    symlinkSync(join(vault, "no-target"), link);
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(copy-file "${link}")`);
+    feed(editor, join(vault, "coach-copy-dest.txt"));
+    expect(editor.getState().statusMessage).toContain("no such file");
+    expect(existsSync(join(vault, "coach-copy-dest.txt"))).toBe(false);
+  });
+
+  test("C3-3a: delete-file refuses every protected operand form", async () => {
+    const homeLink = join(vault, "coach-home-link");
+    const cwdLink = join(vault, "coach-cwd-link");
+    mkdirSync(vault, { recursive: true });
+    symlinkSync(process.env.HOME!, homeLink);
+    symlinkSync(process.cwd(), cwdLink);
+    const editor = await createStartedEditor("");
+    for (const operand of ["/", "~", "(process-cwd)", homeLink, cwdLink, "."]) {
+      const arg = operand === "(process-cwd)" ? "(process-cwd)" : `"${operand}"`;
+      executeTlisp(editor, `(delete-file ${arg})`);
+      expect(editor.getState().statusMessage).toContain("refusing");
+      expect(editor.getState().mode).toBe("normal"); // refused before any confirm
+    }
+    expect(lstatSync(homeLink, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(lstatSync(cwdLink, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+  });
+
+  test("C3-3b: delete-directory refuses protected operands through symlinks and relative forms", async () => {
+    const homeLink = join(vault, "coach-dd-home-link");
+    const cwdLink = join(vault, "coach-dd-cwd-link");
+    mkdirSync(vault, { recursive: true });
+    symlinkSync(process.env.HOME!, homeLink);
+    symlinkSync(process.cwd(), cwdLink);
+    const editor = await createStartedEditor("");
+    for (const operand of [homeLink, cwdLink, "."]) {
+      executeTlisp(editor, `(delete-directory "${operand}")`);
+      expect(editor.getState().statusMessage).toContain("refusing");
+      expect(editor.getState().mode).toBe("normal");
+    }
+    expect(lstatSync(homeLink, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(lstatSync(cwdLink, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+  });
+
+  test("C3-3c: delete-file rechecks the guard at removal time — a confirm-window retarget to $HOME is refused", async () => {
+    const safeTarget = join(vault, "coach-safe-target.txt");
+    writeFileSync(safeTarget, "x");
+    const link = join(vault, "coach-retarget-link");
+    symlinkSync(safeTarget, link);
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-file "${link}")`);
+    expect(editor.getState().mode).toBe("mx"); // confirm open, link is safe
+    // Retarget the SAME entry to $HOME while the confirm is pending.
+    rmSync(link);
+    symlinkSync(process.env.HOME!, link);
+    feed(editor, "yes");
+    expect(editor.getState().statusMessage).toContain("refusing");
+    expect(lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+  });
+
+  test("C3-3d: delete-directory rechecks the guard at removal time — confirm-window retarget refused", async () => {
+    const safeDir = join(vault, "coach-safe-dir");
+    mkdirSync(safeDir, { recursive: true });
+    const link = join(vault, "coach-dd-retarget-link");
+    symlinkSync(safeDir, link);
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(delete-directory "${link}")`);
+    expect(editor.getState().mode).toBe("mx"); // symlink confirm open
+    rmSync(link);
+    symlinkSync(process.env.HOME!, link);
+    feed(editor, "yes");
+    expect(editor.getState().statusMessage).toContain("refusing");
+    expect(lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
   });
 });

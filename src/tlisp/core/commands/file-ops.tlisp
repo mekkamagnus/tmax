@@ -113,16 +113,22 @@ then asks for confirmation before deleting. ~ expands to $HOME."
   (delete-file-confirm path))
 
 (defun delete-file-confirm (path)
-  "Open the yes/no confirm for deleting PATH."
-  (setq delete-file-pending-path path)
-  (completing-read
+  "Open the yes/no confirm for deleting PATH — unless PATH resolves to
+a protected tree (coach r3: the same canonical guard
+delete-directory applies, so a symlink to $HOME or the cwd is refused
+here too, before any prompt)."
+  (if (file-ops-destructive-p path)
+    (message (concat "delete-file: refusing to delete protected path " path))
+    (progn
+      (setq delete-file-pending-path path)
+      (completing-read
     (concat "Delete " path "? ")
     "file-ops-yes-no-table"
     nil
     t
     ""
     "file-ops-history"
-    "delete-file-do"))
+    "delete-file-do"))))
 
 (defun delete-file-do (answer)
   "Confirm accept handler: delete the pending path on \"yes\".
@@ -133,6 +139,11 @@ delete-directory is the directory command."
     (setq delete-file-pending-path nil)
     (if (string= answer "yes")
       (cond
+        ((file-ops-destructive-p path)
+          ;; Coach r3: the operand may have been retargeted while the
+          ;; confirm was open — recheck at removal time, never trust the
+          ;; pre-confirm resolution.
+          (message (concat "delete-file: refusing to delete protected path " path)))
         ((string= path "")
           (message "delete-file: empty path"))
         ((and (not (file-exists-p path)) (not (file-symlink-p path)))
@@ -194,7 +205,9 @@ turns them into a visible status-line message."
   (cond
     ((or (string= source "") (string= dest ""))
       (message "rename-file: empty path"))
-    ((not (file-exists-p source))
+    ((and (not (file-exists-p source)) (not (file-symlink-p source)))
+      ;; file-exists-p FOLLOWS links — a dangling symlink is still a
+      ;; renameable directory entry (coach r3).
       (message (concat "rename-file: no such file " source)))
     (t
       (condition-case err
@@ -284,10 +297,15 @@ working directory. Comparison is on file-realpath, so symlinked and
 tilde forms are caught too. GUARD ONLY — callers must never pass the
 resolved form on as the operand (codex r1 finding 1)."
   (let ((real (file-realpath path)))
+    ;; Coach r3: compare the RESOLVED operand against resolved forms —
+    ;; process-cwd can itself sit behind a symlink. file-realpath returns
+    ;; "" on failure; a failed resolution never equals a protected path
+    ;; (the exists/directory checks reject such operands downstream), and
+    ;; the protected roots always resolve.
     (or
       (string= real "/")
       (string= real (file-realpath "~"))
-      (string= real (process-cwd)))))
+      (string= real (file-realpath (process-cwd))))))
 
 (defun file-ops-plist-get (plist key)
   "Fetch KEY's value from the (key value key value ...) list that
@@ -349,13 +367,19 @@ non-directory operand reports visibly instead of crashing on read-dir
         (message (concat "delete-directory: no such directory " p)))
       ((not (file-ops-directory-p p))
         (message (concat "delete-directory: not a directory: " p)))
-      ((= (length (read-dir p)) 0)
-        (delete-directory-open-confirm p "empty"
-          (concat "Delete empty directory " p "? ")))
       (t
-        (delete-directory-open-confirm p "tree"
-          (concat "Recursively delete " p " ("
-            (number-to-string (length (read-dir p))) " entries)? "))))))
+        (let ((entries (read-dir p)))
+          ;; nil = read failure (e.g. mode 000 — coach r3): a visible error,
+          ;; no confirm, no deletion. The EMPTY LIST is truthy in T-Lisp and
+          ;; means an empty directory — never test it with null.
+          (if entries
+            (if (= (length entries) 0)
+              (delete-directory-open-confirm p "empty"
+                (concat "Delete empty directory " p "? "))
+              (delete-directory-open-confirm p "tree"
+                (concat "Recursively delete " p " ("
+                  (number-to-string (length entries)) " entries)? ")))
+            (message (concat "delete-directory: cannot read " p))))))))
 
 (defun delete-directory-open-confirm (path kind prompt)
   "Prime the pending PATH/KIND and open the yes/no confirm (ADR-0168)."
@@ -382,11 +406,14 @@ non-directory operand reports visibly instead of crashing on read-dir
 
 (defun delete-directory-do (path kind)
   "Remove PATH per the CONFIRMED KIND and report.
-symlink: plain unlink (a link is a file to the filesystem). empty:
-non-recursive file-rmdir — content that appeared after the confirm is
-REFUSED, never silently destroyed (the TOCTOU contract). tree:
-recursive file-remove."
-  (cond
+The guard is RECHECKED here (coach r3): the operand may have been
+retargeted while the confirm was open. symlink: plain unlink (a link
+is a file to the filesystem). empty: non-recursive file-rmdir —
+content that appeared after the confirm is REFUSED, never silently
+destroyed (the TOCTOU contract). tree: recursive file-remove."
+  (if (file-ops-destructive-p path)
+    (message (concat "delete-directory: refusing to delete protected path " path))
+    (cond
     ((string= kind "symlink")
       (if (file-remove path)
         (message (concat "Deleted symlink " path))
@@ -398,7 +425,7 @@ recursive file-remove."
     (t
       (if (file-remove path t)
         (message (concat "Deleted directory " path))
-        (message (concat "delete-directory: failed to delete " path))))))
+        (message (concat "delete-directory: failed to delete " path)))))))
 
 (provide "file-ops")
 )  ;; end of defmodule editor/commands/file-ops (BUG-74/#126: keep the close at EOF, not at the export clause)
