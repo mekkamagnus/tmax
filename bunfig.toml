@@ -1,0 +1,8 @@
+# bunfig.toml — Bun runtime configuration.
+#
+# [test] preload: load test isolation before every test file (#354). The
+# preload sets TMAX_LOG_PATH to a per-process temp file so every Editor
+# constructed by any test (server-built editors, direct constructions) logs
+# outside the developer's real HOME.
+[test]
+preload = ["./test/fixtures/test-isolation-preload.ts"]
