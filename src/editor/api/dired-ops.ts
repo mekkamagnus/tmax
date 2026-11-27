@@ -47,6 +47,25 @@ function plistGet(entries: TLispValue[], key: string): TLispValue | undefined {
 }
 
 
+/** #360 coach r8: reversible display-name codecs (module level — the
+ * identity parser and the primitives share them). */
+const encodeName = (n: string): string =>
+  n.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\t/g, "\\t").replace(/\r/g, "\\r");
+const decodeName = (n: string): string => {
+  let out = "";
+  for (let i = 0; i < n.length; i++) {
+    if (n[i] === "\\" && i + 1 < n.length) {
+      const c = n[i + 1]!;
+      if (c === "n") { out += "\n"; i++; continue; }
+      if (c === "t") { out += "\t"; i++; continue; }
+      if (c === "r") { out += "\r"; i++; continue; }
+      if (c === "\\") { out += "\\"; i++; continue; }
+    }
+    out += n[i]!;
+  }
+  return out;
+};
+
 /**
  * #360 coach r7: entry identity parser for the phase-1 listing format
  * ("XY name" with an optional display "/" suffix). Removes EXACTLY the
@@ -56,7 +75,8 @@ function plistGet(entries: TLispValue[], key: string): TLispValue | undefined {
  */
 function parseEntryIdentity(lineContent: string): string {
   const rest = lineContent.length >= 2 ? lineContent.substring(2) : lineContent;
-  return rest.endsWith("/") ? rest.slice(0, -1) : rest;
+  const bare = rest.endsWith("/") ? rest.slice(0, -1) : rest;
+  return decodeName(bare);
 }
 
 type EntryLike = TLispValue[] | Map<string, TLispValue>;
@@ -131,11 +151,7 @@ export function createDiredOps(
 
     const lines = (linesArg.value as TLispValue[])
       .filter((l): l is { type: "string"; value: string } => l.type === "string")
-      .map((l) => l.value)
-      // #360 coach r7: a name containing a newline would render as multiple
-      // actionable rows — drop such rows at the display boundary (the entry
-      // stays untouched on disk).
-      .filter((l) => !l.includes("\n"));
+      .map((l) => l.value);
 
     const currentBuffer = getCurrentBuffer();
     const bufferValidation = validateBufferExists(currentBuffer);
@@ -180,6 +196,66 @@ export function createDiredOps(
       setCurrentBuffer(insertResult.right);
     }
 
+    return Either.right(createNil());
+  });
+
+  // (dired-encode-name NAME) / (dired-decode-name NAME) — #360 coach r8:
+  // reversible display encoding so one entry is always ONE actionable row.
+  // Escapes backslash, newline, tab, CR; the directory suffix stays outside
+  // the encoded region. Operations derive operands from the DECODED name.
+  api.set("dired-encode-name", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 1 || args[0]!.type !== "string") {
+      return Either.left(createValidationError('ConstraintViolation', 'dired-encode-name requires 1 string', 'args', args.length, '1 string'));
+    }
+    return Either.right(createString(encodeName(args[0]!.value as string)));
+  });
+  api.set("dired-decode-name", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 1 || args[0]!.type !== "string") {
+      return Either.left(createValidationError('ConstraintViolation', 'dired-decode-name requires 1 string', 'args', args.length, '1 string'));
+    }
+    return Either.right(createString(decodeName(args[0]!.value as string)));
+  });
+
+  // (dired-mark-rows NAMES) — #360 coach r8: re-apply D prefixes to the rows
+  // whose (decoded) names are in NAMES, after a refresh rebuild. Marks are
+  // entry-identity, never line numbers.
+  api.set("dired-mark-rows", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 1 || args[0]!.type !== "list") {
+      return Either.left(createValidationError('ConstraintViolation', 'dired-mark-rows requires 1 list', 'args', args.length, '1 list'));
+    }
+    const names = new Set<string>(
+      (args[0]!.value as TLispValue[])
+        .filter((v) => v.type === "string")
+        .map((v) => v.value as string)
+    );
+    s.markedForDelete.clear();
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+    const lineCountResult = currentBuffer!.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get line count: ${lineCountResult.left}`));
+    }
+    for (let i = 0; i < lineCountResult.right; i++) {
+      const lineResult = currentBuffer!.getLine(i);
+      if (Either.isLeft(lineResult)) continue;
+      const text = lineResult.right;
+      if (!text.startsWith("  ") && !text.startsWith("D ")) continue;
+      const name = parseEntryIdentity(text);
+      if (name.length > 0 && names.has(name)) {
+        if (!text.startsWith("D")) {
+          const deleteRange = { start: { line: i, column: 0 }, end: { line: i, column: text.length } };
+          const deleteResult = currentBuffer!.delete(deleteRange);
+          if (Either.isLeft(deleteResult)) continue;
+          const insertResult = deleteResult.right.insert({ line: i, column: 0 }, "D" + text.substring(1));
+          if (Either.isLeft(insertResult)) continue;
+          setCurrentBuffer(insertResult.right);
+        }
+        s.markedForDelete.add(i);
+      }
+    }
     return Either.right(createNil());
   });
 

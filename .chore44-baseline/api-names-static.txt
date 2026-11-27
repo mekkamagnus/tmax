@@ -1,4 +1,5 @@
 # Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
+# #360 coach r8: 444 -> 447 — dired-encode-name/-decode-name (reversible display encoding) + dired-mark-rows (identity-preserved marks).
 # #360 p1: 443 -> 444 — dired-insert-lines (pre-formatted listing write; format lives in T-Lisp).
 # #361 codex r2: 442 -> 443 — file-symlink-p (lstat entry test; slashed-symlink + dangling-link deletes).
 # #361 codex r1: 441 -> 442 — file-rmdir (the non-recursive fast-path primitive).
@@ -152,11 +153,14 @@ delete-to-line-end
 delete-to-sentence-end
 delete-word
 describe-module
+dired-decode-name
+dired-encode-name
 dired-format-listing
 dired-get-marked
 dired-insert-lines
 dired-insert-listing
 dired-is-directory-p
+dired-mark-rows
 dired-parse-current-entry
 dired-refresh
 dired-toggle-mark

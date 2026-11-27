@@ -418,3 +418,220 @@ const dirnameSafe = (p: string): string => {
   const i = p.lastIndexOf("/");
   return i > 0 ? p.slice(0, i) : "/";
 };
+
+describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefills", () => {
+  test("C8-1a: the batch prompt names the recursive trees", async () => {
+    const d = join(vault, "c8-tree");
+    mkdirSync(join(d, "s"), { recursive: true });
+    writeFileSync(join(vault, "c8-file.txt"), "x");
+    writeFileSync(join(d, "s", "f"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (n === "c8-tree" || n === "c8-file.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    expect(ed.getState().minibufferView?.prompt).toContain("1 tree");
+    executeTlisp(ed, '(minibuffer-set-input "no")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+  });
+
+  test("C8-1b: a confirmed FILE replaced by a nonempty directory before yes — tree survives, refusal visible", async () => {
+    writeFileSync(join(vault, "c8-swap.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2) === "c8-swap.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    // swap the confirmed file for a NONEMPTY directory while the prompt is open
+    rmSync(join(vault, "c8-swap.txt"));
+    mkdirSync(join(vault, "c8-swap.txt", "kept"), { recursive: true });
+    writeFileSync(join(vault, "c8-swap.txt", "kept", "safe.txt"), "safe");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c8-swap.txt", "kept", "safe.txt"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refused");
+  });
+
+  test("C8-1c: a confirmed EMPTY directory that becomes nonempty before yes survives", async () => {
+    const d = join(vault, "c8-latefill");
+    mkdirSync(d, { recursive: true });
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2) === "c8-latefill/") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    writeFileSync(join(d, "appeared.txt"), "x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(d, "appeared.txt"))).toBe(true);
+  });
+
+  test("C8-1d: a confirmed directory that becomes a symlink before yes is refused", async () => {
+    const target = join(vault, "c8-retarget-t");
+    mkdirSync(target, { recursive: true });
+    const d = join(vault, "c8-becomes-link");
+    mkdirSync(d, { recursive: true });
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2) === "c8-becomes-link/") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    rmSync(d, { recursive: true });
+    symlinkSync(target, join(vault, "c8-becomes-link"));
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(lstatSync(join(vault, "c8-becomes-link"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(existsSync(target)).toBe(true);
+  });
+
+  test("C8-1e: an unreadable marked directory is refused, intact", async () => {
+    const d = join(vault, "c8-noread");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "x"), "x");
+    chmodSync(d, 0o000);
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2) === "c8-noread/") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    chmodSync(d, 0o755);
+    expect(existsSync(join(d, "x"))).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refused");
+  });
+
+  test("C8-2a: marks survive g by identity — d, g, x deletes the intended file", async () => {
+    writeFileSync(join(vault, "c8-keepmark.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let mLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  c8-keepmark.txt") mLine = i;
+    executeTlisp(ed, `(cursor-move ${mLine} 0)`);
+    await ed.handleKey("d");
+    await ed.handleKey("g");
+    // the row still carries its mark after the rebuild
+    const rows2 = Number(tl(ed, "(buffer-line-count)"));
+    let still = false;
+    for (let i = 0; i < rows2; i++) if (line(ed, i) === "D c8-keepmark.txt") still = true;
+    expect(still).toBe(true);
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c8-keepmark.txt"))).toBe(false);
+  });
+
+  test("C8-2b: a failed refresh keeps the listing AND the marks", async () => {
+    writeFileSync(join(vault, "c8-failmark.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  c8-failmark.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    chmodSync(vault, 0o500); // readable+listable? make unreadable for readdir:
+    chmodSync(vault, 0o000);
+    await ed.handleKey("g");
+    chmodSync(vault, 0o755);
+    expect(tl(ed, "(buffer-text)")).toContain("D c8-failmark.txt");
+    expect(ed.getState().statusMessage).toContain("cannot read");
+  });
+
+  test("C8-3a: a newline-named entry is ONE actionable row and deletes by identity", async () => {
+    writeFileSync(join(vault, "c8\nweird.txt"), "x");
+    writeFileSync(join(vault, "c8weird.txt"), "neighbor");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let wLine = -1;
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (n === "c8\\nweird.txt") wLine = i; // displayed escaped
+    }
+    expect(wLine).toBeGreaterThan(0);
+    executeTlisp(ed, `(cursor-move ${wLine} 0)`);
+    await ed.handleKey("d");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c8\nweird.txt"))).toBe(false); // the real-newline entry is gone
+    expect(existsSync(join(vault, "c8weird.txt"))).toBe(true); // the neighbor survives
+  });
+
+  test("C8-3b: a literal backslash-n name is distinct from a real newline name", async () => {
+    writeFileSync(join(vault, "lit\\nname.txt"), "lit"); // three chars: lit \ n ...
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let litLine = -1;
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (n === "lit\\\\nname.txt") litLine = i; // backslash escaped in display
+    }
+    expect(litLine).toBeGreaterThan(0);
+    executeTlisp(ed, `(cursor-move ${litLine} 0)`);
+    await ed.handleKey("d");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "lit\\nname.txt"))).toBe(false);
+  });
+
+  test("C8-4a: R and C prefill the destination prompt with the SOURCE path", async () => {
+    writeFileSync(join(vault, "c8-prefill.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let pLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  c8-prefill.txt") pLine = i;
+    executeTlisp(ed, `(cursor-move ${pLine} 0)`);
+    await ed.handleKey("R");
+    expect(ed.getState().minibufferView?.input).toBe(join(vault, "c8-prefill.txt"));
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "c8-prefill-renamed.txt")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "c8-prefill-renamed.txt"))).toBe(true);
+    const rows2 = Number(tl(ed, "(buffer-line-count)"));
+    let p2 = -1;
+    for (let i = 0; i < rows2; i++) if (line(ed, i) === "  c8-prefill-renamed.txt") p2 = i;
+    executeTlisp(ed, `(cursor-move ${p2} 0)`);
+    await ed.handleKey("C");
+    expect(ed.getState().minibufferView?.input).toBe(join(vault, "c8-prefill-renamed.txt"));
+    executeTlisp(ed, '(minibuffer-dispatch-key "Escape")');
+  });
+});

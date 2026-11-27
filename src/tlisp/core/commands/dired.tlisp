@@ -48,8 +48,14 @@ file-ops/markdown convention — cross-module bare names do not resolve.)"
 
 (defun dired-entry-name-at (text)
   "The entry name in a listing line: columns after the two-char mark
-field (the name may contain spaces; a trailing / marks a directory)."
-  (substring text 2))
+field, the display directory suffix stripped, then DECODED from the
+reversible display encoding (coach r8 finding 3) — the caller gets the
+exact filesystem identity."
+  (let ((rest (substring text 2)))
+    (dired-decode-name
+      (if (dired-entry-dir-p-at text)
+        (substring rest 0 (- (length rest) 1))
+        rest))))
 
 (defun dired-entry-dir-p-at (text)
   "Whether a listing line's entry is a directory (trailing /)."
@@ -65,12 +71,9 @@ field (the name may contain spaces; a trailing / marks a directory)."
   (dired-entry-dir-p-at (dired-current-line-text)))
 
 (defun dired-current-path ()
-  "Full path of the entry under the cursor (no trailing slash)."
-  (let ((name (dired-current-name)))
-    (concat (buffer-filename) "/"
-      (if (dired-current-dir-p)
-        (substring name 0 (- (length name) 1))
-        name))))
+  "Full path of the entry under the cursor (decoded identity, no
+trailing slash)."
+  (concat (buffer-filename) "/" (dired-current-name)))
 
 (defun dired-plist-get (plist key)
   "Fetch KEY's value from the (key value ...) list file-stat returns."
@@ -94,7 +97,7 @@ links). nil on a failed stat (dangling links are file-shaped rows)."
   "One listing line: mark field + name, with a trailing / when the
 entry NAVIGATES as a directory (following stat)."
   (let ((name (hashmap-get entry "name")))
-    (concat "  " name
+    (concat "  " (dired-encode-name name)
       (if (dired-entry-dir-p dir name) "/" ""))))
 
 (defun dired-listing-lines (dir)
@@ -251,17 +254,53 @@ captured HERE so a changed buffer cannot redirect the batch."
   (let ((marked (dired-get-marked)))
     (if (= (length marked) 0)
       (message "No marked entries")
-      (progn
-        (setq dired-pending-deletions marked)
-        (setq dired-pending-dir (buffer-filename))
-        (completing-read
-          (concat "Delete " (number-to-string (length marked)) " marked entries? ")
-          "file-ops-yes-no-table"
-          nil
-          t
-          ""
-          "file-ops-history"
-          "dired-execute-accept")))))
+      (let ((dir (buffer-filename))
+            (plan (list)))
+        (dolist (name marked)
+          (setq plan (append plan
+            (list (hashmap "name" name
+                           "kind" (dired-entry-kind (concat dir "/" name)))))))
+        (setq dired-pending-deletions plan)
+        (setq dired-pending-dir dir)
+        (let ((trees (dired-plan-count-kind plan "tree")))
+          (completing-read
+            (concat "Delete " (number-to-string (length marked)) " marked entries"
+              (if (> trees 0)
+                (concat " (" (number-to-string trees) " tree"
+                  (if (> trees 1) "s" "") " recursively)")
+                "")
+              "? ")
+            "file-ops-yes-no-table"
+            nil
+            t
+            ""
+            "file-ops-history"
+            "dired-execute-accept"))))))
+
+(defun dired-entry-kind (path)
+  "The entry's kind for the deletion plan: symlink, file, empty, tree,
+unreadable, or missing. A failed read-dir is NEVER treated as empty
+(coach r8 finding 1)."
+  (cond
+    ((file-symlink-p path) "symlink")
+    (t
+      (let ((st (file-stat path)))
+        (if st
+          (if (dired-plist-get st 'isDirectory)
+            (let ((entries (read-dir path)))
+              (if entries
+                (if (= (length entries) 0) "empty" "tree")
+                "unreadable"))
+            "file")
+          "missing")))))
+
+(defun dired-plan-count-kind (plan kind)
+  "How many plan entries carry KIND."
+  (let ((n 0))
+    (dolist (e plan)
+      (if (string= (hashmap-get e "kind") kind)
+        (set! n (+ n 1))))
+    n))
 
 (defun dired-remove-entry (path)
   "Remove one entry by its ACTUAL type (coach r7 finding 2): symlinks
@@ -274,11 +313,14 @@ directories remove recursively; files unlink. t/nil."
       (file-remove path))))
 
 (defun dired-execute-accept (answer)
-  "Batch-delete confirm accept: on \"yes\", remove every marked entry
-that passes the guard (typed removal, against the CAPTURED directory),
-then refresh. The summary keeps refusals and failures visible — the
-last success cannot hide them (coach r7 finding 3)."
-  (let ((names dired-pending-deletions)
+  "Batch-delete confirm accept: on \"yes\", execute the CAPTURED plan
+(coach r8 finding 1) — each entry's kind is RECHECKED; a changed or
+missing entry is refused, never reinterpreted (a confirmed file that
+became a nonempty directory SURVIVES). Confirmed empty directories
+remove non-recursively (content added during the prompt survives);
+confirmed symlinks unlink; confirmed trees remove recursively. The
+summary keeps refusals and failures visible."
+  (let ((plan dired-pending-deletions)
         (dir dired-pending-dir))
     (setq dired-pending-deletions nil)
     (setq dired-pending-dir nil)
@@ -286,17 +328,29 @@ last success cannot hide them (coach r7 finding 3)."
       (let ((deleted 0)
             (refused 0)
             (failed 0))
-        (dolist (name names)
-          (let ((path (concat dir "/" name)))
+        (dolist (e plan)
+          (let* ((name (hashmap-get e "name"))
+                 (kind (hashmap-get e "kind"))
+                 (path (concat dir "/" name))
+                 (now (dired-entry-kind path)))
             (cond
               ((string= name "..")
                 (set! refused (+ refused 1)))
               ((dired-destructive-p path)
                 (set! refused (+ refused 1)))
+              ((not (string= now kind))
+                (set! refused (+ refused 1)))
               (t
-                (if (dired-remove-entry path)
-                  (set! deleted (+ deleted 1))
-                  (set! failed (+ failed 1)))))))
+                (let ((ok
+                        (cond
+                          ((string= kind "symlink") (file-remove path))
+                          ((string= kind "file") (file-remove path))
+                          ((string= kind "empty") (file-rmdir path))
+                          ((string= kind "tree") (file-remove path t))
+                          (t nil))))
+                  (if ok
+                    (set! deleted (+ deleted 1))
+                    (set! failed (+ failed 1))))))))
         (if (string= (buffer-current) "*Dired*")
           (dired-refresh)
           t)
@@ -338,7 +392,7 @@ source filled in, destination prompted, then refresh)."
       "file-completion-table"
       nil
       nil
-      (concat (buffer-filename) "/")
+      src
       "rename-file-history"
       "dired-rename-accept")))
 
@@ -361,7 +415,7 @@ source filled in, destination prompted, then refresh)."
       "file-completion-table"
       nil
       nil
-      (concat (buffer-filename) "/")
+      src
       "copy-file-history"
       "dired-copy-accept")))
 
@@ -380,17 +434,20 @@ when it still exists (g); otherwise back to the top. A failed re-read
 keeps the old listing and reports (coach r7 finding 3)."
   (interactive)
   (let ((name (dired-current-name))
-        (dir (buffer-filename)))
+        (dir (buffer-filename))
+        (marked (dired-get-marked)))
     (if (dired-render dir)
-      (let ((i 0)
-            (found -1))
-        (while (< i (buffer-line-count))
-          (if (string= (dired-entry-name-at (buffer-get-line i)) name)
-            (progn
-              (set! found i)
-              (set! i (buffer-line-count)))
-            (set! i (+ i 1))))
-        (cursor-move (if (>= found 0) found 0) 0))
+      (progn
+        (dired-mark-rows marked)
+        (let ((i 0)
+              (found -1))
+          (while (< i (buffer-line-count))
+            (if (string= (dired-entry-name-at (buffer-get-line i)) name)
+              (progn
+                (set! found i)
+                (set! i (buffer-line-count)))
+              (set! i (+ i 1))))
+          (cursor-move (if (>= found 0) found 0) 0)))
       nil)))
 
 ;; ── keymap (vim-motion; BUFFER-LOCAL, the shadow tier) ────────────────
