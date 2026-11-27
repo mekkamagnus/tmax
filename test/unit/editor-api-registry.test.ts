@@ -61,7 +61,9 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // grep backend primitives; reconciled on the #308 branch, frozen
     // here with the drift).
     // r154: 439 → 440 — http-cancel (abort an in-flight http-request).
-    expect(live.length).toBe(440);
+    // #361: 440 → 441 — process-cwd (the delete-directory guard's fact
+    // primitive; refrozen with the U2 full-suite catch).
+    expect(live.length).toBe(441);
     expect(live).toEqual(expected);
   });
 
