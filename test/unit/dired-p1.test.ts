@@ -8,12 +8,12 @@
  * ".." first, hidden files shown. One *Dired* buffer updated in place.
  */
 import { describe, test, expect, beforeAll } from "bun:test";
-import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
 
-const vault = join(tmpdir(), `tmax-dired-${process.pid}-`);
+let vault = join(tmpdir(), `tmax-dired-${process.pid}-`);
 type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 const tl = (ed: Editor, form: string): string => {
   const r = executeTlisp(ed, form) as { type: string; value?: unknown };
@@ -32,6 +32,7 @@ beforeAll(() => {
   writeFileSync(join(vault, ".hidden"), "dot\n");
   writeFileSync(join(vault, "z.txt"), "zulu\n");
   writeFileSync(join(vault, "sub", "inner.md"), "# inner\n");
+  vault = realpathSync(vault); // canonical: dired resolves listing paths
 });
 
 describe("#360 phase 1: dired listing and mode", () => {
@@ -212,3 +213,208 @@ describe("#360 phase 1: dired operations", () => {
     expect(line(ed, Number(tl(ed, "(cursor-line)")))).toBe("  z.txt"); // still on z.txt
   });
 });
+
+describe("#360 coach round 7: identity, typed deletion, results, paths, links", () => {
+  test("C7-1a: a spaced name deletes THE spaced file, not its last word", async () => {
+    writeFileSync(join(vault, "my file"), "a");
+    writeFileSync(join(vault, "file"), "b");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let mLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  my file") mLine = i;
+    expect(mLine).toBeGreaterThan(0);
+    executeTlisp(ed, `(cursor-move ${mLine} 0)`);
+    await ed.handleKey("d");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "my file"))).toBe(false);
+    expect(existsSync(join(vault, "file"))).toBe(true);
+  });
+
+  test("C7-1b: l opens a file whose name contains spaces", async () => {
+    writeFileSync(join(vault, "space name.txt"), "spaced\n");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let sLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  space name.txt") sLine = i;
+    executeTlisp(ed, `(cursor-move ${sLine} 0)`);
+    await ed.handleKey("l");
+    expect(tl(ed, "(buffer-current)")).toBe(join(vault, "space name.txt"));
+    expect(tl(ed, "(buffer-text)")).toContain("spaced");
+  });
+
+  test("C7-1c: a newline-named entry cannot inject an actionable row", async () => {
+    writeFileSync(join(vault, "bad\nfake-row.txt"), "evil");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      const name = line(ed, i).slice(2);
+      expect(name).not.toBe("fake-row.txt"); // no injected row parses as that name
+    }
+    expect(existsSync(join(vault, "bad\nfake-row.txt"))).toBe(true); // untouched on disk
+  });
+
+  test("C7-2a: a marked NON-EMPTY directory is deleted after confirm", async () => {
+    const d = join(vault, "marked-dir");
+    mkdirSync(join(d, "inner"), { recursive: true });
+    writeFileSync(join(d, "inner", "x.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let dLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i) === "  marked-dir/") dLine = i;
+    expect(dLine).toBeGreaterThan(0);
+    executeTlisp(ed, `(cursor-move ${dLine} 0)`);
+    await ed.handleKey("d");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(d)).toBe(false);
+  });
+
+  test("C7-2b: a symlink-to-directory mark deletes the LINK, target intact", async () => {
+    const target = join(vault, "link-target-dir");
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, "keep.txt"), "keep");
+    symlinkSync(target, join(vault, "dir-link"));
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let lLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i).endsWith("dir-link/")) lLine = i;
+    expect(lLine).toBeGreaterThan(0); // displayed with / (C7-5)
+    executeTlisp(ed, `(cursor-move ${lLine} 0)`);
+    await ed.handleKey("d");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "dir-link"))).toBe(false);
+    expect(existsSync(join(target, "keep.txt"))).toBe(true);
+  });
+
+  test("C7-2c: mixed batch — deletable + protected link — both outcomes reported", async () => {
+    writeFileSync(join(vault, "killme.txt"), "x");
+    symlinkSync(process.env.HOME!, join(vault, "home-alias"));
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (n === "killme.txt" || n === "home-alias") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "killme.txt"))).toBe(false);
+    expect(lstatSync(join(vault, "home-alias"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(ed.getState().statusMessage).toContain("refused");
+    expect(ed.getState().statusMessage).toContain("Deleted");
+  });
+
+  test("C7-2d: cancelling the batch deletes nothing", async () => {
+    writeFileSync(join(vault, "spared-batch.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2) === "spared-batch.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "no")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "spared-batch.txt"))).toBe(true);
+  });
+
+  test("C7-3a: mkdir failure survives the refresh (status shows the failure)", async () => {
+    writeFileSync(join(vault, "plain-file.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    await ed.handleKey("+");
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "plain-file.txt", "sub")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(ed.getState().statusMessage).toContain("failed");
+    expect(ed.getState().statusMessage).not.toContain("Dired: ");
+  });
+
+  test("C7-3b: refresh failure keeps the old listing and reports", async () => {
+    const d = join(vault, "noread-refresh");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "inside.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${d}")`);
+    const before = tl(ed, "(buffer-text)");
+    chmodSync(d, 0o000);
+    await ed.handleKey("g");
+    expect(tl(ed, "(buffer-text)")).toBe(before); // old listing intact
+    expect(ed.getState().statusMessage).toContain("cannot read");
+    chmodSync(d, 0o755);
+  });
+
+  test("C7-4a: a relative visited file lists the cwd (not /); h reaches the parent", async () => {
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, '(set-buffer-filename "notes.txt")');
+    executeTlisp(ed, "(dired)");
+    expect(tl(ed, "(buffer-filename)")).toBe(process.cwd());
+    await ed.handleKey("h");
+    expect(tl(ed, "(buffer-filename)")).toBe(join(process.cwd(), "..").replace(/\/$/, "") !== "/" ? dirnameSafe(process.cwd()) : "/");
+    expect(tl(ed, "(buffer-filename)")).not.toBe("/");
+  });
+
+  test("C7-4b: explicit '.' and trailing-slash arguments normalize", async () => {
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, '(dired ".")');
+    expect(tl(ed, "(buffer-filename)")).toBe(process.cwd());
+    executeTlisp(ed, `(dired "${vault}/")`);
+    expect(tl(ed, "(buffer-filename)")).toBe(vault);
+  });
+
+  test("C7-5a: a directory SYMLINK row shows / and l enters it", async () => {
+    const target = join(vault, "nav-target");
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, "seen.txt"), "x");
+    symlinkSync(target, join(vault, "nav-link"));
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let nLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i).endsWith("nav-link/")) nLine = i;
+    expect(nLine).toBeGreaterThan(0); // following stat gave it a trailing /
+    executeTlisp(ed, `(cursor-move ${nLine} 0)`);
+    await ed.handleKey("l");
+    expect(tl(ed, "(buffer-filename)")).toBe(target);
+    expect(tl(ed, "(buffer-text)")).toContain("seen.txt");
+  });
+
+  test("C7-5b: a dangling link is listed, does not crash, and deletes as an entry", async () => {
+    symlinkSync(join(vault, "nowhere"), join(vault, "dangling-link"));
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    let dLine = -1;
+    for (let i = 0; i < rows; i++) if (line(ed, i).slice(2).replace(/\/$/, "") === "dangling-link") dLine = i;
+    expect(dLine).toBeGreaterThan(0);
+    executeTlisp(ed, `(cursor-move ${dLine} 0)`);
+    await ed.handleKey("d");
+    await ed.handleKey("x");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(lstatSync(join(vault, "dangling-link"), { throwIfNoEntry: false })).toBeUndefined();
+  });
+});
+
+const dirnameSafe = (p: string): string => {
+  const i = p.lastIndexOf("/");
+  return i > 0 ? p.slice(0, i) : "/";
+};

@@ -46,6 +46,19 @@ function plistGet(entries: TLispValue[], key: string): TLispValue | undefined {
   return undefined;
 }
 
+
+/**
+ * #360 coach r7: entry identity parser for the phase-1 listing format
+ * ("XY name" with an optional display "/" suffix). Removes EXACTLY the
+ * two-character mark field and one trailing slash — whitespace inside the
+ * name survives (the old last-whitespace-token parser turned "my file"
+ * into "file").
+ */
+function parseEntryIdentity(lineContent: string): string {
+  const rest = lineContent.length >= 2 ? lineContent.substring(2) : lineContent;
+  return rest.endsWith("/") ? rest.slice(0, -1) : rest;
+}
+
 type EntryLike = TLispValue[] | Map<string, TLispValue>;
 
 function entryGet(entry: EntryLike, key: string): TLispValue | undefined {
@@ -118,7 +131,11 @@ export function createDiredOps(
 
     const lines = (linesArg.value as TLispValue[])
       .filter((l): l is { type: "string"; value: string } => l.type === "string")
-      .map((l) => l.value);
+      .map((l) => l.value)
+      // #360 coach r7: a name containing a newline would render as multiple
+      // actionable rows — drop such rows at the display boundary (the entry
+      // stays untouched on disk).
+      .filter((l) => !l.includes("\n"));
 
     const currentBuffer = getCurrentBuffer();
     const bufferValidation = validateBufferExists(currentBuffer);
@@ -317,17 +334,7 @@ export function createDiredOps(
     }
 
     const lineContent = lineResult.right;
-    // Extract filename: last column, stripping trailing /
-    const parts = lineContent.trim().split(/\s+/);
-    if (parts.length === 0) {
-      return Either.right(createString(""));
-    }
-
-    const lastPart = parts[parts.length - 1]!;
-    // Strip trailing / for directory entries
-    const filename = lastPart.endsWith("/") ? lastPart.slice(0, -1) : lastPart;
-
-    return Either.right(createString(filename));
+    return Either.right(createString(parseEntryIdentity(lineContent)));
   });
 
   // (dired-is-directory-p ENTRY)
@@ -450,11 +457,8 @@ export function createDiredOps(
 
       const lineContent = lineResult.right;
       if (lineContent.startsWith("D")) {
-        // Extract filename from this line (last column)
-        const parts = lineContent.trim().split(/\s+/);
-        if (parts.length > 0) {
-          const lastPart = parts[parts.length - 1]!;
-          const filename = lastPart.endsWith("/") ? lastPart.slice(0, -1) : lastPart;
+        const filename = parseEntryIdentity(lineContent);
+        if (filename.length > 0) {
           marked.push(createString(filename));
         }
       }

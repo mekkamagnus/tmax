@@ -32,6 +32,7 @@
 (defvar dired-rename-source nil "Entry path awaiting rename-file's destination prompt.")
 (defvar dired-copy-source nil "Entry path awaiting copy-file's destination prompt.")
 (defvar dired-pending-deletions nil "Marked entry names awaiting the batch delete confirm.")
+(defvar dired-pending-dir nil "The listing directory captured at x-time — the accept must not be redirected by a changed buffer (coach r7 finding 2).")
 
 ;; ── helpers ───────────────────────────────────────────────────────────
 
@@ -71,19 +72,43 @@ field (the name may contain spaces; a trailing / marks a directory)."
         (substring name 0 (- (length name) 1))
         name))))
 
-(defun dired-format-entry (entry)
-  "One listing line for a read-dir hashmap entry: mark field + name
-(+ trailing / for directories)."
-  (concat "  " (hashmap-get entry "name")
-    (if (hashmap-get entry "isDirectory") "/" "")))
+(defun dired-plist-get (plist key)
+  "Fetch KEY's value from the (key value ...) list file-stat returns."
+  (if (or (null plist) (null (cdr plist)))
+    nil
+    (if (equal (car plist) key)
+      (car (cdr plist))
+      (dired-plist-get (cdr (cdr plist)) key))))
+
+(defun dired-entry-dir-p (dir name)
+  "Whether DIR/NAME navigates into a directory — a FOLLOWING stat, so
+a symlink to a directory gets a trailing / and l enters it (coach r7
+finding 5; read-dir's own isDirectory is lstat-shaped and says nil for
+links). nil on a failed stat (dangling links are file-shaped rows)."
+  (let ((st (file-stat (concat dir "/" name))))
+    (if st
+      (dired-plist-get st 'isDirectory)
+      nil)))
+
+(defun dired-format-entry (dir entry)
+  "One listing line: mark field + name, with a trailing / when the
+entry NAVIGATES as a directory (following stat)."
+  (let ((name (hashmap-get entry "name")))
+    (concat "  " name
+      (if (dired-entry-dir-p dir name) "/" ""))))
 
 (defun dired-listing-lines (dir)
   "All listing lines for DIR: \"..\" first, then every read-dir entry
-(hidden files included, read-dir order — phase 1 has no sort). nil when
-DIR cannot be read."
+(hidden files included, read-dir order — phase 1 has no sort). Rows
+whose names contain a newline are dropped at the DISPLAY boundary
+(dired-insert-lines) — one entry must never become multiple actionable
+rows (coach r7 finding 1). nil when DIR cannot be read."
   (let ((entries (read-dir dir)))
     (if entries
-      (cons "  .." (mapcar "dired-format-entry" entries))
+      (let ((rows (list "  ..")))
+        (dolist (e entries)
+          (setq rows (append rows (list (dired-format-entry dir e)))))
+        rows)
       nil)))
 
 ;; ── entry point ───────────────────────────────────────────────────────
@@ -91,32 +116,65 @@ DIR cannot be read."
 (defun dired (&optional path)
   "Open a directory listing (RFC-041 #360 phase 1).
 With PATH, list it; with a file visited, list the file's directory;
-otherwise list the process working directory. The listing buffer is
-read-only with dired-mode active; q returns to the previous buffer."
+otherwise list the process working directory. The target is
+CANONICALIZED (file-realpath): relative names resolve against the
+process cwd, trailing slashes and . / .. normalize, and / stays /
+(coach r7 finding 4 — a relative visited file used to derive \"/\").
+The listing buffer is read-only with dired-mode active; q returns to
+the previous buffer."
   (interactive)
-  (let ((dir (or path
-               (let ((fn (buffer-filename)))
-                 (if fn (dired-dirname fn) (process-cwd))))))
-    (unless (string= (buffer-current) "*Dired*")
-      (setq dired-return-buffer (buffer-current)))
-    (dired-render dir)))
+  (let ((raw (or path (dired-initial-dir))))
+    (let ((dir (file-realpath raw)))
+      (if (or (string= dir "") (not (dired-real-directory-p dir)))
+        (message (concat "dired: cannot read " raw))
+        (progn
+          (unless (string= (buffer-current) "*Dired*")
+            (setq dired-return-buffer (buffer-current)))
+          (dired-render dir))))))
+
+(defun dired-initial-dir ()
+  "The directory to list when no PATH was given: the visited file's
+directory — the process cwd when the filename has no slash (a bare
+name lives in the cwd; dired-dirname would say \"/\") — or the cwd."
+  (let ((fn (buffer-filename)))
+    (if fn
+      (if (string-contains-p "/" fn)
+        (dired-dirname fn)
+        (process-cwd))
+      (process-cwd))))
+
+(defun dired-real-directory-p (path)
+  "t when PATH resolves and is a directory (following stat)."
+  (let ((st (file-stat path)))
+    (if st
+      (dired-plist-get st 'isDirectory)
+      nil)))
 
 (defun dired-render (dir)
-  "Build and install the listing for DIR in the *Dired* buffer."
-  (let ((lines (dired-listing-lines dir)))
-    (if lines
+  "Build and install the listing for DIR in the *Dired* buffer.
+Returns t on success; on an unreadable directory the old listing is
+left intact and the failure is messaged (coach r7 finding 3)."
+  (let ((real (file-realpath dir)))
+    (if (or (string= real "") (not (dired-real-directory-p real)))
       (progn
-        (buffer-create "*Dired*")
-        (buffer-switch "*Dired*")
-        (set-buffer-filename dir)
+        (message (concat "dired: cannot read " dir))
+        nil)
+      (let ((lines (dired-listing-lines real)))
+        (if lines
+          (progn
+            (buffer-create "*Dired*")
+            (buffer-switch "*Dired*")
+            (set-buffer-filename real)
         (dired-insert-lines lines)
         (cursor-move 0 0)
         (set-buffer-modified-p nil)
         (buffer-set-read-only t)
         (major-mode-set "dired")
-        (dired-ensure-keymap)
-        (message (concat "Dired: " dir)))
-      (message (concat "dired: cannot read " dir)))))
+            (dired-ensure-keymap)
+            t)
+          (progn
+            (message (concat "dired: cannot read " real))
+            nil))))))
 
 ;; ── navigation ────────────────────────────────────────────────────────
 
@@ -187,14 +245,15 @@ $HOME, and the process working directory, compared on realpath."
 (defun dired-execute-deletions ()
   "Carry out the marked deletions (x), behind ONE yes/no confirm for
 the batch (phase 1 shape; each entry still passes the protected-path
-guard, and \"..\" is never deleted). Directories are removed
-recursively, files with plain unlink."
+guard, and \"..\" is never deleted). The listing directory is
+captured HERE so a changed buffer cannot redirect the batch."
   (interactive)
   (let ((marked (dired-get-marked)))
     (if (= (length marked) 0)
       (message "No marked entries")
       (progn
         (setq dired-pending-deletions marked)
+        (setq dired-pending-dir (buffer-filename))
         (completing-read
           (concat "Delete " (number-to-string (length marked)) " marked entries? ")
           "file-ops-yes-no-table"
@@ -204,26 +263,46 @@ recursively, files with plain unlink."
           "file-ops-history"
           "dired-execute-accept")))))
 
+(defun dired-remove-entry (path)
+  "Remove one entry by its ACTUAL type (coach r7 finding 2): symlinks
+(including dangling and directory links) unlink as links; real
+directories remove recursively; files unlink. t/nil."
+  (if (file-symlink-p path)
+    (file-remove path)
+    (if (dired-real-directory-p path)
+      (file-remove path t)
+      (file-remove path))))
+
 (defun dired-execute-accept (answer)
   "Batch-delete confirm accept: on \"yes\", remove every marked entry
-that passes the guard, then refresh."
-  (let ((names dired-pending-deletions))
+that passes the guard (typed removal, against the CAPTURED directory),
+then refresh. The summary keeps refusals and failures visible — the
+last success cannot hide them (coach r7 finding 3)."
+  (let ((names dired-pending-deletions)
+        (dir dired-pending-dir))
     (setq dired-pending-deletions nil)
+    (setq dired-pending-dir nil)
     (if (string= answer "yes")
-      (let ((deleted 0))
+      (let ((deleted 0)
+            (refused 0)
+            (failed 0))
         (dolist (name names)
-          (let ((path (concat (buffer-filename) "/" name)))
+          (let ((path (concat dir "/" name)))
             (cond
               ((string= name "..")
-                (message "dired: refusing to delete .."))
+                (set! refused (+ refused 1)))
               ((dired-destructive-p path)
-                (message (concat "dired: refusing to delete protected path " path)))
+                (set! refused (+ refused 1)))
               (t
-                (if (file-remove path (file-symlink-p path))
+                (if (dired-remove-entry path)
                   (set! deleted (+ deleted 1))
-                  (message (concat "dired: failed to delete " path)))))))
-        (dired-refresh)
-        (message (concat "Deleted " (number-to-string deleted) " entries")))
+                  (set! failed (+ failed 1)))))))
+        (if (string= (buffer-current) "*Dired*")
+          (dired-refresh)
+          t)
+        (message (concat "Deleted " (number-to-string deleted)
+          " entries (" (number-to-string refused) " refused, "
+          (number-to-string failed) " failed)")))
       (message "Cancelled"))))
 
 ;; ── file operations (delegate to the file-ops family) ─────────────────
@@ -242,8 +321,11 @@ command, prefilled with the listing's directory)."
     "dired-mkdir-accept"))
 
 (defun dired-mkdir-accept (path)
-  (funcall "mkdir-do" path)
-  (dired-refresh))
+  "mkdir accept: run the #359 worker, refresh, then show the RESULT
+(the refresh must not overwrite it — coach r7 finding 3)."
+  (let ((res (funcall "mkdir-do" path)))
+    (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
+    (message (if (stringp res) res "mkdir: done"))))
 
 (defun dired-rename-entry ()
   "Rename the entry under the cursor (R — the #361 rename-file flow,
@@ -263,8 +345,10 @@ source filled in, destination prompted, then refresh)."
 (defun dired-rename-accept (dest)
   (let ((src dired-rename-source))
     (setq dired-rename-source nil)
-    (funcall "rename-file-do" src dest)
-    (dired-refresh)))
+    ;; rename-file-do returns its outcome message; show it AFTER refresh.
+    (let ((res (funcall "rename-file-do" src dest)))
+      (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
+      (message (if (stringp res) res "rename-file: done")))))
 
 (defun dired-copy-entry ()
   "Copy the entry under the cursor (C — the #361 copy-file flow,
@@ -284,27 +368,30 @@ source filled in, destination prompted, then refresh)."
 (defun dired-copy-accept (dest)
   (let ((src dired-copy-source))
     (setq dired-copy-source nil)
-    (funcall "copy-file-do" src dest)
-    (dired-refresh)))
+    (let ((res (funcall "copy-file-do" src dest)))
+      (if (string= (buffer-current) "*Dired*") (dired-refresh) t)
+      (message (if (stringp res) res "copy-file: done")))))
 
 ;; ── refresh ───────────────────────────────────────────────────────────
 
 (defun dired-refresh ()
   "Re-read the listed directory and keep the cursor on the same entry
-when it still exists (g); otherwise back to the top."
+when it still exists (g); otherwise back to the top. A failed re-read
+keeps the old listing and reports (coach r7 finding 3)."
   (interactive)
   (let ((name (dired-current-name))
         (dir (buffer-filename)))
-    (dired-render dir)
-    (let ((i 0)
-          (found -1))
-      (while (< i (buffer-line-count))
-        (if (string= (dired-entry-name-at (buffer-get-line i)) name)
-          (progn
-            (set! found i)
-            (set! i (buffer-line-count)))
-          (set! i (+ i 1))))
-      (cursor-move (if (>= found 0) found 0) 0))))
+    (if (dired-render dir)
+      (let ((i 0)
+            (found -1))
+        (while (< i (buffer-line-count))
+          (if (string= (dired-entry-name-at (buffer-get-line i)) name)
+            (progn
+              (set! found i)
+              (set! i (buffer-line-count)))
+            (set! i (+ i 1))))
+        (cursor-move (if (>= found 0) found 0) 0))
+      nil)))
 
 ;; ── keymap (vim-motion; BUFFER-LOCAL, the shadow tier) ────────────────
 ;; Major-mode-scoped key-binds resolve AFTER the normal-mode T-Lisp keymap
