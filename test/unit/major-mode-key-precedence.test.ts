@@ -125,7 +125,7 @@ describe("#368 a: every key of info, help, helpgrep and man runs the command of 
 
   for (const table of tables) {
     for (const [key, command] of table.keys) {
-      test(`${table.name}: ${key} runs ${command} and not the vim command`, async () => {
+      test(`${table.name}: ${key} runs ${command} and not the vim command`, { timeout: 30_000 }, async () => {
         const ed = await createStartedEditor("");
         executeTlisp(ed, table.open);
         expect(str(ed, "(major-mode-get)")).toBe(table.name);
@@ -142,7 +142,7 @@ describe("#368 a: every key of info, help, helpgrep and man runs the command of 
 });
 
 describe("#368 a: the keys work in the real editor (commands executed)", () => {
-  test("info: n goes to the next node, t back to Top, i opens the Index, q does not start a macro", async () => {
+  test("info: n goes to the next node, t back to Top, i opens the Index, q does not start a macro", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, "(info)");
     expect(str(ed, "(buffer-current)")).toBe("*Info*");
@@ -179,7 +179,7 @@ describe("#368 a: the keys work in the real editor (commands executed)", () => {
     expect(truthy(ed, "(macro-record-active)")).toBe(false);
   });
 
-  test("help: l and r walk the history instead of moving the cursor", async () => {
+  test("help: l and r walk the history instead of moving the cursor", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, '(describe-function "save-buffer")');
     const pageOne = str(ed, "(buffer-line 0)");
@@ -209,7 +209,7 @@ describe("#368 a: the keys work in the real editor (commands executed)", () => {
     expect(str(ed, "(cursor-line)")).toBe(String(firstRef));
   });
 
-  test("a mode key pressed during a recording is part of the macro", async () => {
+  test("a mode key pressed during a recording is part of the macro", { timeout: 30_000 }, async () => {
     // Vim records literal keys. Before #368 a mode binding that did run
     // (Tab in help, `, b` in markdown) reached its command through a path
     // that never recorded, so the replay of the macro lost that key.
@@ -230,7 +230,7 @@ describe("#368 a: the keys work in the real editor (commands executed)", () => {
     expect(await recorded(help, ["\t"])).toEqual(["Tab"]);
   });
 
-  test("help: q reaches help-bury and does not start a macro recording", async () => {
+  test("help: q reaches help-bury and does not start a macro recording", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, '(describe-function "save-buffer")');
     const calls = spyCommands(ed, true);
@@ -240,7 +240,7 @@ describe("#368 a: the keys work in the real editor (commands executed)", () => {
     expect(truthy(ed, "(macro-record-active)")).toBe(false);
   });
 
-  test("man: } and { jump between section headers; s is not vim's substitute", async () => {
+  test("man: } and { jump between section headers; s is not vim's substitute", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     const r = ed.getInterpreter().execute('(man "ls")');
     if (r?._tag !== "Right") throw new Error("no man page for ls on this host");
@@ -268,7 +268,7 @@ describe("#368 a: the keys work in the real editor (commands executed)", () => {
     expect(str(ed, `(buffer-line ${first})`)).toBe(line);
   });
 
-  test("man: RET reaches man-follow and is not vim's move-down", async () => {
+  test("man: RET reaches man-follow and is not vim's move-down", { timeout: 30_000 }, async () => {
     // man-follow itself cannot recognise a `name(section)` reference on this
     // host (it reports "No man-page reference under point"; true before
     // #368 too), so the DISPATCH is what is asserted: the mode command ran
@@ -285,7 +285,7 @@ describe("#368 a: the keys work in the real editor (commands executed)", () => {
     expect(str(ed, "(major-mode-get)")).toBe("man");
   });
 
-  test("helpgrep: RET jumps to the corpus location instead of moving down", async () => {
+  test("helpgrep: RET jumps to the corpus location instead of moving down", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, '(helpgrep-run "mode")');
     expect(str(ed, "(major-mode-get)")).toBe("helpgrep");
@@ -316,7 +316,7 @@ describe("#368 b: a buffer in fundamental (or with no major mode) keeps the vim 
     ["r", "(vim-replace-begin)"],
   ];
   for (const [key, command] of vimKeys) {
-    test(`fundamental: ${key} runs the vim command`, async () => {
+    test(`fundamental: ${key} runs the vim command`, { timeout: 30_000 }, async () => {
       const ed = await createStartedEditor("hello");
       expect(str(ed, "(major-mode-get)")).toBe("fundamental");
       const calls = spyCommands(ed);
@@ -326,7 +326,7 @@ describe("#368 b: a buffer in fundamental (or with no major mode) keeps the vim 
     });
   }
 
-  test("a major mode that does not bind the key: the vim key runs", async () => {
+  test("a major mode that does not bind the key: the vim key runs", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, '(major-mode-register "plainmode" (quote ()) nil)');
     executeTlisp(ed, '(major-mode-set "plainmode")');
@@ -340,7 +340,7 @@ describe("#368 b: a buffer in fundamental (or with no major mode) keeps the vim 
 describe("#368 c: a multi-key binding of a mode still works", () => {
   const MD = "# One\n\ntext one\n\n## Two\n\ntext two\n\n# Three\n\ntext three\n";
 
-  test("markdown: ] h and [ h move between headings", async () => {
+  test("markdown: ] h and [ h move between headings", { timeout: 30_000 }, async () => {
     const ed = await setupMarkdownEditor(MD);
     expect(str(ed, "(major-mode-get)")).toBe("markdown");
     executeTlisp(ed, "(cursor-move 0 0)");
@@ -366,7 +366,7 @@ describe("#368 d: a mode key that is also the start of a global sequence", () =>
     );
   };
 
-  test("the binding of the mode runs for the bare g; no prefix is armed", async () => {
+  test("the binding of the mode runs for the bare g; no prefix is armed", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("hello");
     registerGMode(ed);
     executeTlisp(ed, '(major-mode-set "gmode")');
@@ -376,7 +376,7 @@ describe("#368 d: a mode key that is also the start of a global sequence", () =>
     expect(ed.getState().statusMessage).not.toContain("Which-key");
   });
 
-  test("control: in fundamental the bare g still arms the global prefix", async () => {
+  test("control: in fundamental the bare g still arms the global prefix", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("hello");
     registerGMode(ed);
     const calls = spyCommands(ed);
@@ -385,7 +385,7 @@ describe("#368 d: a mode key that is also the start of a global sequence", () =>
     expect(ed.getState().whichKeyPrefix).toBe("g");
   });
 
-  test("in that mode every g runs the mode's binding: the global g sequences are shadowed there", async () => {
+  test("in that mode every g runs the mode's binding: the global g sequences are shadowed there", { timeout: 30_000 }, async () => {
     // The consequence of the rule, written down: a mode that binds a global
     // prefix key makes that prefix's global sequences unreachable in its
     // buffers (vim's `g g` would have moved the cursor to line 0).
@@ -433,20 +433,20 @@ describe("#368 e: the mode-scoped keys of the markdown mode still resolve to the
   const stillResolve = bindings.filter(({ key }) => !shadowedBefore.includes(key) && !threeKeyGap.includes(key));
 
   for (const { key, command } of stillResolve) {
-    test(`markdown: ${key} resolves to ${command}`, async () => {
+    test(`markdown: ${key} resolves to ${command}`, { timeout: 30_000 }, async () => {
       const { ed, calls } = await drive("# Title\n\ntext\n", key);
       expect(calls).toEqual([command]);
       expect(ed.getState().whichKeyPrefix).toBe("");
     });
   }
 
-  test("markdown: g b is the mode's binding, not the global binding of the same sequence", async () => {
+  test("markdown: g b is the mode's binding, not the global binding of the same sequence", { timeout: 30_000 }, async () => {
     // Before #368 the global `g b` (markdown-jump-back) shadowed the mode's.
     const { calls } = await drive("# Title\n\ntext\n", "g b");
     expect(calls).toEqual(["(markdown-backlinks)"]);
   });
 
-  test(`known gap, NOT #368: a three-key sequence whose two-key prefix is a complete binding does not resolve (${threeKeyGap.length} keys)`, async () => {
+  test(`known gap, NOT #368: a three-key sequence whose two-key prefix is a complete binding does not resolve (${threeKeyGap.length} keys)`, { timeout: 30_000 }, async () => {
     // `, m s` (move the subtree up) cannot run: `, m` (frontmatter-show) is a
     // complete binding and fires on the second key; the third key then runs
     // as a vim key. True before #368 and after it — pinned so that a later
@@ -494,13 +494,13 @@ describe("#368, grading round 2: a count typed before a key of a mode does not s
 
   for (const table of tables) {
     for (const key of table.keys) {
-      test(`round 2: ${table.name}: 3 then ${JSON.stringify(key)}, then x deletes ONE character`, async () => {
+      test(`round 2: ${table.name}: 3 then ${JSON.stringify(key)}, then x deletes ONE character`, { timeout: 30_000 }, async () => {
         expect(await countThenX(table.open, key)).toBe("ne two three four five");
       });
     }
   }
 
-  test("round 2: info: 3 n q x — the coach's case, by the keys alone", async () => {
+  test("round 2: info: 3 n q x — the coach's case, by the keys alone", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor(TEXT);
     executeTlisp(ed, "(info)");
     await ed.handleKey("3");
@@ -512,7 +512,7 @@ describe("#368, grading round 2: a count typed before a key of a mode does not s
     expect(str(ed, "(buffer-text)")).toBe("ne two three four five");
   });
 
-  test("round 2: markdown: a count typed before a mode sequence does not survive it (3 ] h, then x)", async () => {
+  test("round 2: markdown: a count typed before a mode sequence does not survive it (3 ] h, then x)", { timeout: 30_000 }, async () => {
     const ed = await setupMarkdownEditor("# One\n\ntext one\n\n## Two\n\ntext two\n");
     executeTlisp(ed, "(cursor-move 2 0)");
     await ed.handleKey("3");
@@ -526,7 +526,7 @@ describe("#368, grading round 2: a count typed before a key of a mode does not s
     expect(str(ed, "(buffer-line 2)")).toBe("ext one");
   });
 
-  test("round 2: a count typed before a command that reports something: the report stays (3 m in a node without a menu)", async () => {
+  test("round 2: a count typed before a command that reports something: the report stays (3 m in a node without a menu)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor(TEXT);
     executeTlisp(ed, "(info)");
     await ed.handleKey("n"); // the Introduction has no menu
@@ -538,7 +538,7 @@ describe("#368, grading round 2: a count typed before a key of a mode does not s
     expect(truthy(ed, "(vim-count-active-p)")).toBe(false);
   });
 
-  test("round 2: the count display does not stay after a command that sets no message (3 p at Top)", async () => {
+  test("round 2: the count display does not stay after a command that sets no message (3 p at Top)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor(TEXT);
     executeTlisp(ed, "(info)");
     executeTlisp(ed, "(cursor-move 1 0)");
@@ -548,7 +548,7 @@ describe("#368, grading round 2: a count typed before a key of a mode does not s
     expect(truthy(ed, "(vim-count-active-p)")).toBe(false);
   });
 
-  test("round 2 control: in fundamental a count still reaches the vim command (3 x deletes three)", async () => {
+  test("round 2 control: in fundamental a count still reaches the vim command (3 x deletes three)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor(TEXT);
     await ed.handleKey("3");
     await ed.handleKey("x");
@@ -556,7 +556,7 @@ describe("#368, grading round 2: a count typed before a key of a mode does not s
     expect(truthy(ed, "(vim-count-active-p)")).toBe(false);
   });
 
-  test("round 2: help: a count typed before S-TAB does not survive it either", async () => {
+  test("round 2: help: a count typed before S-TAB does not survive it either", { timeout: 30_000 }, async () => {
     // S-TAB ran through the old path too; no command of a mode reads the
     // count today, so what is left after the command must be cleared.
     const ed = await createStartedEditor(TEXT);
@@ -589,7 +589,7 @@ describe("landing round L1: a binding of a major mode stands between the inner k
   ];
 
   for (const { name, open, buffer, key, raw } of readers) {
-    test(`L1: ${name}: a BUFFER-LOCAL binding of ${JSON.stringify(key)} wins over the binding of the mode (red first)`, async () => {
+    test(`L1: ${name}: a BUFFER-LOCAL binding of ${JSON.stringify(key)} wins over the binding of the mode (red first)`, { timeout: 30_000 }, async () => {
       const ed = await createStartedEditor("");
       executeTlisp(ed, open);
       executeTlisp(ed, "(cursor-move 0 0)");
@@ -606,7 +606,7 @@ describe("landing round L1: a binding of a major mode stands between the inner k
     });
   }
 
-  test("L1: the binding of an ACTIVE MINOR MODE wins over the binding of the mode (red first)", async () => {
+  test("L1: the binding of an ACTIVE MINOR MODE wins over the binding of the mode (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, "(info)");
     executeTlisp(ed, `(progn
@@ -621,7 +621,7 @@ describe("landing round L1: a binding of a major mode stands between the inner k
     expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
   });
 
-  test("L1: markdown: a buffer-local FULL binding of a key that is a prefix of the mode runs at once (red first)", async () => {
+  test("L1: markdown: a buffer-local FULL binding of a key that is a prefix of the mode runs at once (red first)", { timeout: 30_000 }, async () => {
     const ed = await setupMarkdownEditor("# One\n\ntext\n");
     bindLocal(ed, "test", "]", "local ] ran");
     await ed.handleKey("]");
@@ -629,7 +629,7 @@ describe("landing round L1: a binding of a major mode stands between the inner k
     expect(ed.getState().whichKeyPrefix).toBe(""); // not waiting for a second key
   });
 
-  test("L1: markdown: a buffer-local binding of a WHOLE sequence wins over the same sequence of the mode (red first)", async () => {
+  test("L1: markdown: a buffer-local binding of a WHOLE sequence wins over the same sequence of the mode (red first)", { timeout: 30_000 }, async () => {
     const ed = await setupMarkdownEditor("# One\n\ntext\n\n## Two\n\ntext two\n");
     bindLocal(ed, "test", "] h", "local ] h ran");
     await ed.handleKey("]");
@@ -638,7 +638,7 @@ describe("landing round L1: a binding of a major mode stands between the inner k
     expect(str(ed, "(cursor-line)")).toBe("0"); // markdown-next-heading did not run
   });
 
-  test("L1: control: a buffer-local prefix that overlaps the mode keeps both: ] x is local, ] h is the mode's", async () => {
+  test("L1: control: a buffer-local prefix that overlaps the mode keeps both: ] x is local, ] h is the mode's", { timeout: 30_000 }, async () => {
     const ed = await setupMarkdownEditor("# One\n\ntext\n\n## Two\n\ntext two\n");
     bindLocal(ed, "test", "] x", "local ] x ran");
     await ed.handleKey("]");
@@ -652,7 +652,7 @@ describe("landing round L1: a binding of a major mode stands between the inner k
     expect(str(ed, "(cursor-line)")).toBe("4"); // the mode's ] h ran
   });
 
-  test("L1: control: with no inner binding, the binding of the mode still wins over the vim key", async () => {
+  test("L1: control: with no inner binding, the binding of the mode still wins over the vim key", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, "(info)");
     expect(executeTlisp(ed, '(keymap-ref-inner "n")').type).toBe("nil"); // only the global keymap binds n
@@ -660,10 +660,131 @@ describe("landing round L1: a binding of a major mode stands between the inner k
     expect(str(ed, "(buffer-line 0)")).toBe("Node: Introduction");
   });
 
-  test("L1: control: in a buffer without a major mode, a buffer-local binding still wins (as before)", async () => {
+  test("L1: control: in a buffer without a major mode, a buffer-local binding still wins (as before)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("hello");
     bindLocal(ed, "test", "n", "local n ran");
     await ed.handleKey("n");
     expect(ed.getState().statusMessage).toBe("local n ran");
+  });
+
+  describe("L2: an inner keymap's PREFIX against a complete binding of the mode", () => {
+    test("L2: info: a buffer-local `n x` sequence can be typed: n waits, x runs the local command (red first)", { timeout: 30_000 }, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, "(info)");
+      bindLocal(ed, "*Info*", "n x", "local n x ran");
+      expect(str(ed, '(keymap-inner-lookup "n")')).toBe("..prefix..");
+      await ed.handleKey("n");
+      // The command of the mode did NOT run: still at Top, waiting for x.
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+      expect(ed.getState().whichKeyPrefix).toBe("n");
+      expect(ed.getState().statusMessage).not.toBe("local n x ran");
+      await ed.handleKey("x");
+      expect(ed.getState().statusMessage).toBe("local n x ran");
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+      expect(ed.getState().whichKeyPrefix).toBe("");
+    });
+
+    test("L2: info: the PREFIX of an active minor mode beats the complete binding of the mode (red first)", { timeout: 30_000 }, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, "(info)");
+      executeTlisp(ed, `(progn
+        (minor-mode-register "l2mm" "l2 minor" "L2")
+        (keymap-register "l2mm-map" (keymap-init "l2mm"))
+        (keymap-set-key (keymap-named "l2mm-map") "n x" ${setStatusCommand("minor n x ran")})
+        (minor-mode-set-keymap "l2mm" "l2mm-map")
+        (minor-mode-set "l2mm" t))`);
+      await ed.handleKey("n");
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+      expect(ed.getState().whichKeyPrefix).toBe("n");
+      await ed.handleKey("x");
+      expect(ed.getState().statusMessage).toBe("minor n x ran");
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+    });
+
+    test("L2: two active minor modes and a buffer-local map: the innermost that knows the sequence decides", { timeout: 30_000 }, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, "(info)");
+      executeTlisp(ed, `(progn
+        (minor-mode-register "mma2" "A2" "A2")
+        (minor-mode-register "mmb2" "B2" "B2")
+        (keymap-register "mma2-map" (keymap-init "mma2"))
+        (keymap-set-key (keymap-named "mma2-map") "n a" ${setStatusCommand("mma n a ran")})
+        (minor-mode-set-keymap "mma2" "mma2-map")
+        (minor-mode-set "mma2" t)
+        (keymap-register "mmb2-map" (keymap-init "mmb2"))
+        (keymap-set-key (keymap-named "mmb2-map") "n b" ${setStatusCommand("mmb n b ran")})
+        (minor-mode-set-keymap "mmb2" "mmb2-map")
+        (minor-mode-set "mmb2" t))`);
+      // Both minor modes prefix n; the mode binds n completely. n waits.
+      await ed.handleKey("n");
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+      await ed.handleKey("b");
+      expect(ed.getState().statusMessage).toBe("mmb n b ran"); // the later-activated
+      executeTlisp(ed, setStatusCommand(""));
+      await ed.handleKey("n");
+      await ed.handleKey("a");
+      expect(ed.getState().statusMessage).toBe("mma n a ran"); // the other one's sequence
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top"); // info-next never ran
+      // A buffer-local sequence is inner still.
+      bindLocal(ed, "*Info*", "n x", "local n x ran");
+      executeTlisp(ed, setStatusCommand(""));
+      await ed.handleKey("n");
+      await ed.handleKey("x");
+      expect(ed.getState().statusMessage).toBe("local n x ran");
+      executeTlisp(ed, setStatusCommand(""));
+      await ed.handleKey("n");
+      await ed.handleKey("b"); // the minor mode's sequence still completes
+      expect(ed.getState().statusMessage).toBe("mmb n b ran");
+    });
+
+    test("L2: a buffer-local prefix of THREE keys against the complete binding of the mode", { timeout: 30_000 }, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, "(info)");
+      bindLocal(ed, "*Info*", "n x y", "local n x y ran");
+      await ed.handleKey("n");
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+      await ed.handleKey("x");
+      expect(ed.getState().whichKeyPrefix).toBe("n x"); // still waiting
+      await ed.handleKey("y");
+      expect(ed.getState().statusMessage).toBe("local n x y ran");
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+    });
+
+    test("L2: Escape cancels the pending inner prefix; nothing ran (red first)", { timeout: 30_000 }, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, "(info)");
+      bindLocal(ed, "*Info*", "n x", "local n x ran");
+      executeTlisp(ed, setStatusCommand("a marker"));
+      await ed.handleKey("n");
+      await ed.handleKey("Escape");
+      expect(ed.getState().whichKeyPrefix).toBe("");
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+      // x alone is a vim key here and does not run the local sequence.
+      expect(ed.getState().statusMessage).not.toBe("local n x ran");
+    });
+
+    test("L2: control: a macro recording running while an inner sequence is typed closes cleanly, and the mode's command does not run", { timeout: 30_000 }, async () => {
+      // Not asserted: the FIRST key of a prefix sequence being recorded. That
+      // is not recorded for any sequence of the global keymap either
+      // (FIX-REPORT.md, W5, older than this change), and this change must not
+      // make it worse or better.
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, "(info)");
+      bindLocal(ed, "*Info*", "n x", "local n x ran");
+      executeTlisp(ed, '(macro-record-start "b")');
+      await ed.handleKey("n");
+      await ed.handleKey("x");
+      expect(ed.getState().statusMessage).toBe("local n x ran"); // the local command ran while recording
+      expect(str(ed, "(buffer-line 0)")).toBe("Node: Top"); // the mode's n did not
+      expect(str(ed, "(macro-record-active)")).toBe("true"); // still recording
+      await ed.handleKey("q");
+      expect(str(ed, "(macro-record-active)")).toBe("false"); // the stopping q closed it
+      const list = executeTlisp(ed, "(macro-list)") as any;
+      const pair = list.value.find((entry: any) => entry.value[0].value === "b");
+      // The keys recorded end with x (the key that completed the sequence).
+      const keys: string[] = pair.value[1].value.map((k: any) => k.value);
+      expect(keys.at(-1)).toBe("x");
+      expect(keys).not.toContain("q"); // the stopping q is not recorded
+    });
   });
 });

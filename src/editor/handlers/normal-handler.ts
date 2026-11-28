@@ -43,6 +43,10 @@ const DIGIT_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 /** The start of the status line the which-key popup writes while it shows. */
 const WHICH_KEY_STATUS_PREFIX = "Which-key: ";
 
+/** What keymap-inner-lookup returns when an inner keymap has a PREFIX for a
+ *  key (the marker keymaps.tlisp uses for an intermediate prefix). */
+const PREFIX_MARKER = "..prefix..";
+
 const PREFIX_LABELS: Record<string, string> = {
   "z": "z — scroll/viewport",
   "g": "g — goto",
@@ -236,19 +240,26 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     }
   }
 
-  // Is the key bound by a level INNER to the editor-mode keymap — the
-  // buffer-local keymap or an active minor-mode keymap (#206 chain)? Then
-  // that binding wins: the major mode stands between those levels and the
-  // editor-mode keymap, as a minor mode does in Emacs. The lookup is in
-  // T-Lisp; this only routes.
-  const innerBound = isTruthyResult(exec(`(keymap-ref-inner "${escape(lookupKey)}")`));
+  // What do the levels INNER to the editor-mode keymap say — the
+  // buffer-local keymap, then the active minor-mode keymaps (#206 chain)?
+  // The first of them that knows the key decides, and the major mode is
+  // not asked: it stands between those levels and the editor-mode keymap,
+  // as a minor mode does in Emacs. The lookup is in T-Lisp
+  // (keymap-inner-lookup): a command string, or the marker "..prefix.."
+  // when an inner map has a prefix for the key — the next key must be
+  // waited for, exactly as for a prefix of the editor-mode keymap.
+  const innerResult = exec(`(keymap-inner-lookup "${escape(lookupKey)}")`);
+  const innerRight = isRight(innerResult) ? innerResult.right : null;
+  const innerPrefix = !!innerRight && innerRight.type === "string" && innerRight.value === PREFIX_MARKER;
+  const innerBound = !!innerRight && innerRight.type === "string" && innerRight.value !== PREFIX_MARKER;
+  const innerKnows = innerBound || innerPrefix;
 
   // Major-mode binding for the EXACT key (#368). info, help, helpgrep and
   // man bind keys that vim also uses (n, i, q, Enter, ...); read after the
   // keymap they never ran. Only a binding the major mode ITSELF declares
   // counts (a table row with no major mode is the global binding below).
   const majorMode = editor.getCurrentMajorMode();
-  if (!innerBound && majorMode && majorMode !== "fundamental") {
+  if (!innerKnows && majorMode && majorMode !== "fundamental") {
     const own = lookupMajorModeOwnBinding(editor, lookupKey, majorMode);
     if (own) {
       clearWhichKey(editor, wk);
@@ -289,8 +300,10 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   // wait for the next key. Major-mode bindings are not in the T-Lisp keymap,
   // so they need their own prefix detection here. A FULL binding of an inner
   // level shadows this prefix (the Emacs rule), like it shadows the global
-  // one below.
-  if (!innerBound && majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
+  // one — and so does a PREFIX of an inner level: the first level that
+  // knows the key decides (grading round L2: a buffer-local `n x` in *Info*
+  // could not be typed, because the mode's `n` ran on the first key).
+  if (!innerKnows && majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
     // The first key of a mode sequence is recorded here, the last one when
     // its binding runs (above), so `] h` replays as `] h`.
     if (macroRecording) {

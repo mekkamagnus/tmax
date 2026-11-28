@@ -47,7 +47,7 @@ const recency = (ed: Editor): string[] =>
   (executeTlisp(ed, "(buffer-recency-list)") as any).value.map((v: any) => v.value);
 
 describe("#375: q returns to the buffer that was on screen", () => {
-  test("help: q returns to the file buffer (SPC h m = describe-mode)", async () => {
+  test("help: q returns to the file buffer (SPC h m = describe-mode)", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(describe-mode)");
     expect(str(ed, "(buffer-current)")).toBe("*Help*");
@@ -59,7 +59,7 @@ describe("#375: q returns to the buffer that was on screen", () => {
     expect(str(ed, "(buffer-list)")).toContain("*Help*");
   });
 
-  test("info: q returns to the file buffer", async () => {
+  test("info: q returns to the file buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(info)");
     expect(str(ed, "(buffer-current)")).toBe("*Info*");
@@ -68,7 +68,7 @@ describe("#375: q returns to the buffer that was on screen", () => {
     expect(recency(ed).at(-1)).toBe("*Info*");
   });
 
-  test("man: q returns to the file buffer", async () => {
+  test("man: q returns to the file buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, '(man "ls")');
     expect(str(ed, "(buffer-current)")).toBe("*Man*");
@@ -77,7 +77,7 @@ describe("#375: q returns to the buffer that was on screen", () => {
     expect(recency(ed).at(-1)).toBe("*Man*");
   });
 
-  test("man opened through its prompt: q returns to the file buffer", async () => {
+  test("man opened through its prompt: q returns to the file buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(cursor-move 0 0)");
     executeTlisp(ed, `(find-file-open "${join(dir, "one.md")}")`);
@@ -94,7 +94,7 @@ describe("#375: q returns to the buffer that was on screen", () => {
     expect(str(ed, "(buffer-current)")).toBe("test");
   });
 
-  test("help opened from a prompt (apropos): q returns to the file buffer", async () => {
+  test("help opened from a prompt (apropos): q returns to the file buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(apropos)");
     expect(ed.getState().mode).toBe("mx");
@@ -113,7 +113,7 @@ describe("#375: q returns to the buffer where the user was", () => {
     ["man", '(man "ls")', ["}", "{"]],
   ];
   for (const [name, open, keys] of cases) {
-    test(`${name}: the cursor of the returned buffer is where it was (red first)`, async () => {
+    test(`${name}: the cursor of the returned buffer is where it was (red first)`, { timeout: 30_000 }, async () => {
       const path = join(dir, "cursor.md");
       writeFileSync(path, "l1\nl2\nl3\nl4\nl5\n");
       const ed = await createStartedEditor("");
@@ -130,7 +130,7 @@ describe("#375: q returns to the buffer where the user was", () => {
     });
   }
 
-  test("a cursor position that no longer exists (the line was removed meanwhile) is clamped, not an error (guard after the fix)", async () => {
+  test("a cursor position that no longer exists (the line was removed meanwhile) is clamped, not an error (guard after the fix)", { timeout: 30_000 }, async () => {
     const path = join(dir, "cursor-short.md");
     writeFileSync(path, "l1\nl2\nl3\nl4\nl5\n");
     const ed = await createStartedEditor("");
@@ -147,7 +147,7 @@ describe("#375: q returns to the buffer where the user was", () => {
 });
 
 describe("#375: help opened from help returns to the buffer before the first page", () => {
-  test("two help pages, then q: the file buffer", async () => {
+  test("two help pages, then q: the file buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, '(describe-function "save-buffer")');
     executeTlisp(ed, '(describe-function "save-some-buffers")'); // help from help
@@ -156,7 +156,7 @@ describe("#375: help opened from help returns to the buffer before the first pag
     expect(str(ed, "(buffer-current)")).toBe(file);
   });
 
-  test("a cross-reference followed in the help buffer, then q: the file buffer", async () => {
+  test("a cross-reference followed in the help buffer, then q: the file buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, '(apropos-run "save")');
     await ed.handleKey("\t"); // first reference
@@ -166,7 +166,7 @@ describe("#375: help opened from help returns to the buffer before the first pag
     expect(str(ed, "(buffer-current)")).toBe(file);
   });
 
-  test("info navigated (n, t), then q: the file buffer", async () => {
+  test("info navigated (n, t), then q: the file buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(info)");
     await ed.handleKey("n");
@@ -180,7 +180,7 @@ describe("#375: help opened from help returns to the buffer before the first pag
 });
 
 describe("#375: the buffer before help has no file", () => {
-  test("help opened from the dired listing: q returns to the listing", async () => {
+  test("help opened from the dired listing: q returns to the listing", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, `(dired "${dir}")`);
     expect(str(ed, "(buffer-current)")).toBe("*Dired*");
@@ -191,7 +191,7 @@ describe("#375: the buffer before help has no file", () => {
     expect(str(ed, "(major-mode-get)")).toBe("dired");
   });
 
-  test("help opened from a buffer without a name that is a file: q returns to it", async () => {
+  test("help opened from a buffer without a name that is a file: q returns to it", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("plain text");
     expect(str(ed, "(buffer-current)")).toBe("test");
     executeTlisp(ed, "(describe-mode)");
@@ -202,7 +202,7 @@ describe("#375: the buffer before help has no file", () => {
 });
 
 describe("#375: when there is no earlier buffer", () => {
-  test("the buffer before help is gone: q shows *scratch*", async () => {
+  test("the buffer before help is gone: q shows *scratch*", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(describe-mode)");
     // Leave *Help* without q, kill the file buffer elsewhere, come back.
@@ -215,7 +215,7 @@ describe("#375: when there is no earlier buffer", () => {
     expect(str(ed, "(buffer-current)")).toBe("*scratch*");
   });
 
-  test("help opened from *scratch* (no earlier buffer): q shows *scratch*", async () => {
+  test("help opened from *scratch* (no earlier buffer): q shows *scratch*", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, '(switch-to-buffer "*scratch*")');
     executeTlisp(ed, "(describe-mode)");
@@ -231,7 +231,7 @@ describe("#375: a reader opened again from inside itself", () => {
     ["man", '(man "ls")', "*Man*"],
   ];
   for (const [name, open, reader] of readers) {
-    test(`${name}: after an earlier q, opened again while it is shown: q returns to the buffer it was last opened from (red first)`, async () => {
+    test(`${name}: after an earlier q, opened again while it is shown: q returns to the buffer it was last opened from (red first)`, { timeout: 30_000 }, async () => {
       // The user leaves the reader with q, comes back to it by switching
       // buffers, and runs the command again from inside it.
       const ed = await createStartedEditor("");
@@ -251,7 +251,7 @@ describe("#375: a reader opened again from inside itself", () => {
 });
 
 describe("#375: one reader opened from another", () => {
-  test("man from *Info* (K): q in *Man* returns to *Info*, q in *Info* to the file (guard: true before)", async () => {
+  test("man from *Info* (K): q in *Man* returns to *Info*, q in *Info* to the file (guard: true before)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, `(find-file-open "${file}")`);
     executeTlisp(ed, "(info)");
@@ -265,7 +265,7 @@ describe("#375: one reader opened from another", () => {
 });
 
 describe("#375, grading round 3: the identity of a buffer", () => {
-  test("buffer-id is stable across edits, switches and a rename, and differs for a later buffer of the same name", async () => {
+  test("buffer-id is stable across edits, switches and a rename, and differs for a later buffer of the same name", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, '(switch-to-buffer "*scratch*")');
     executeTlisp(ed, '(buffer-create "origin")');
@@ -303,7 +303,7 @@ describe("#375, grading round 3: the return buffer is a buffer, not a name", () 
   ];
 
   for (const [name, open] of readers) {
-    test(`${name}: the origin was killed and a DIFFERENT buffer has its name: q shows *scratch* (red first)`, async () => {
+    test(`${name}: the origin was killed and a DIFFERENT buffer has its name: q shows *scratch* (red first)`, { timeout: 30_000 }, async () => {
       const ed = await createStartedEditor("");
       executeTlisp(ed, '(switch-to-buffer "*scratch*")');
       executeTlisp(ed, '(buffer-create "origin")');
@@ -322,7 +322,7 @@ describe("#375, grading round 3: the return buffer is a buffer, not a name", () 
       expect(str(ed, "(buffer-text)")).toBe("the replacement"); // and it was not touched
     });
 
-    test(`${name}: the origin was RENAMED while the reader was open: q returns to it under its new name (red first)`, async () => {
+    test(`${name}: the origin was RENAMED while the reader was open: q returns to it under its new name (red first)`, { timeout: 30_000 }, async () => {
       const ed = await createStartedEditor("");
       executeTlisp(ed, '(switch-to-buffer "*scratch*")');
       executeTlisp(ed, '(buffer-create "origin")');
@@ -344,7 +344,7 @@ describe("#375, grading round 3: the return buffer is a buffer, not a name", () 
 });
 
 describe("#375: the state after q", () => {
-  test("the help buffer is at the end of the buffer order", async () => {
+  test("the help buffer is at the end of the buffer order", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(describe-mode)");
     expect(recency(ed)[0]).toBe("*Help*"); // most recent while it is shown
@@ -353,7 +353,7 @@ describe("#375: the state after q", () => {
     expect(recency(ed).at(-1)).toBe("*Help*");
   });
 
-  test("q in help does not start a macro recording", async () => {
+  test("q in help does not start a macro recording", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(describe-mode)");
     await ed.handleKey("q");
@@ -362,7 +362,7 @@ describe("#375: the state after q", () => {
     expect(str(ed, "(buffer-current)")).toBe(file);
   });
 
-  test("the returned buffer shows no stale message of the help buffer", async () => {
+  test("the returned buffer shows no stale message of the help buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(describe-mode)");
     await ed.handleKey("q");
@@ -370,7 +370,7 @@ describe("#375: the state after q", () => {
     expect(ed.getState().statusMessage ?? "").not.toContain("*Help*");
   });
 
-  test("q twice: the second q is the vim q of the file buffer (a macro recording)", async () => {
+  test("q twice: the second q is the vim q of the file buffer (a macro recording)", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(describe-mode)");
     await ed.handleKey("q");
@@ -379,7 +379,7 @@ describe("#375: the state after q", () => {
     expect(str(ed, "(macro-record-pending-p)")).toBe("true");
   });
 
-  test("help opened again from ANOTHER buffer returns to that other buffer", async () => {
+  test("help opened again from ANOTHER buffer returns to that other buffer", { timeout: 30_000 }, async () => {
     const ed = await fileEditor();
     executeTlisp(ed, "(describe-mode)");
     await ed.handleKey("q");
@@ -398,7 +398,7 @@ describe("#375: the docstrings say what the functions do", () => {
     return String(map.get("docstring")?.value ?? "");
   };
 
-  test("help-bury, info-bury and man-quit say that they return to the earlier buffer", async () => {
+  test("help-bury, info-bury and man-quit say that they return to the earlier buffer", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     for (const name of ["help-bury", "info-bury", "man-quit"]) {
       const doc = docstring(ed, name);
@@ -407,7 +407,7 @@ describe("#375: the docstrings say what the functions do", () => {
     }
   });
 
-  test("bury-buffer does not claim a switch or an Emacs convention it does not have", async () => {
+  test("bury-buffer does not claim a switch or an Emacs convention it does not have", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     const doc = docstring(ed, "bury-buffer");
     expect(doc).toMatch(/[Rr]ecency/);

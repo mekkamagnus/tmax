@@ -5,7 +5,7 @@
           keymap-all-bindings keymap-prefix-bindings keymap-bindings-list
           buffer-set-keymap buffer-keymap keymap-chain
           keymap-init keymap-register keymap-named keymap-mutable-set!
-          keymap-ref-own keymap-ref-inner)
+          keymap-ref-own keymap-ref-inner keymap-inner-lookup keymap-prefix-own-p)
 
 (defvar normal-keymap nil)
 (defvar insert-keymap nil)
@@ -16,9 +16,14 @@
 ;;   buffer-local → active minor-mode keymaps (later-activated innermost)
 ;;   → the editor-mode keymap. Inner levels shadow outer for BINDINGS; a
 ;;   partial sequence that is a prefix at ANY level keeps waiting for the
-;;   next key. LIMITATION: the handler checks prefix-p before ref, so a
-;;   buffer-local FULL binding of a key that is a prefix at an outer level
-;;   (bare g/SPC) cannot fire — the outer prefix wins.
+;;   next key. Refined by #286 (keymap-prefix-p): the first level that
+;;   knows the key decides — a buffer-local FULL binding of a key that is a
+;;   prefix at an outer level (bare g/SPC) DOES fire.
+;;   #368: the bindings of the current MAJOR MODE are a level of their own,
+;;   between the inner levels and the editor-mode keymap (as a minor mode
+;;   in Emacs). They live in the editor's keyMappings table, not here; the
+;;   normal handler asks keymap-inner-lookup first and looks at the major
+;;   mode only when no inner level knows the key.
 (defvar buffer-keymaps (hashmap))
 
 (defun keymap-init (mode-name)
@@ -132,28 +137,55 @@ innermost level wins, outer levels are fallback."
         (hashmap-get bindings key)
         nil))))
 
-(defun keymap-ref-inner (key)
-  "KEY as bound by a level INNER to the editor-mode keymap — the
-buffer-local keymap, then the active minor-mode keymaps, innermost
-first — or nil when only the editor-mode keymap binds KEY (#206 chain).
-A binding of the major mode stands between these levels and the
-editor-mode keymap (#368): the handler asks this before it looks at the
-major mode."
-  (keymap-ref-inner-maps
-    (let ((local (buffer-keymap (buffer-name)))
-          (minors (minor-mode-keymap-chain)))
-      (append (if local (list local) '())
-              (if minors minors '())))
-    key))
+(defun keymap-prefix-own-p (kmap key)
+  "t when KEY is a PREFIX in KMAP ITSELF — its own prefix-table has an
+entry for it; nil otherwise."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (let ((pt (hashmap-get kmap "prefix-table")))
+      (if (hashmapp pt)
+        (hashmapp (keymap-walk-prefix pt (string-split key " ")))
+        nil))))
 
-(defun keymap-ref-inner-maps (kmaps key)
-  "KEY as bound by one of KMAPS itself, first map first; nil when none."
+(defun keymap-inner-maps ()
+  "The levels INNER to the editor-mode keymap, innermost first: the
+buffer-local keymap, then the active minor-mode keymaps (#206 chain)."
+  (let ((local (buffer-keymap (buffer-name)))
+        (minors (minor-mode-keymap-chain)))
+    (append (if local (list local) '())
+            (if minors minors '()))))
+
+(defun keymap-inner-lookup (key)
+  "What the levels INNER to the editor-mode keymap say about KEY (#368).
+They are walked innermost first and the FIRST map that knows KEY
+decides: its COMMAND when that map has a complete binding for KEY, the
+marker of two dots around the word prefix when it has a prefix entry for
+KEY (the next key must be waited for), nil when no inner map knows KEY. A complete binding
+wins over a prefix in the same map (the rule of keymap-prefix-p). The
+normal handler looks at the binding of the major mode only when this is
+nil."
+  (keymap-inner-lookup-maps (keymap-inner-maps) key))
+
+(defun keymap-inner-lookup-maps (kmaps key)
+  "keymap-inner-lookup over KMAPS, first map first."
   (if (null kmaps)
     nil
     (let ((here (keymap-ref-own (car kmaps) key)))
       (if here
         here
-        (keymap-ref-inner-maps (cdr kmaps) key)))))
+        (if (keymap-prefix-own-p (car kmaps) key)
+          "..prefix.."
+          (keymap-inner-lookup-maps (cdr kmaps) key))))))
+
+(defun keymap-ref-inner (key)
+  "KEY as bound by a level INNER to the editor-mode keymap — the
+buffer-local keymap, then the active minor-mode keymaps, innermost
+first — or nil when none of them has a COMPLETE binding for KEY (#206
+chain). See keymap-inner-lookup for prefixes."
+  (let ((found (keymap-inner-lookup key)))
+    (if (and found (string= found "..prefix.."))
+      nil
+      found)))
 
 (defun keymap-set-key (kmap key command)
   "Bind KEY to COMMAND in KMAP. Multi-key sequences (e.g. \"SPC x f\")

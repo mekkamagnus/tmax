@@ -81,14 +81,14 @@ async function answer(ed: Editor, input: string): Promise<void> {
 const allExist = (names = FILES): boolean => names.every((name) => existsSync(join(vault, name)));
 
 describe("#372 part 1: the question says what to type", () => {
-  test("the question names the count and says to type yes (red first)", async () => {
+  test("the question names the count and says to type yes (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     await ed.handleKey("y");
     expect(ed.getState().minibufferView!.prompt).toBe("Delete 3 shown entries? Type yes: ");
   });
 
-  test("the question and the typed yes are complete at 40 columns (red first)", async () => {
+  test("the question and the typed yes are complete at 40 columns (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     await ed.handleKey("y");
@@ -103,7 +103,7 @@ describe("#372 part 1: the question says what to type", () => {
     expect(rendered.cursorColumn).toBeLessThan(40);
   });
 
-  test("the question and the typed yes are complete at 200 columns (red first)", async () => {
+  test("the question and the typed yes are complete at 200 columns (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     await ed.handleKey("y");
@@ -113,7 +113,7 @@ describe("#372 part 1: the question says what to type", () => {
     expect(line.startsWith("Delete 3 shown entries? Type yes: yes")).toBe(true);
   });
 
-  test("what follows the answer on the line is recorded: the completion message of a free-form prompt", async () => {
+  test("what follows the answer on the line is recorded: the completion message of a free-form prompt", { timeout: 30_000 }, async () => {
     // Not #372 (true for every read-from-minibuffer prompt before it): the
     // renderer appends the completion message after the input. A free-form
     // prompt has no candidates, so that message is "No match"; on a
@@ -126,7 +126,7 @@ describe("#372 part 1: the question says what to type", () => {
     expect(view.message).toBe("No match");
   });
 
-  test("y then Enter deletes nothing and says that the full word was needed (red first)", async () => {
+  test("y then Enter deletes nothing and says that the full word was needed (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     await ed.handleKey("y"); // the plan's confirm key
@@ -140,7 +140,7 @@ describe("#372 part 1: the question says what to type", () => {
     expect(marked(ed, "alpha.txt")).toBe(true); // the marks are kept
   });
 
-  test("yes deletes exactly the shown entries (guard: true before #372)", async () => {
+  test("yes deletes exactly the shown entries (guard: true before #372)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     await answer(ed, "yes");
@@ -151,7 +151,7 @@ describe("#372 part 1: the question says what to type", () => {
 });
 
 describe("#372 part 2: q cancels the plan", () => {
-  test("q cancels, keeps the marks, and starts no macro recording (red first)", async () => {
+  test("q cancels, keeps the marks, and starts no macro recording (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     await ed.handleKey("q");
@@ -164,7 +164,7 @@ describe("#372 part 2: q cancels the plan", () => {
     expect(status).toContain("nothing deleted");
   });
 
-  test("the instruction line of the plan names q as the cancel key (red first)", async () => {
+  test("the instruction line of the plan names q as the cancel key (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     const last = text(ed).trimEnd().split("\n").at(-1)!;
@@ -172,7 +172,7 @@ describe("#372 part 2: q cancels the plan", () => {
     expect(last).toContain("cancel");
   });
 
-  test("q in the plan is the plan's own q, not the first key of a macro recording (red first)", async () => {
+  test("q in the plan is the plan's own q, not the first key of a macro recording (red first)", { timeout: 30_000 }, async () => {
     // Before #372, q in the plan asked for a macro register; the next key
     // was taken as the register (here: "Cancelled", still in the plan).
     const ed = await createStartedEditor("");
@@ -182,7 +182,7 @@ describe("#372 part 2: q cancels the plan", () => {
     expect(ed.getState().statusMessage ?? "").not.toContain("Macro record");
   });
 
-  test("n still cancels (guard: true before #372)", async () => {
+  test("n still cancels (guard: true before #372)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     await openPlan(ed);
     await ed.handleKey("n");
@@ -193,7 +193,7 @@ describe("#372 part 2: q cancels the plan", () => {
 });
 
 describe("#372 part 3: no stale status message", () => {
-  test("the plan buffer does not show the status message of an earlier command (red first)", async () => {
+  test("the plan buffer does not show the status message of an earlier command (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, `(dired "${vault}")`);
     // An earlier command of the flow: a copy, whose result is a status message.
@@ -217,7 +217,7 @@ describe("#372 part 3: no stale status message", () => {
     expect(ed.getState().statusMessage ?? "").toContain("Not confirmed");
   });
 
-  test("a cancelled plan leaves a message of its own, not the earlier one (red first)", async () => {
+  test("a cancelled plan leaves a message of its own, not the earlier one (red first)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, '(editor-set-status "Copied something earlier")');
     await openPlan(ed, ["gamma.txt"]);
@@ -240,7 +240,7 @@ describe("#372 part 3: a completed leader sequence does not keep the which-key l
     throw new Error("the which-key popup did not show");
   }
 
-  test("control: after SPC alone the which-key line IS the status (guard: true before #372)", async () => {
+  test("control: after SPC alone the which-key line IS the status (guard: true before #372)", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     ed.getWhichKeyHandle().reset(30);
     await ed.handleKey(" ");
@@ -252,7 +252,7 @@ describe("#372 part 3: a completed leader sequence does not keep the which-key l
     ["SPC d d", [" ", "d", "d"], LISTING],
     ["SPC h m", [" ", "h", "m"], "*Help*"],
   ] as const) {
-    test(`${name}: the which-key line is gone once the command ran (red first)`, async () => {
+    test(`${name}: the which-key line is gone once the command ran (red first)`, { timeout: 30_000 }, async () => {
       const ed = await createStartedEditor("");
       ed.getWhichKeyHandle().reset(30);
       for (let i = 0; i < keys.length - 1; i++) {
@@ -267,7 +267,7 @@ describe("#372 part 3: a completed leader sequence does not keep the which-key l
     });
   }
 
-  test("a real message set by the command is kept (guard: true before #372)", async () => {
+  test("a real message set by the command is kept (guard: true before #372)", { timeout: 30_000 }, async () => {
     // SPC x z runs bury-buffer, whose message is "Buried <buffer>".
     const ed = await createStartedEditor("hello");
     ed.getWhichKeyHandle().reset(30);

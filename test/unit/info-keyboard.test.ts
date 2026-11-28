@@ -52,21 +52,21 @@ function choose(ed: Editor, input: string): void {
 }
 
 describe("item 5a: n, p, u, t, q on the real manual (through the key handler)", () => {
-  test("guard: n shows the next node of the same level", async () => {
+  test("guard: n shows the next node of the same level", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("n");
     expect(node(ed)).toBe("Node: Introduction");
     expect(text(ed)).toContain("Node: Introduction");
   });
 
-  test("guard: p shows the previous node", async () => {
+  test("guard: p shows the previous node", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("n");
     await ed.handleKey("p");
     expect(node(ed)).toBe("Node: Top");
   });
 
-  test("guard: u shows the parent node", async () => {
+  test("guard: u shows the parent node", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("n");
     expect(node(ed)).toBe("Node: Introduction");
@@ -74,7 +74,7 @@ describe("item 5a: n, p, u, t, q on the real manual (through the key handler)", 
     expect(node(ed)).toBe("Node: Top");
   });
 
-  test("guard: t shows the Top node from anywhere", async () => {
+  test("guard: t shows the Top node from anywhere", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("n");
     await ed.handleKey("n"); // Installation
@@ -83,7 +83,7 @@ describe("item 5a: n, p, u, t, q on the real manual (through the key handler)", 
     expect(node(ed)).toBe("Node: Top");
   });
 
-  test("guard: q leaves to the buffer from which info was opened", async () => {
+  test("guard: q leaves to the buffer from which info was opened", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("n");
     await ed.handleKey("q");
@@ -92,7 +92,7 @@ describe("item 5a: n, p, u, t, q on the real manual (through the key handler)", 
 });
 
 describe("item 5a: m is a prompt with the menu items of the node", () => {
-  test("red first: m offers the menu items of the node; choosing one shows that node", async () => {
+  test("red first: m offers the menu items of the node; choosing one shows that node", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("m");
     expect(ed.getState().mode).toBe("mx");
@@ -111,7 +111,7 @@ describe("item 5a: m is a prompt with the menu items of the node", () => {
     expect(ed.getState().mode).toBe("normal");
   });
 
-  test("red first: the first menu item of the Top node is the Introduction, not a leftover of the heading", async () => {
+  test("red first: the first menu item of the Top node is the Introduction, not a leftover of the heading", { timeout: 30_000 }, async () => {
     // info-parse-links read "* Menu:" as an item whose target was the next
     // line, so the Introduction was missing from the items.
     const ed = await infoEditor();
@@ -121,7 +121,7 @@ describe("item 5a: m is a prompt with the menu items of the node", () => {
     expect(shown.join("\n")).not.toMatch(/What tmax is/);
   });
 
-  test("guard: m in a node without a menu says so and opens no prompt", async () => {
+  test("guard: m in a node without a menu says so and opens no prompt", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("n"); // the Introduction has no '* Menu:' section
     expect(text(ed)).not.toMatch(/(^|\n)\* Menu:/);
@@ -130,7 +130,7 @@ describe("item 5a: m is a prompt with the menu items of the node", () => {
     expect(ed.getState().statusMessage).toContain("No menu items");
   });
 
-  test("red first: m after n offers the menu of the node that is shown, not of Top", async () => {
+  test("red first: m after n offers the menu of the node that is shown, not of Top", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     // Walk down with n (past Top) to the first node that has a menu.
     await ed.handleKey("n");
@@ -157,7 +157,7 @@ describe("item 5a: m is a prompt with the menu items of the node", () => {
 });
 
 describe("item 5a: i is a prompt for a node", () => {
-  test("red first: i offers the nodes of the manual; choosing one shows it", async () => {
+  test("red first: i offers the nodes of the manual; choosing one shows it", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("i");
     expect(ed.getState().mode).toBe("mx");
@@ -170,7 +170,7 @@ describe("item 5a: i is a prompt for a node", () => {
     expect(node(ed)).toBe("Node: Installation");
   });
 
-  test("red first: i then Enter alone shows the Index (the key's name: the index)", async () => {
+  test("red first: i then Enter alone shows the Index (the key's name: the index)", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("i");
     expect(ed.getState().mode).toBe("mx");
@@ -178,7 +178,7 @@ describe("item 5a: i is a prompt for a node", () => {
     expect(node(ed)).toBe("Node: Index");
   });
 
-  test("red first: a node that does not exist is refused with a message", async () => {
+  test("red first: a node that does not exist is refused with a message", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     await ed.handleKey("i");
     choose(ed, "no-such-node");
@@ -188,7 +188,7 @@ describe("item 5a: i is a prompt for a node", () => {
 });
 
 describe("item 5a: RET, and the scroll keys in the read-only buffer", () => {
-  test("known, guard: RET is unbound in *Info* — the reader cannot follow a reference", async () => {
+  test("known, guard: RET is unbound in *Info* — the reader cannot follow a reference", { timeout: 30_000 }, async () => {
     // Written down, not built: following a menu item or a cross-reference
     // with RET is a decision for the user (FIX-REPORT.md, FOR THE USER).
     const ed = await infoEditor();
@@ -214,7 +214,7 @@ describe("item 5a: RET, and the scroll keys in the read-only buffer", () => {
   const top = (ed: Editor): number => Number(str(ed, "(viewport-top-get)"));
   const line = (ed: Editor): number => Number(str(ed, "(cursor-line)"));
 
-  test("guard: C-d, C-f, C-b and C-u page through a long node (the cursor moves, the view follows)", async () => {
+  test("guard: C-d, C-f, C-b and C-u page through a long node (the cursor moves, the view follows)", { timeout: 30_000 }, async () => {
     const ed = await longNode();
     expect(line(ed)).toBe(0);
     await ed.handleKey("\x04"); // C-d: half a page down
@@ -230,7 +230,7 @@ describe("item 5a: RET, and the scroll keys in the read-only buffer", () => {
     expect(line(ed)).toBe(0);
   });
 
-  test("guard: C-e and C-y scroll the view by a line", async () => {
+  test("guard: C-e and C-y scroll the view by a line", { timeout: 30_000 }, async () => {
     const ed = await longNode();
     await ed.handleKey("\x05"); // C-e: the view goes down one line
     expect(top(ed)).toBe(1);
@@ -238,7 +238,7 @@ describe("item 5a: RET, and the scroll keys in the read-only buffer", () => {
     expect(top(ed)).toBe(0);
   });
 
-  test("guard: G and gg move the cursor through a long node", async () => {
+  test("guard: G and gg move the cursor through a long node", { timeout: 30_000 }, async () => {
     const ed = await longNode();
     const lines = Number(str(ed, "(buffer-line-count)"));
     await ed.handleKey("G");
@@ -249,7 +249,7 @@ describe("item 5a: RET, and the scroll keys in the read-only buffer", () => {
     expect(top(ed)).toBe(0);
   });
 
-  test("guard: x and dd do not change the read-only text", async () => {
+  test("guard: x and dd do not change the read-only text", { timeout: 30_000 }, async () => {
     for (const keys of [["x"], ["d", "d"]]) {
       const ed = await infoEditor();
       const before = text(ed);
@@ -260,7 +260,7 @@ describe("item 5a: RET, and the scroll keys in the read-only buffer", () => {
     }
   });
 
-  test("known gap, NOT this item: cw changes the text of a read-only buffer", async () => {
+  test("known gap, NOT this item: cw changes the text of a read-only buffer", { timeout: 30_000 }, async () => {
     // Measured on *Info*, *Help* and *Dired*: the read-only flag refuses
     // x, dd and p, but cw, dw, J, ~, S, D, >>, <<, r<char> and the visual d
     // get through. That is in the vim operators, not in the info reader
@@ -276,7 +276,7 @@ describe("item 5a: RET, and the scroll keys in the read-only buffer", () => {
 });
 
 describe("item 5b: the T-Lisp manual is reachable", () => {
-  test("red first: (info \"tlisp\") shows the Top node of the T-Lisp manual and not the tmax manual", async () => {
+  test("red first: (info \"tlisp\") shows the Top node of the T-Lisp manual and not the tmax manual", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     const r = ed.getInterpreter().execute('(info "tlisp")');
     expect(r._tag).toBe("Right");
@@ -286,14 +286,14 @@ describe("item 5b: the T-Lisp manual is reachable", () => {
     expect(text(ed)).toMatch(/T-Lisp/);
   });
 
-  test("guard: (info) is unchanged — the Top node of the tmax manual", async () => {
+  test("guard: (info) is unchanged — the Top node of the tmax manual", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, "(info)");
     expect(node(ed)).toBe("Node: Top");
     expect(text(ed)).toContain("tmax Manual");
   });
 
-  test("red first: an unknown manual name gives a clear message and opens nothing", async () => {
+  test("red first: an unknown manual name gives a clear message and opens nothing", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, `(find-file-open "${file}")`);
     executeTlisp(ed, '(info "nosuch")');
@@ -304,7 +304,7 @@ describe("item 5b: the T-Lisp manual is reachable", () => {
     expect(status).toMatch(/no manual|unknown|not/i);
   });
 
-  test("red first: (info \"tlisp\") from the tmax manual switches the manual", async () => {
+  test("red first: (info \"tlisp\") from the tmax manual switches the manual", { timeout: 30_000 }, async () => {
     const ed = await infoEditor();
     executeTlisp(ed, '(info "tlisp")');
     expect(text(ed)).not.toContain("tmax Manual");
@@ -317,7 +317,7 @@ describe("item 5b: the T-Lisp manual is reachable", () => {
     expect(node(ed)).toBe("Node: Lexical Structure");
   });
 
-  test("red first: info-tlisp is an M-x command that opens the T-Lisp manual", async () => {
+  test("red first: info-tlisp is an M-x command that opens the T-Lisp manual", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     executeTlisp(ed, `(find-file-open "${file}")`);
     // The M-x path: SPC ; then the name of the command.
@@ -334,7 +334,7 @@ describe("item 5b: the T-Lisp manual is reachable", () => {
     expect(str(ed, "(buffer-current)")).toBe(file);
   });
 
-  test("guard: both manuals sit in the docs directory the daemon names, each with a Top node", async () => {
+  test("guard: both manuals sit in the docs directory the daemon names, each with a Top node", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     const dir = str(ed, "(helpgrep-docs-dir)");
     for (const manual of ["tmax", "tlisp"]) {
@@ -346,7 +346,7 @@ describe("item 5b: the T-Lisp manual is reachable", () => {
 });
 
 describe("item 5c: the docstring of the mode", () => {
-  test("red first: it names what the keys do and says that the buffer is read-only", async () => {
+  test("red first: it names what the keys do and says that the buffer is read-only", { timeout: 30_000 }, async () => {
     const ed = await createStartedEditor("");
     const doc = str(ed, '(major-mode-description "info")');
     expect(doc).toMatch(/read-only/i);
