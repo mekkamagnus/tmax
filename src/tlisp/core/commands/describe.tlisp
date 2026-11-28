@@ -25,7 +25,8 @@ so it can be killed and is recreated on the next describe call.")
   "The identity (buffer-id) of the buffer that was shown when this help
 session was opened (#375). q (help-bury) buries *Help* and shows that
 buffer again — the buffer, not whichever buffer has its name by then.
-nil while no help session is open.")
+It is KEPT after q: a later help page opened from inside *Help* is not a
+new origin. nil until help was opened from another buffer.")
 (defvar help-return-cursor nil
   "The (line column) the cursor had in help-return-buffer when this help
 session was opened (#375): q puts it back.")
@@ -414,11 +415,9 @@ that was shown when this help session was opened — the buffer before the
 first page when help was opened from help, or *scratch* when that buffer
 is gone. Returns the buried name."
   (interactive)
-  (let ((return-id help-return-id)
-        (position help-return-cursor))
-    (setq help-return-id nil)
-    (setq help-return-cursor nil)
-    (funcall "bury-buffer-and-switch" help-buffer-name return-id position)))
+  ;; The origin is kept: a page opened from inside *Help* later is not a
+  ;; new origin, and q must still leave help for the buffer before it.
+  (funcall "bury-buffer-and-switch" help-buffer-name help-return-id help-return-cursor))
 
 (major-mode-register "help" '() nil)
 (major-mode-doc "help" "Read-only navigation mode for *Help* — RET follows references, TAB cycles, l/r history, q buries")
@@ -478,8 +477,9 @@ helpgrep results (major-mode 'helpgrep')."
 (defvar info-return-id nil
   "The identity (buffer-id) of the buffer that was shown when *Info* was
 opened (#375). q (info-bury) buries *Info* and shows that buffer again —
-the buffer, not whichever buffer has its name by then. nil while *Info*
-is closed.")
+the buffer, not whichever buffer has its name by then. It is KEPT after
+q: the manual opened again from inside *Info* is not a new origin. nil
+until *Info* was entered from another buffer.")
 (defvar info-return-cursor nil
   "The (line column) the cursor had in info-return-buffer when *Info* was
 opened (#375): q puts it back.")
@@ -551,11 +551,8 @@ opened (#375): q puts it back.")
 was shown when the manual was opened, or *scratch* when that buffer is
 gone. Returns the buried name."
   (interactive)
-  (let ((return-id info-return-id)
-        (position info-return-cursor))
-    (setq info-return-id nil)
-    (setq info-return-cursor nil)
-    (funcall "bury-buffer-and-switch" info-buffer-name return-id position)))
+  ;; The origin is kept (see help-bury).
+  (funcall "bury-buffer-and-switch" info-buffer-name info-return-id info-return-cursor))
 
 (defun info-menu-links ()
   "The menu items of the current node as (display target) lists, in menu

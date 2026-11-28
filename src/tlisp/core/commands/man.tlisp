@@ -13,8 +13,9 @@
 (defvar man-return-id nil
   "The identity (buffer-id) of the buffer that was shown when *Man* was
 opened (#375). q (man-quit) buries *Man* and shows that buffer again —
-the buffer, not whichever buffer has its name by then. nil while *Man*
-is closed.")
+the buffer, not whichever buffer has its name by then. It is KEPT after
+q: a page opened from inside *Man* is not a new origin. nil until *Man*
+was entered from another buffer.")
 (defvar man-return-cursor nil
   "The (line column) the cursor had in man-return-buffer when *Man* was
 opened (#375): q puts it back.")
@@ -132,12 +133,9 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 was shown when the man page was opened, or *scratch* when that buffer is
 gone. Returns the buried name."
   (interactive)
-  (let ((return-id man-return-id)
-        (position man-return-cursor))
-    (setq man-return-id nil)
-    (setq man-return-cursor nil)
-    (funcall "bury-buffer-and-switch" man-buffer-name return-id position)
-    (editor-set-mode "normal")))
+  ;; The origin is kept (see help-bury in describe.tlisp).
+  (funcall "bury-buffer-and-switch" man-buffer-name man-return-id man-return-cursor)
+    (editor-set-mode "normal"))
 
 ;; ── man-mode ───────────────────────────────────────────────────────────
 (major-mode-register "man" '() nil)

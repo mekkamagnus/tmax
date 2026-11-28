@@ -224,6 +224,46 @@ describe("#375: when there is no earlier buffer", () => {
   });
 });
 
+describe("#375: a reader opened again from inside itself", () => {
+  const readers: [string, string, string][] = [
+    ["help", "(describe-mode)", "*Help*"],
+    ["info", "(info)", "*Info*"],
+    ["man", '(man "ls")', "*Man*"],
+  ];
+  for (const [name, open, reader] of readers) {
+    test(`${name}: after an earlier q, opened again while it is shown: q returns to the buffer it was last opened from (red first)`, async () => {
+      // The user leaves the reader with q, comes back to it by switching
+      // buffers, and runs the command again from inside it.
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, `(find-file-open "${file}")`);
+      executeTlisp(ed, "(cursor-move 0 3)");
+      executeTlisp(ed, open);
+      await ed.handleKey("q");
+      expect(str(ed, "(buffer-current)")).toBe(file);
+      executeTlisp(ed, `(switch-to-buffer "${reader}")`);
+      executeTlisp(ed, open); // from inside the reader: not a new origin
+      expect(str(ed, "(buffer-current)")).toBe(reader);
+      await ed.handleKey("q");
+      expect(str(ed, "(buffer-current)")).toBe(file); // not *scratch*
+      expect(str(ed, "(cursor-column)")).toBe("3");
+    });
+  }
+});
+
+describe("#375: one reader opened from another", () => {
+  test("man from *Info* (K): q in *Man* returns to *Info*, q in *Info* to the file (guard: true before)", async () => {
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(find-file-open "${file}")`);
+    executeTlisp(ed, "(info)");
+    await ed.handleKey("K"); // the man page of the word at point, from *Info*
+    expect(str(ed, "(buffer-current)")).toBe("*Man*");
+    await ed.handleKey("q");
+    expect(str(ed, "(buffer-current)")).toBe("*Info*");
+    await ed.handleKey("q");
+    expect(str(ed, "(buffer-current)")).toBe(file);
+  });
+});
+
 describe("#375, grading round 3: the identity of a buffer", () => {
   test("buffer-id is stable across edits, switches and a rename, and differs for a later buffer of the same name", async () => {
     const ed = await createStartedEditor("");
