@@ -1,5 +1,6 @@
 (defmodule editor/commands/buffers
-  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-detail-name buffer-completion-table buffer-recency-list buffer-recency-rotation buffer-index-of buffer-special-p buffer-rotation-list switch-buffer-accept switch-buffer buffer-name current-buffer-name clear-splash-if-present switch-to-buffer open-file revert-buffer next-buffer previous-buffer kill-buffer-yes-no-table kill-buffer-save-accept kill-buffer rename-buffer-interactive rename-buffer bury-buffer)
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-detail-name buffer-completion-table buffer-recency-list buffer-recency-rotation buffer-index-of buffer-special-p buffer-rotation-list switch-buffer-accept switch-buffer buffer-name current-buffer-name clear-splash-if-present switch-to-buffer open-file revert-buffer next-buffer previous-buffer kill-buffer-yes-no-table kill-buffer-save-accept kill-buffer rename-buffer-interactive rename-buffer bury-buffer
+  bury-buffer-and-switch)
 
 ;; buffers.tlisp --- Interactive buffer completion
 
@@ -293,9 +294,11 @@ display-name change only (buffer-filename is preserved). M-x discoverable."
 (defun bury-buffer (&optional name)
   "Bury a buffer so it sinks to the bottom of the recency order.
 NAME defaults to the current buffer. The buffer's recency is set below all
-others, so switch-buffer / next-buffer no longer prefer it. The current
-buffer is left in place (Emacs convention: bury only reorders, it does not
-switch away). M-x discoverable via this docstring."
+others, so switch-buffer / next-buffer no longer prefer it. Only the order
+changes: the buffer shown in the editor is not changed, and when the buried
+buffer is the one shown it stays on screen. To leave a buffer, use its quit
+command (q in *Help*, *Info*, *Man*, *Dired*) or bury-buffer-and-switch.
+M-x discoverable via this docstring."
   (interactive)
   (let ((target (or name (buffer-current))))
     (unless target
@@ -304,6 +307,22 @@ switch away). M-x discoverable via this docstring."
     (let ((buried (buffer-bury target)))
       (message (concat "Buried " buried))
       buried)))
+
+(defun bury-buffer-and-switch (name return-buffer)
+  "Bury buffer NAME and show RETURN-BUFFER in its place (the Emacs
+quit-window, #375). RETURN-BUFFER is shown only when it is a live buffer
+other than NAME; otherwise *scratch* is shown. The status line is cleared,
+so the shown buffer carries no message of the buried one. Returns the
+buried name."
+  (let ((target (if (and return-buffer
+                        (not (string= return-buffer name))
+                        (member return-buffer (buffer-list)))
+                   return-buffer
+                   "*scratch*")))
+    (buffer-bury name)
+    (switch-to-buffer target)
+    (editor-set-status "")
+    name))
 
 ;; SPEC-073 / SPEC-084: SPC-led bindings (C-x is reserved by SPEC-067 for the
 ;; vim decrement-number prefix). SPC x r/z live in this buffer group.

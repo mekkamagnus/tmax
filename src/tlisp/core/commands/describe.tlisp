@@ -20,6 +20,11 @@
 reserved buffer (src/editor/CLAUDE.md reserves only *scratch*/*Messages*/*daemon*),
 so it can be killed and is recreated on the next describe call.")
 
+(defvar help-return-buffer nil
+  "The buffer that was shown when this help session was opened (#375). q
+(help-bury) buries *Help* and shows this buffer again. nil while no help
+session is open.")
+
 ;; ── Shared renderer ───────────────────────────────────────────────────
 (defun describe-to-help (title body)
   "Render TITLE + BODY into the reusable *Help* buffer in help-mode (read-only,
@@ -27,6 +32,10 @@ cross-references, history). Creates *Help* if absent and clears it on each call.
 Returns the buffer name. Used by every describe-* command so the surface is
 consistent."
   (progn
+    ;; #375: remember where this help session was opened from. A page opened
+    ;; from *Help* itself keeps the FIRST buffer, so q leaves help entirely.
+    (unless (string= (buffer-current) help-buffer-name)
+      (setq help-return-buffer (buffer-current)))
     ;; Push current page onto help history before rendering the new one.
     (help-history-push title body)
     (unless (member help-buffer-name (buffer-list))
@@ -394,9 +403,14 @@ Bound to RET in help-mode."
     (help-history-render (nth help-history-pos help-history))))
 
 (defun help-bury ()
-  "Bury the *Help* buffer. Bound to q in help-mode."
+  "Leave the help buffer (q in help-mode): bury *Help* and show the buffer
+that was shown when this help session was opened — the buffer before the
+first page when help was opened from help, or *scratch* when that buffer
+is gone. Returns the buried name."
   (interactive)
-  (funcall "bury-buffer"))
+  (let ((return-buffer help-return-buffer))
+    (setq help-return-buffer nil)
+    (funcall "bury-buffer-and-switch" help-buffer-name return-buffer)))
 
 (major-mode-register "help" '() nil)
 (major-mode-doc "help" "Read-only navigation mode for *Help* — RET follows references, TAB cycles, l/r history, q buries")
@@ -453,6 +467,9 @@ helpgrep results (major-mode 'helpgrep')."
 ;; ── Info reader: browse .info manuals (SPEC-112, #179) ──────────────
 (defvar info-nodes (hashmap))
 (defvar info-current-node "")
+(defvar info-return-buffer nil
+  "The buffer that was shown when *Info* was opened (#375). q (info-bury)
+buries *Info* and shows this buffer again. nil while *Info* is closed.")
 (defvar info-buffer-name "*Info*")
 
 (defun info--render-node (node-name)
@@ -464,6 +481,10 @@ helpgrep results (major-mode 'helpgrep')."
         (setq info-current-node node-name)
         (unless (member info-buffer-name (buffer-list))
           (buffer-create info-buffer-name))
+        ;; #375: remember where *Info* was entered from. A node opened
+        ;; from *Info* itself keeps the FIRST buffer.
+        (unless (string= (buffer-current) info-buffer-name)
+          (setq info-return-buffer (buffer-current)))
         (buffer-switch info-buffer-name)
         (buffer-set-read-only nil info-buffer-name)
         (let ((lines (buffer-line-count)))
@@ -512,9 +533,13 @@ helpgrep results (major-mode 'helpgrep')."
   (info--render-node "Top"))
 
 (defun info-bury ()
-  "Bury the *Info* buffer. Bound to q in info-mode."
+  "Leave the manual (q in info-mode): bury *Info* and show the buffer that
+was shown when the manual was opened, or *scratch* when that buffer is
+gone. Returns the buried name."
   (interactive)
-  (funcall "bury-buffer"))
+  (let ((return-buffer info-return-buffer))
+    (setq info-return-buffer nil)
+    (funcall "bury-buffer-and-switch" info-buffer-name return-buffer)))
 
 (defun info-menu ()
   "Prompt for a menu item from the current node and navigate. Bound to m.
