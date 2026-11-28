@@ -9,9 +9,18 @@
  * 2. Pending state (operator/find awaiting next key) → route to state machine.
  * 3. Digit 1-9 (or 0 when count active) → feed count state machine; must run
  *    before keymap lookup so count-building isn't shadowed by a binding.
- * 4. Keymap prefix (g/z/C-w/SPC/...) → schedule which-key, set prefix.
- * 5. Keymap binding → execute command.
- * 6. Else → "Unbound key".
+ * 4. Major-mode binding for the exact key → execute command (#368). Runs
+ *    before the keymap so a mode can bind a key that vim also uses, and a
+ *    mode binding of a key shadows a global prefix on the same key.
+ * 5. Keymap prefix (g/z/C-w/SPC/...) → schedule which-key, set prefix.
+ * 6. Major-mode prefix ("]" of "] h") → set prefix.
+ * 7. Keymap binding → execute command.
+ * 8. Else → "Unbound key".
+ *
+ * Keys consumed BEFORE any lookup (a major mode cannot bind them):
+ * macro record/play pending, register prefix pending, replace-char pending,
+ * Escape / C-g, find / mark / text-object / operator pending, the `q` that
+ * stops a running recording, digits 1-9 (and 0 inside a count).
  *
  * Operator-g sub-state (for `dgg`) is tracked inside the operator state
  * machine via `vim-operator-g-pending`.
@@ -221,6 +230,25 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     }
   }
 
+  // Major-mode binding for the EXACT key (#368). info, help, helpgrep and
+  // man bind keys that vim also uses (n, i, q, Enter, ...); read after the
+  // keymap they never ran. Only a binding the major mode ITSELF declares
+  // counts (a table row with no major mode is the global binding below).
+  const majorMode = editor.getCurrentMajorMode();
+  if (majorMode && majorMode !== "fundamental") {
+    const own = lookupMajorModeOwnBinding(editor, lookupKey, majorMode);
+    if (own) {
+      clearWhichKey(editor, wk);
+      // Recorded like any other bound key (vim records literal keys); a mode
+      // binding is excluded from a macro no longer than a global one.
+      if (macroRecording) {
+        try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+      }
+      await executeCommand(editor, own.command);
+      return;
+    }
+  }
+
   // Keymap prefix check → schedule which-key, set prefix
   const prefixResult = exec(`(keymap-prefix-p (current-keymap) "${escape(lookupKey)}")`);
   if (isRight(prefixResult) && isTruthy(prefixResult.right)) {
@@ -241,8 +269,12 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   // multi-key binding (e.g. "]" is a prefix of "] h"), set the prefix and
   // wait for the next key. Major-mode bindings are not in the T-Lisp keymap,
   // so they need their own prefix detection here.
-  const majorMode = editor.getCurrentMajorMode();
   if (majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
+    // The first key of a mode sequence is recorded here, the last one when
+    // its binding runs (above), so `] h` replays as `] h`.
+    if (macroRecording) {
+      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+    }
     editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: lookupKey });
     editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
     editor.applyUpdate({ type: "SetStatusMessage", message: "" });
@@ -271,11 +303,11 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     return;
   }
 
-  // Major-mode-scoped bindings (e.g. "] h" in the heading-jump mode). The
-  // T-Lisp mode keymap above has no major-mode concept, so these live in the
-  // editor's keyMappings table and are resolved here as the dispatch path of
-  // last resort (after global/mode bindings). Precedence: mode+majorMode >
-  // mode > majorMode > global (see resolveMapping).
+  // Fallback for a keyMappings row the T-Lisp keymap above does not hold
+  // (a binding whose keymap entry is missing or was rebound, so the keymap
+  // lookup missed it). A major-mode binding for the exact key already ran
+  // above (#368), so what is left here is the wider table precedence:
+  // mode+majorMode > mode > majorMode > global (see resolveMapping).
   if (majorMode && majorMode !== "fundamental") {
     const mapping = lookupMajorModeBinding(editor, lookupKey, majorMode);
     if (mapping) {
@@ -317,6 +349,20 @@ function majorModeLookupKeys(lookupKey: string): string[] {
     forms.add(`<${lookupKey}>`); // "Tab" → "<Tab>"
   }
   return [...forms];
+}
+
+/**
+ * The binding the major mode ITSELF declares for `lookupKey` (a row whose
+ * majorMode is `majorMode`, in the normal mode or in no editor mode).
+ * Returns the mapping, or undefined when the mode does not bind this key.
+ */
+function lookupMajorModeOwnBinding(editor: EditorDispatchPort, lookupKey: string, majorMode: string) {
+  for (const form of majorModeLookupKeys(lookupKey)) {
+    const mappings = editor.getKeyMappings().get(form);
+    const own = mappings?.find(m => m.majorMode === majorMode && (m.mode === "normal" || !m.mode));
+    if (own) return own;
+  }
+  return undefined;
 }
 
 /**

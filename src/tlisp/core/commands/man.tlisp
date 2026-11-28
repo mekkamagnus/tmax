@@ -125,7 +125,7 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 (major-mode-doc "man" "Man-page viewer — } / { jump sections, RET follows SEE ALSO, s searches, q buries.")
 (key-bind "}" "(man-next-section)" "normal" "man")
 (key-bind "{" "(man-prev-section)" "normal" "man")
-(key-bind "RET" "(man-follow)" "normal" "man")
+(key-bind "Enter" "(man-follow)" "normal" "man")
 (key-bind "s" "(man-search)" "normal" "man")
 (key-bind "q" "(man-quit)" "normal" "man")
 

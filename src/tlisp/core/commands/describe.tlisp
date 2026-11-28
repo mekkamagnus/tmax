@@ -400,8 +400,10 @@ Bound to RET in help-mode."
 
 (major-mode-register "help" '() nil)
 (major-mode-doc "help" "Read-only navigation mode for *Help* — RET follows references, TAB cycles, l/r history, q buries")
-(key-bind "RET" "(help-follow)" "normal" "help")
-(key-bind "TAB" "(help-next-ref)" "normal" "help")
+;; Mode keys are spelled as the key handler names them ("Enter", "Tab",
+;; "S-TAB"), so each binding matches the key that was pressed (#368).
+(key-bind "Enter" "(help-follow)" "normal" "help")
+(key-bind "Tab" "(help-next-ref)" "normal" "help")
 (key-bind "l" "(help-back)" "normal" "help")
 (key-bind "r" "(help-forward)" "normal" "help")
 (key-bind "q" "(help-bury)" "normal" "help")
@@ -446,7 +448,7 @@ helpgrep results (major-mode 'helpgrep')."
 ;; Register the helpgrep results mode + RET binding.
 (major-mode-register "helpgrep" '() nil)
 (major-mode-doc "helpgrep" "Helpgrep results mode — RET jumps to the corpus source location")
-(key-bind "RET" "(helpgrep-jump)" "normal" "helpgrep")
+(key-bind "Enter" "(helpgrep-jump)" "normal" "helpgrep")
 
 ;; ── Info reader: browse .info manuals (SPEC-112, #179) ──────────────
 (defvar info-nodes (hashmap))

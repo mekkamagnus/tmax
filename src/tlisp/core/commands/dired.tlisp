@@ -414,7 +414,7 @@ the SHORT question; q or Escape cancels."
 
 (defun dired-ensure-plan-keymap ()
   "The plan buffer's BUFFER-LOCAL keymap (the dired-ensure-keymap
-mechanism — mode-scoped binds resolve last and would be shadowed)."
+mechanism: the buffer-local tier is innermost and wins)."
   (let ((kmap (editor/keymaps/buffer-keymap dired-plan-buffer-name)))
     (if (not kmap)
       (progn
@@ -666,10 +666,12 @@ keeps the old listing and reports (coach r7 finding 3)."
       nil))))
 
 ;; ── keymap (vim-motion; BUFFER-LOCAL, the shadow tier) ────────────────
-;; Major-mode-scoped key-binds resolve AFTER the normal-mode T-Lisp keymap
-;; (last resort), so vim's j/k/l/h would shadow them. The buffer-local
-;; keymap tier is innermost and wins — the grep-results-mode mechanism.
-;; Built once per *Dired* buffer in dired-render.
+;; The listing's keys live in a buffer-local keymap: the innermost tier of
+;; the lookup chain (#206), so they win over the vim keys j/k/l/h — the
+;; grep-results-mode mechanism. dired registers no mode-scoped key-binds.
+;; (Before #368 a mode-scoped key-bind resolved after the global keymap and
+;; was shadowed; since #368 it resolves first. The buffer-local tier is kept
+;; as it is.) Built once per *Dired* buffer in dired-render.
 
 (defun dired-ensure-keymap ()
   "Attach the dired keymap to the *Dired* buffer (idempotent)."

@@ -111,8 +111,10 @@ test('help-back navigates to the previous page', async () => {
 
 test('help-mode bindings are scoped to major-mode "help"', async () => {
   const src = await Bun.file('src/tlisp/core/commands/describe.tlisp').text();
-  expect(src).toContain('(key-bind "RET" "(help-follow)" "normal" "help")');
-  expect(src).toContain('(key-bind "TAB" "(help-next-ref)" "normal" "help")');
+  // #368: the keys are spelled as the handler names them ("Enter", "Tab"),
+  // so the binding matches the key that was pressed.
+  expect(src).toContain('(key-bind "Enter" "(help-follow)" "normal" "help")');
+  expect(src).toContain('(key-bind "Tab" "(help-next-ref)" "normal" "help")');
   expect(src).toContain('(key-bind "l" "(help-back)" "normal" "help")');
   expect(src).toContain('(key-bind "r" "(help-forward)" "normal" "help")');
   expect(src).toContain('(key-bind "q" "(help-bury)" "normal" "help")');
