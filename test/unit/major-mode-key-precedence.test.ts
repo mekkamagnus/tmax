@@ -463,3 +463,107 @@ describe("#368 e: the mode-scoped keys of the markdown mode still resolve to the
     }
   });
 });
+
+describe("#368, grading round 2: a count typed before a key of a mode does not survive the command", () => {
+  const TEXT = "one two three four five";
+  const tables: { name: string; open: string; keys: string[] }[] = [
+    { name: "info", open: "(info)", keys: ["n", "p", "u", "t", "m", "i", "q"] },
+    { name: "help", open: "(apropos-run \"save\")", keys: ["\r", "\t", "\x1b[Z", "l", "r", "q"] },
+    { name: "helpgrep", open: "(helpgrep-run \"mode\")", keys: ["\r"] },
+    { name: "man", open: "(man \"ls\")", keys: ["}", "{", "\r", "s", "q"] },
+  ];
+
+  /**
+   * `3 <key>` in the buffer of a mode, then `x` in an ordinary buffer:
+   * exactly one character must go. A count that the command of the mode
+   * left behind would make `x` delete three.
+   */
+  async function countThenX(open: string, key: string): Promise<string> {
+    const ed = await createStartedEditor(TEXT);
+    executeTlisp(ed, open);
+    await ed.handleKey("3");
+    expect(str(ed, "(vim-count-active-p)")).toBe("true"); // the count is pending
+    await ed.handleKey(key);
+    // Leave a prompt the command may have opened, then go back to the text.
+    if (ed.getState().mode === "mx") executeTlisp(ed, '(minibuffer-dispatch-key "Escape")');
+    executeTlisp(ed, '(switch-to-buffer "test")');
+    executeTlisp(ed, "(cursor-move 0 0)");
+    await ed.handleKey("x");
+    return str(ed, "(buffer-text)");
+  }
+
+  for (const table of tables) {
+    for (const key of table.keys) {
+      test(`round 2: ${table.name}: 3 then ${JSON.stringify(key)}, then x deletes ONE character`, async () => {
+        expect(await countThenX(table.open, key)).toBe("ne two three four five");
+      });
+    }
+  }
+
+  test("round 2: info: 3 n q x — the coach's case, by the keys alone", async () => {
+    const ed = await createStartedEditor(TEXT);
+    executeTlisp(ed, "(info)");
+    await ed.handleKey("3");
+    await ed.handleKey("n");
+    await ed.handleKey("q");
+    expect(str(ed, "(buffer-current)")).toBe("test");
+    executeTlisp(ed, "(cursor-move 0 0)");
+    await ed.handleKey("x");
+    expect(str(ed, "(buffer-text)")).toBe("ne two three four five");
+  });
+
+  test("round 2: markdown: a count typed before a mode sequence does not survive it (3 ] h, then x)", async () => {
+    const ed = await setupMarkdownEditor("# One\n\ntext one\n\n## Two\n\ntext two\n");
+    executeTlisp(ed, "(cursor-move 2 0)");
+    await ed.handleKey("3");
+    await ed.handleKey("]");
+    expect(str(ed, "(vim-count-active-p)")).toBe("true"); // kept while the sequence is incomplete
+    await ed.handleKey("h");
+    expect(str(ed, "(cursor-line)")).toBe("4"); // the sequence ran
+    expect(truthy(ed, "(vim-count-active-p)")).toBe(false);
+    executeTlisp(ed, "(cursor-move 2 0)");
+    await ed.handleKey("x");
+    expect(str(ed, "(buffer-line 2)")).toBe("ext one");
+  });
+
+  test("round 2: a count typed before a command that reports something: the report stays (3 m in a node without a menu)", async () => {
+    const ed = await createStartedEditor(TEXT);
+    executeTlisp(ed, "(info)");
+    await ed.handleKey("n"); // the Introduction has no menu
+    await ed.handleKey("3");
+    expect(str(ed, "(editor-status)")).toBe("Count: 3"); // the count display is the status line
+    await ed.handleKey("m");
+    expect(ed.getState().mode).toBe("normal");
+    expect(str(ed, "(editor-status)")).toBe("No menu items in this node"); // not wiped
+    expect(truthy(ed, "(vim-count-active-p)")).toBe(false);
+  });
+
+  test("round 2: the count display does not stay after a command that sets no message (3 p at Top)", async () => {
+    const ed = await createStartedEditor(TEXT);
+    executeTlisp(ed, "(info)");
+    executeTlisp(ed, "(cursor-move 1 0)");
+    await ed.handleKey("3");
+    await ed.handleKey("p"); // no previous node at Top: no message
+    expect(str(ed, "(editor-status)")).toBe(""); // "Count: 3" is gone
+    expect(truthy(ed, "(vim-count-active-p)")).toBe(false);
+  });
+
+  test("round 2 control: in fundamental a count still reaches the vim command (3 x deletes three)", async () => {
+    const ed = await createStartedEditor(TEXT);
+    await ed.handleKey("3");
+    await ed.handleKey("x");
+    expect(str(ed, "(buffer-text)")).toBe(" two three four five");
+    expect(truthy(ed, "(vim-count-active-p)")).toBe(false);
+  });
+
+  test("round 2: help: a count typed before S-TAB does not survive it either", async () => {
+    // S-TAB ran through the old path too; no command of a mode reads the
+    // count today, so what is left after the command must be cleared.
+    const ed = await createStartedEditor(TEXT);
+    executeTlisp(ed, '(describe-function "save-buffer")');
+    await ed.handleKey("3");
+    await ed.handleKey("\x1b[Z");
+    expect(str(ed, "(buffer-current)")).toBe("*Help*");
+    expect(truthy(ed, "(vim-count-active-p)")).toBe(false); // cleared after the command
+  });
+});

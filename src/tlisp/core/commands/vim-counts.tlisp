@@ -1,5 +1,6 @@
 (defmodule editor/commands/vim-counts
-  (export vim-count-active-p vim-count-add-digit vim-count-current vim-count-reset vim-count-consume)
+  (export vim-count-active-p vim-count-add-digit vim-count-current vim-count-reset vim-count-consume
+          vim-count-discard)
 
 ;; vim-counts.tlisp -- Vim count prefix state owned by T-Lisp
 
@@ -30,6 +31,23 @@
     (set! vim-count-active nil)
     (count-reset)
     (editor-set-status "")
+    nil))
+
+(defun vim-count-discard ()
+  "Clear the Vim count when one is ACTIVE, and do nothing otherwise.
+Unlike vim-count-reset, a status message is cleared only when it is the
+count display itself (\"Count: 3\"): a message the command that ran just
+set stays. For a command that does not read the count and has run to its
+end (a binding of a major mode): the count must not reach the next edit."
+  (if vim-count-active
+    (progn
+      (set! vim-count 0)
+      (set! vim-count-active nil)
+      (count-reset)
+      (if (string-prefix-p "Count: " (editor-status))
+        (editor-set-status "")
+        nil)
+      t)
     nil))
 
 (defun vim-count-consume (&optional (default 1 default-supplied-p))

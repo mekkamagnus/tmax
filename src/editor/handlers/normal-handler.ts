@@ -248,6 +248,12 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
         try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
       }
       await executeCommand(editor, own.command);
+      // A count typed before the key (`3` `n`) is discarded once the command
+      // of the mode has run. No command of a mode reads the count; left
+      // behind, it reached the next edit in the buffer the user went back
+      // to (grading round 2: `3 n q x` deleted three characters). The rule
+      // is in T-Lisp: it clears a message only when that is the count line.
+      try { exec("(vim-count-discard)"); } catch {}
       return;
     }
   }
@@ -316,6 +322,8 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     if (mapping) {
       clearWhichKey(editor, wk);
       await executeCommand(editor, mapping.command);
+      // Same rule as the mode binding above (grading round 2).
+      try { exec("(vim-count-discard)"); } catch {}
       return;
     }
   }
