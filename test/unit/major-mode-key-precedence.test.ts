@@ -567,3 +567,103 @@ describe("#368, grading round 2: a count typed before a key of a mode does not s
     expect(truthy(ed, "(vim-count-active-p)")).toBe(false); // cleared after the command
   });
 });
+
+describe("landing round L1: a binding of a major mode stands between the inner keymaps and the global one", () => {
+  /** The T-Lisp text of a command that sets STATUS (its quotes escaped). */
+  const setStatusCommand = (status: string): string => JSON.stringify(`(editor-set-status ${JSON.stringify(status)})`);
+
+  /** Give BUFFER a buffer-local binding of KEY that sets STATUS. */
+  const bindLocal = (ed: Editor, buffer: string, key: string, status: string): void => {
+    executeTlisp(
+      ed,
+      `(let ((kmap (editor/keymaps/keymap-init "l1")))
+         (editor/keymaps/keymap-set-key kmap ${JSON.stringify(key)} ${setStatusCommand(status)})
+         (editor/keymaps/buffer-set-keymap ${JSON.stringify(buffer)} kmap))`,
+    );
+  };
+  const readers: { name: string; open: string; buffer: string; key: string; raw: string }[] = [
+    { name: "info", open: "(info)", buffer: "*Info*", key: "n", raw: "n" },
+    { name: "help", open: "(apropos-run \"save\")", buffer: "*Help*", key: "l", raw: "l" },
+    { name: "helpgrep", open: "(helpgrep-run \"mode\")", buffer: "*Help*", key: "Enter", raw: "\r" },
+    { name: "man", open: "(man \"ls\")", buffer: "*Man*", key: "s", raw: "s" },
+  ];
+
+  for (const { name, open, buffer, key, raw } of readers) {
+    test(`L1: ${name}: a BUFFER-LOCAL binding of ${JSON.stringify(key)} wins over the binding of the mode (red first)`, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, open);
+      executeTlisp(ed, "(cursor-move 0 0)");
+      bindLocal(ed, buffer, key, `local ${key} ran`);
+      // The chain itself already says so: the inner level owns the key.
+      expect(str(ed, `(keymap-ref-inner ${JSON.stringify(key)})`)).toContain(`local ${key} ran`);
+      await ed.handleKey(raw);
+      expect(ed.getState().statusMessage).toBe(`local ${key} ran`);
+      // And the command of the mode did not run.
+      expect(str(ed, "(cursor-line)")).toBe("0");
+      expect(str(ed, "(buffer-current)")).toBe(buffer);
+      if (name === "info") expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+      if (name === "man" || name === "helpgrep") expect(ed.getState().mode).toBe("normal"); // no prompt opened
+    });
+  }
+
+  test("L1: the binding of an ACTIVE MINOR MODE wins over the binding of the mode (red first)", async () => {
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, "(info)");
+    executeTlisp(ed, `(progn
+      (minor-mode-register "l1mm" "l1 minor" "L1")
+      (keymap-register "l1mm-map" (keymap-init "l1mm"))
+      (keymap-set-key (keymap-named "l1mm-map") "n" ${setStatusCommand("minor n ran")})
+      (minor-mode-set-keymap "l1mm" "l1mm-map")
+      (minor-mode-set "l1mm" t))`);
+    expect(str(ed, '(keymap-ref-inner "n")')).toContain("minor n ran");
+    await ed.handleKey("n");
+    expect(ed.getState().statusMessage).toBe("minor n ran");
+    expect(str(ed, "(buffer-line 0)")).toBe("Node: Top");
+  });
+
+  test("L1: markdown: a buffer-local FULL binding of a key that is a prefix of the mode runs at once (red first)", async () => {
+    const ed = await setupMarkdownEditor("# One\n\ntext\n");
+    bindLocal(ed, "test", "]", "local ] ran");
+    await ed.handleKey("]");
+    expect(ed.getState().statusMessage).toBe("local ] ran");
+    expect(ed.getState().whichKeyPrefix).toBe(""); // not waiting for a second key
+  });
+
+  test("L1: markdown: a buffer-local binding of a WHOLE sequence wins over the same sequence of the mode (red first)", async () => {
+    const ed = await setupMarkdownEditor("# One\n\ntext\n\n## Two\n\ntext two\n");
+    bindLocal(ed, "test", "] h", "local ] h ran");
+    await ed.handleKey("]");
+    await ed.handleKey("h");
+    expect(ed.getState().statusMessage).toBe("local ] h ran");
+    expect(str(ed, "(cursor-line)")).toBe("0"); // markdown-next-heading did not run
+  });
+
+  test("L1: control: a buffer-local prefix that overlaps the mode keeps both: ] x is local, ] h is the mode's", async () => {
+    const ed = await setupMarkdownEditor("# One\n\ntext\n\n## Two\n\ntext two\n");
+    bindLocal(ed, "test", "] x", "local ] x ran");
+    await ed.handleKey("]");
+    await ed.handleKey("x");
+    expect(ed.getState().statusMessage).toBe("local ] x ran");
+    executeTlisp(ed, "(editor-set-status \"\")");
+    executeTlisp(ed, "(cursor-move 0 0)");
+    await ed.handleKey("]");
+    await ed.handleKey("h");
+    expect(ed.getState().statusMessage).not.toBe("local ] x ran");
+    expect(str(ed, "(cursor-line)")).toBe("4"); // the mode's ] h ran
+  });
+
+  test("L1: control: with no inner binding, the binding of the mode still wins over the vim key", async () => {
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, "(info)");
+    expect(executeTlisp(ed, '(keymap-ref-inner "n")').type).toBe("nil"); // only the global keymap binds n
+    await ed.handleKey("n");
+    expect(str(ed, "(buffer-line 0)")).toBe("Node: Introduction");
+  });
+
+  test("L1: control: in a buffer without a major mode, a buffer-local binding still wins (as before)", async () => {
+    const ed = await createStartedEditor("hello");
+    bindLocal(ed, "test", "n", "local n ran");
+    await ed.handleKey("n");
+    expect(ed.getState().statusMessage).toBe("local n ran");
+  });
+});

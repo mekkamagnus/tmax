@@ -11,7 +11,10 @@
  *    before keymap lookup so count-building isn't shadowed by a binding.
  * 4. Major-mode binding for the exact key → execute command (#368). Runs
  *    before the keymap so a mode can bind a key that vim also uses, and a
- *    mode binding of a key shadows a global prefix on the same key.
+ *    mode binding of a key shadows a global prefix on the same key. It does
+ *    NOT run ahead of the levels inner to the editor-mode keymap (the
+ *    buffer-local keymap and the active minor-mode keymaps, #206): when one
+ *    of those binds the key, that binding wins and the mode is not asked.
  * 5. Keymap prefix (g/z/C-w/SPC/...) → schedule which-key, set prefix.
  * 6. Major-mode prefix ("]" of "] h") → set prefix.
  * 7. Keymap binding → execute command.
@@ -233,12 +236,19 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     }
   }
 
+  // Is the key bound by a level INNER to the editor-mode keymap — the
+  // buffer-local keymap or an active minor-mode keymap (#206 chain)? Then
+  // that binding wins: the major mode stands between those levels and the
+  // editor-mode keymap, as a minor mode does in Emacs. The lookup is in
+  // T-Lisp; this only routes.
+  const innerBound = isTruthyResult(exec(`(keymap-ref-inner "${escape(lookupKey)}")`));
+
   // Major-mode binding for the EXACT key (#368). info, help, helpgrep and
   // man bind keys that vim also uses (n, i, q, Enter, ...); read after the
   // keymap they never ran. Only a binding the major mode ITSELF declares
   // counts (a table row with no major mode is the global binding below).
   const majorMode = editor.getCurrentMajorMode();
-  if (majorMode && majorMode !== "fundamental") {
+  if (!innerBound && majorMode && majorMode !== "fundamental") {
     const own = lookupMajorModeOwnBinding(editor, lookupKey, majorMode);
     if (own) {
       clearWhichKey(editor, wk);
@@ -277,8 +287,10 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   // Major-mode prefix check: if lookupKey is the start of a major-mode
   // multi-key binding (e.g. "]" is a prefix of "] h"), set the prefix and
   // wait for the next key. Major-mode bindings are not in the T-Lisp keymap,
-  // so they need their own prefix detection here.
-  if (majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
+  // so they need their own prefix detection here. A FULL binding of an inner
+  // level shadows this prefix (the Emacs rule), like it shadows the global
+  // one below.
+  if (!innerBound && majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
     // The first key of a mode sequence is recorded here, the last one when
     // its binding runs (above), so `] h` replays as `] h`.
     if (macroRecording) {

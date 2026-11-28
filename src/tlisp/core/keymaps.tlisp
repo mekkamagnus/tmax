@@ -4,7 +4,8 @@
           keymap-walk-prefix keymap-prefix-p
           keymap-all-bindings keymap-prefix-bindings keymap-bindings-list
           buffer-set-keymap buffer-keymap keymap-chain
-          keymap-init keymap-register keymap-named keymap-mutable-set!)
+          keymap-init keymap-register keymap-named keymap-mutable-set!
+          keymap-ref-own keymap-ref-inner)
 
 (defvar normal-keymap nil)
 (defvar insert-keymap nil)
@@ -120,6 +121,39 @@ innermost level wins, outer levels are fallback."
           (if (hashmapp parent)
             (keymap-ref parent key)
             nil))))))
+
+(defun keymap-ref-own (kmap key)
+  "KEY as bound by KMAP ITSELF — its own bindings, not a parent's
+(#206 chain). nil when KMAP does not bind KEY."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (let ((bindings (hashmap-get kmap "bindings")))
+      (if (hashmapp bindings)
+        (hashmap-get bindings key)
+        nil))))
+
+(defun keymap-ref-inner (key)
+  "KEY as bound by a level INNER to the editor-mode keymap — the
+buffer-local keymap, then the active minor-mode keymaps, innermost
+first — or nil when only the editor-mode keymap binds KEY (#206 chain).
+A binding of the major mode stands between these levels and the
+editor-mode keymap (#368): the handler asks this before it looks at the
+major mode."
+  (keymap-ref-inner-maps
+    (let ((local (buffer-keymap (buffer-name)))
+          (minors (minor-mode-keymap-chain)))
+      (append (if local (list local) '())
+              (if minors minors '())))
+    key))
+
+(defun keymap-ref-inner-maps (kmaps key)
+  "KEY as bound by one of KMAPS itself, first map first; nil when none."
+  (if (null kmaps)
+    nil
+    (let ((here (keymap-ref-own (car kmaps) key)))
+      (if here
+        here
+        (keymap-ref-inner-maps (cdr kmaps) key)))))
 
 (defun keymap-set-key (kmap key command)
   "Bind KEY to COMMAND in KMAP. Multi-key sequences (e.g. \"SPC x f\")
