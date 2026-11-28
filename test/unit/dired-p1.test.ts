@@ -1289,3 +1289,33 @@ describe("#360 round 14: a deletion plan the user can read in full", () => {
     expect(ed.getState().statusMessage).toContain("refused");
   });
 });
+
+describe("#360 landing guard: the conservative mark rule", () => {
+  test("guard: a replaced entry loses its mark (the conservative rule)", async () => {
+    // The RULE (round 15 finding 1 documents the behavior; this pins it as
+    // intended): when a marked entry is replaced by another entry of the
+    // same name and the listing is refreshed, the mark is DROPPED — and a
+    // deletion would have refused on the identity mismatch anyway. A
+    // replacement must never inherit the mark.
+    writeFileSync(join(vault, "guard-swap.txt"), "original");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  guard-swap.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+      }
+    }
+    rmSync(join(vault, "guard-swap.txt"));
+    writeFileSync(join(vault, "guard-swap.txt"), "replacement");
+    await ed.handleKey("g");
+    const rows2 = Number(tl(ed, "(buffer-line-count)"));
+    let marked = false;
+    for (let i = 0; i < rows2; i++) if (line(ed, i) === "D guard-swap.txt") marked = true;
+    expect(marked).toBe(false); // the mark is dropped
+    // (The other half of the rule — a deletion whose stored identity no
+    // longer matches is refused — is pinned by C11-2a: replaced during the
+    // confirmation, refused, replacement survives.)
+  });
+});
