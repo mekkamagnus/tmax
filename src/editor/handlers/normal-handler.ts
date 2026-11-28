@@ -263,11 +263,14 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     const own = lookupMajorModeOwnBinding(editor, lookupKey, majorMode);
     if (own) {
       clearWhichKey(editor, wk);
-      // Recorded like any other bound key (vim records literal keys); a mode
-      // binding is excluded from a macro no longer than a global one.
-      if (macroRecording) {
-        try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
-      }
+      // A sequence of the mode is recorded in a macro WHEN IT COMPLETES,
+      // whole: the keys of the pending prefix, then this one. Nothing is
+      // recorded while the sequence is still incomplete, so one that is
+      // abandoned (an unbound second key, Escape, the q that stops the
+      // recording) leaves no dangling prefix key behind. Such a key made the
+      // replay read the NEXT recorded key as the second key of the sequence
+      // (`, z x` replayed as `, x`, which is a different command).
+      if (macroRecording) recordSequence(exec, escape, currentPrefix, normalizedKey);
       await executeCommand(editor, own.command);
       // A count typed before the key (`3` `n`) is discarded once the command
       // of the mode has run. No command of a mode reads the count; left
@@ -304,11 +307,8 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   // knows the key decides (grading round L2: a buffer-local `n x` in *Info*
   // could not be typed, because the mode's `n` ran on the first key).
   if (!innerKnows && majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
-    // The first key of a mode sequence is recorded here, the last one when
-    // its binding runs (above), so `] h` replays as `] h`.
-    if (macroRecording) {
-      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
-    }
+    // Nothing is recorded here: a macro gets the whole sequence when its
+    // binding runs (above).
     editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: lookupKey });
     editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
     editor.applyUpdate({ type: "SetStatusMessage", message: "" });
@@ -448,6 +448,21 @@ function feedDigit(editor: EditorDispatchPort, exec: (cmd: string) => any, key: 
   if (digitResult && digitResult._tag === "Right" && digitResult.right?.type === "number") {
     exec(`(vim-count-add-digit ${digitResult.right.value})`);
   }
+}
+
+/**
+ * Record a COMPLETED key sequence in the running macro: each key of the
+ * pending PREFIX (space-separated key names, "" for a single key), then the
+ * last key. Vim records literal keys; the keys of a prefix are not recorded
+ * while the sequence is incomplete (see the mode binding above).
+ */
+function recordSequence(exec: (cmd: string) => any, escape: (s: string) => string, prefix: string, lastKey: string): void {
+  try {
+    for (const part of prefix.split(" ").filter(part => part.length > 0)) {
+      exec(`(macro-record-key "${escape(part)}")`);
+    }
+    exec(`(macro-record-key "${escape(lastKey)}")`);
+  } catch {}
 }
 
 function clearWhichKey(editor: EditorDispatchPort, wk: any): void {

@@ -787,4 +787,85 @@ describe("landing round L1: a binding of a major mode stands between the inner k
       expect(keys).not.toContain("q"); // the stopping q is not recorded
     });
   });
+
+describe("L3: a sequence of a mode in a macro is recorded when it completes; an abandoned one records nothing", () => {
+  const type = async (ed: Editor, keys: string[]): Promise<void> => {
+    for (const key of keys) await ed.handleKey(key);
+  };
+  const recorded = (ed: Editor, register: string): string[] => {
+    const list = executeTlisp(ed, "(macro-list)") as any;
+    const pair = list.value.find((entry: any) => entry.value[0].value === register);
+    return pair ? pair.value[1].value.map((k: any) => k.value) : [];
+  };
+
+  test("L3: an ABANDONED mode prefix does not swallow the next key on replay (red first: the text was changed on replay)", async () => {
+    // The reviewer's case: `, z` is unbound, then x deletes one character.
+    // Before: the recorded `,` stayed in the macro, so the replay of `, x`
+    // ran markdown-toggle-code and changed text the user never typed.
+    const ed = await setupMarkdownEditor("abcdef");
+    executeTlisp(ed, "(cursor-move 0 1)");
+    await type(ed, ["q", "a", ",", "z", "x", "q"]);
+    expect(str(ed, "(buffer-text)")).toBe("acdef"); // what the user typed happened
+    expect(recorded(ed, "a")).toEqual(["x"]); // no dangling prefix key
+    await type(ed, ["@", "a"]);
+    expect(str(ed, "(buffer-text)")).toBe("adef"); // the replay deletes one character, as x did
+  });
+
+  test("L3: a COMPLETED mode sequence is recorded whole and replays as the same keys (guard for , b)", async () => {
+    // markdown-toggle-bold wraps again when it is applied twice; so the
+    // expectation is what pressing the keys a second time gives.
+    const direct = await setupMarkdownEditor("abcdef");
+    executeTlisp(direct, "(cursor-move 0 1)");
+    await type(direct, [",", "b", ",", "b"]);
+    const twice = str(direct, "(buffer-text)");
+    const ed = await setupMarkdownEditor("abcdef");
+    executeTlisp(ed, "(cursor-move 0 1)");
+    await type(ed, ["q", "a", ",", "b", "q"]);
+    expect(str(ed, "(buffer-text)")).not.toBe("abcdef"); // toggled
+    expect(recorded(ed, "a")).toEqual([",", "b"]);
+    await type(ed, ["@", "a"]);
+    expect(str(ed, "(buffer-text)")).toBe(twice); // the replay runs , b again
+  });
+
+  test("L3: ] h is recorded whole and replays as ] h (red first: only h was recorded, which replays as vim's left)", async () => {
+    const ed = await setupMarkdownEditor("# A\n\n## B\n\ntext\n\n### C\n");
+    executeTlisp(ed, "(cursor-move 0 2)"); // not at the line start, so vim's h would move
+    await type(ed, ["q", "a", "]", "h", "q"]);
+    expect(str(ed, "(cursor-line)")).toBe("2"); // the sequence ran: on ## B
+    expect(recorded(ed, "a")).toEqual(["]", "h"]);
+    executeTlisp(ed, "(cursor-move 0 2)");
+    await type(ed, ["@", "a"]);
+    expect(str(ed, "(cursor-line)")).toBe("2"); // the replay runs ] h again
+  });
+
+  test("L3: a mode prefix followed by the stopping q leaves no dangling key in the macro (red first)", async () => {
+    const ed = await setupMarkdownEditor("abcdef");
+    executeTlisp(ed, "(cursor-move 0 0)");
+    await type(ed, ["q", "a", ",", "q"]);
+    expect(str(ed, "(macro-record-active)")).toBe("false"); // the stopping q ended the recording
+    expect(recorded(ed, "a")).toEqual([]); // the abandoned `,` is not in it
+    await type(ed, ["@", "a"]);
+    expect(str(ed, "(buffer-text)")).toBe("abcdef"); // the empty macro does nothing
+    await ed.handleKey("x"); // and no prefix is pending after the replay
+    expect(str(ed, "(buffer-text)")).toBe("bcdef");
+  });
+
+  test("L3: a mode prefix cancelled with Escape leaves no dangling key; the next key replays alone (red first)", async () => {
+    const ed = await setupMarkdownEditor("l1\nl2\nl3");
+    executeTlisp(ed, "(cursor-move 0 0)");
+    await type(ed, ["q", "a", ",", "Escape", "j", "q"]);
+    expect(str(ed, "(cursor-line)")).toBe("1"); // j moved down
+    expect(recorded(ed, "a")).toEqual(["j"]);
+    executeTlisp(ed, "(cursor-move 0 0)");
+    await type(ed, ["@", "a"]);
+    expect(str(ed, "(cursor-line)")).toBe("1"); // not swallowed by a dangling `,`
+    expect(ed.getState().statusMessage ?? "").not.toContain("Unbound key");
+  });
+
+  test("L3: a three-key mode sequence is recorded with all its keys (guard for , k c)", async () => {
+    const ed = await setupMarkdownEditor("abcdef");
+    await type(ed, ["q", "a", ",", "k", "c", "q"]);
+    expect(recorded(ed, "a")).toEqual([",", "k", "c"]);
+  });
+});
 });

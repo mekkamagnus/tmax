@@ -159,8 +159,8 @@ buffer-local keymap, then the active minor-mode keymaps (#206 chain)."
   "What the levels INNER to the editor-mode keymap say about KEY (#368).
 They are walked innermost first and the FIRST map that knows KEY
 decides: its COMMAND when that map has a complete binding for KEY, the
-marker of two dots around the word prefix when it has a prefix entry for
-KEY (the next key must be waited for), nil when no inner map knows KEY. A complete binding
+marker \"..prefix..\" when it has a prefix entry for KEY (the next key
+must be waited for), nil when no inner map knows KEY. A complete binding
 wins over a prefix in the same map (the rule of keymap-prefix-p). The
 normal handler looks at the binding of the major mode only when this is
 nil."
