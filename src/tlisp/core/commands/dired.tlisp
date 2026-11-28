@@ -525,7 +525,9 @@ pass): renameSync would silently overwrite it."
     (cond
       ((not (dired-id-matches (file-entry-id src) id))
         (message (concat "dired: rename refused — the source changed: " src)))
-      ((file-exists-p dest)
+      ((file-entry-id dest)
+        ;; Round 14: taken = a directory ENTRY exists (lstat; a dangling
+        ;; destination link is taken, not free).
         (message (concat "dired: rename refused — destination exists: " dest)))
       (t
         (let ((res (funcall "rename-file-do" src dest)))
@@ -567,7 +569,8 @@ overwrite it."
         ;; Round 12 fix 1: copying follows the link — the LINK and the file
         ;; it points to must BOTH be what they were when the prompt opened.
         (message (concat "dired: copy refused — the source changed: " src)))
-      ((file-exists-p dest)
+      ((file-entry-id dest)
+        ;; Round 14: same lstat-shaped taken-test as rename.
         (message (concat "dired: copy refused — destination exists: " dest)))
       (t
         (let ((res (funcall "copy-file-do" src dest)))

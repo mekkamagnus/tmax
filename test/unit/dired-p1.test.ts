@@ -1085,3 +1085,40 @@ describe("#360 round 13 + safety pass: disk-truth navigation, no silent overwrit
     expect(readFileSync(join(vault, "s4-dest.txt"), "utf8")).toBe("PRECIOUS");
   });
 });
+
+describe("#360 round 14: dired R/C do not replace a destination link", () => {
+  test("R14-3: dired R onto a dangling destination link refuses (key + prompt)", async () => {
+    writeFileSync(join(vault, "r14-d-src.txt"), "source");
+    symlinkSync(join(vault, "no-target-3"), join(vault, "r14-d-dangling"));
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  r14-d-src.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("R");
+      }
+    }
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "r14-d-dangling")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(lstatSync(join(vault, "r14-d-dangling"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(existsSync(join(vault, "r14-d-src.txt"))).toBe(true);
+  });
+
+  test("R14-4: dired C onto a dangling destination link refuses (key + prompt)", async () => {
+    writeFileSync(join(vault, "r14-d-csrc.txt"), "source");
+    symlinkSync(join(vault, "no-target-4"), join(vault, "r14-d-cdangling"));
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  r14-d-csrc.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("C");
+      }
+    }
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "r14-d-cdangling")}")`);
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(lstatSync(join(vault, "r14-d-cdangling"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+  });
+});

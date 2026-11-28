@@ -437,3 +437,39 @@ describe("#361/#360 coach r10: literal confirmation input", () => {
     expect(existsSync(c)).toBe(false);
   });
 });
+
+describe("round 14: rename/copy never replace a destination LINK", () => {
+  test("R14-1: rename-file-do onto a dangling destination link refuses; link and source stay", async () => {
+    writeFileSync(join(vault, "r14-src.txt"), "source");
+    symlinkSync(join(vault, "no-such-target"), join(vault, "r14-dangling-link"));
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(rename-file "${join(vault, "r14-src.txt")}")`);
+    executeTlisp(editor, `(minibuffer-set-input "${join(vault, "r14-dangling-link")}")`);
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(lstatSync(join(vault, "r14-dangling-link"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(existsSync(join(vault, "r14-src.txt"))).toBe(true);
+  });
+
+  test("R14-2: copy-file-do onto a dangling destination link refuses", async () => {
+    writeFileSync(join(vault, "r14-csrc.txt"), "source");
+    symlinkSync(join(vault, "no-such-target-2"), join(vault, "r14-cdangling-link"));
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(copy-file "${join(vault, "r14-csrc.txt")}")`);
+    executeTlisp(editor, `(minibuffer-set-input "${join(vault, "r14-cdangling-link")}")`);
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(lstatSync(join(vault, "r14-cdangling-link"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(existsSync(join(vault, "r14-csrc.txt"))).toBe(true);
+  });
+
+  test("R14-5 (guard): rename onto a link whose target EXISTS is still refused", async () => {
+    writeFileSync(join(vault, "r14-real.txt"), "real");
+    writeFileSync(join(vault, "r14-gsrc.txt"), "src");
+    symlinkSync(join(vault, "r14-real.txt"), join(vault, "r14-live-link"));
+    const editor = await createStartedEditor("");
+    executeTlisp(editor, `(rename-file "${join(vault, "r14-gsrc.txt")}")`);
+    executeTlisp(editor, `(minibuffer-set-input "${join(vault, "r14-live-link")}")`);
+    executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+    expect(lstatSync(join(vault, "r14-live-link"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+    expect(existsSync(join(vault, "r14-gsrc.txt"))).toBe(true);
+  });
+});
