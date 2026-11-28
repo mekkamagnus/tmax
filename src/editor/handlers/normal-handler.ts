@@ -37,6 +37,9 @@ import { computeWhichKeyPopup } from "../../frontend/render/which-key-overlay.ts
 
 const DIGIT_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 
+/** The start of the status line the which-key popup writes while it shows. */
+const WHICH_KEY_STATUS_PREFIX = "Which-key: ";
+
 const PREFIX_LABELS: Record<string, string> = {
   "z": "z — scroll/viewport",
   "g": "g — goto",
@@ -260,7 +263,7 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
       const size = editor.getTerminal().getSize();
       editor.applyUpdate({ type: "SetWhichKeyActive", active: true });
       editor.applyUpdate({ type: "SetWhichKeyPopup", popup: computeWhichKeyPopup(bindings, lookupKey, size.width, Math.max(1, size.height - 4), prefixLabel(lookupKey)) });
-      editor.applyUpdate({ type: "SetStatusMessage", message: `Which-key: ${bindings.map(b => `${b.key.substring(lookupKey.length + 1)} : ${b.command}`).join(", ")}` });
+      editor.applyUpdate({ type: "SetStatusMessage", message: whichKeyStatus(bindings, lookupKey) });
     });
     return;
   }
@@ -420,6 +423,15 @@ function clearWhichKey(editor: EditorDispatchPort, wk: any): void {
   editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: "" });
   editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
   editor.applyUpdate({ type: "SetWhichKeyPopup", popup: null });
+  // #372: while the popup showed, its callback put the candidate list on
+  // the status line. A sequence that is completed takes the popup off, and
+  // must take that line off too — a command that sets no message of its
+  // own (dired) otherwise left "Which-key: ..." as its status. A message
+  // that is not the which-key line (the command's own, or a real one that
+  // landed meanwhile) is kept.
+  if ((editor.getModel().statusMessage ?? "").startsWith(WHICH_KEY_STATUS_PREFIX)) {
+    editor.applyUpdate({ type: "SetStatusMessage", message: "" });
+  }
 }
 
 async function executeCommand(editor: EditorDispatchPort, tLispCmd: string): Promise<void> {
@@ -449,8 +461,13 @@ function schedulePrefixPopup(
     const size = editor.getTerminal().getSize();
     editor.applyUpdate({ type: "SetWhichKeyActive", active: true });
     editor.applyUpdate({ type: "SetWhichKeyPopup", popup: computeWhichKeyPopup(bindings, prefix, size.width, Math.max(1, size.height - 4), prefixLabel(prefix)) });
-    editor.applyUpdate({ type: "SetStatusMessage", message: `Which-key: ${bindings.map(b => `${b.key.substring(prefix.length + 1)} : ${b.command}`).join(", ")}` });
+    editor.applyUpdate({ type: "SetStatusMessage", message: whichKeyStatus(bindings, prefix) });
   });
+}
+
+/** The one-line candidate list that replaces the status line while the popup shows. */
+function whichKeyStatus(bindings: WhichKeyBinding[], prefix: string): string {
+  return WHICH_KEY_STATUS_PREFIX + bindings.map(b => `${b.key.substring(prefix.length + 1)} : ${b.command}`).join(", ");
 }
 
 function tLispPrefixBindings(exec: (cmd: string) => any, escape: (s: string) => string, prefix: string): WhichKeyBinding[] {

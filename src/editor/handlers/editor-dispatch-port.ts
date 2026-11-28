@@ -48,6 +48,8 @@ export interface EditorDispatchPort {
     mode: string;
     whichKeyPrefix?: string;
     currentMajorMode?: string;
+    /** The status line as it is now (read, to recognise the which-key line). */
+    statusMessage?: string;
     cursorPosition: { line: number; column: number };
   };
   getTerminal(): { getSize(): { width: number; height: number } };

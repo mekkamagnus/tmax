@@ -396,51 +396,65 @@ and its captured type; populated directories explicitly recursive."
   "The read-only plan-review buffer opened by x (round 14).")
 
 (defun dired-show-delete-plan (plan)
-  "Open the read-only plan buffer: one line per entry, a trailing
-instruction line. The user scrolls it with the normal motions; y asks
-the SHORT question; q or Escape cancels."
+  "Open the read-only plan buffer: one line per entry, then two
+instruction lines. The user scrolls it with the normal motions; y asks
+the SHORT question; q cancels (n cancels too). Escape does NOT leave the
+plan: the normal handler consumes it before any keymap is read, so it
+only clears the status line (#372). The status line is cleared here, so
+the plan does not show the message of an earlier command."
   (buffer-create dired-plan-buffer-name)
   (buffer-switch dired-plan-buffer-name)
   (let ((lines (list)))
     (dolist (e plan)
       (setq lines (append lines (list (dired-plan-entry-line e)))))
+    ;; Two short lines, each readable on a 40-column terminal.
     (setq lines (append lines (list "")
-      (list "y — confirm in the minibuffer   n — cancel (marks are kept)")))
+      (list "y — confirm in the minibuffer")
+      (list "q — cancel (marks are kept)")))
     (dired-insert-lines lines))
   (cursor-move 0 0)
   (set-buffer-modified-p nil)
   (buffer-set-read-only t)
+  (editor-set-status "")
   (dired-ensure-plan-keymap))
 
 (defun dired-ensure-plan-keymap ()
   "The plan buffer's BUFFER-LOCAL keymap (the dired-ensure-keymap
-mechanism: the buffer-local tier is innermost and wins)."
+mechanism: the buffer-local tier is innermost and wins). q cancels: at
+idle (no macro recording, nothing pending) q is NOT handled before the
+keymap lookup, and the buffer-local keymap is the innermost tier — the
+listing's own q works the same way. While a macro RECORDS, q stops the
+recording instead (vim semantics, kept). Escape cannot be bound: the
+handler consumes it first. n cancels too (kept for the hands that
+learned it; q is the documented key)."
   (let ((kmap (editor/keymaps/buffer-keymap dired-plan-buffer-name)))
     (if (not kmap)
       (progn
         (setq kmap (editor/keymaps/keymap-init "dired-delete-plan"))
         (editor/keymaps/keymap-set-key kmap "y" "(editor/commands/dired/dired-execute-ask)")
-        ;; q and Escape cannot be used: the normal handler special-cases
-        ;; both (macro recording; prefix cancel) BEFORE the keymap lookup.
-        ;; n cancels (mnemonic: no). Plain letters shadow fine (y proves it).
+        (editor/keymaps/keymap-set-key kmap "q" "(editor/commands/dired/dired-plan-cancel)")
         (editor/keymaps/keymap-set-key kmap "n" "(editor/commands/dired/dired-plan-cancel)")
         (editor/keymaps/buffer-set-keymap dired-plan-buffer-name kmap))))
   t)
 
 (defun dired-plan-cancel ()
-  "Cancel the plan review: kill the plan buffer, return to the
+  "Cancel the plan review (q, or n): kill the plan buffer, return to the
 listing. Nothing is deleted; the marks are KEPT (a cancelled review is
-not an unmarking)."
+not an unmarking). Sets its own status message, so the listing does not
+show the message of an earlier command."
   (funcall "buffer-kill" dired-plan-buffer-name)
-  (funcall "switch-to-buffer" "*Dired*"))
+  (funcall "switch-to-buffer" "*Dired*")
+  (message "Deletion cancelled — nothing deleted, the marks are kept"))
 
 (defun dired-execute-ask ()
-  "The SHORT question after the plan was reviewed: short enough that
-prompt + the typed yes fit a 40-column minibuffer line (the renderer
-cuts prompt+input to one terminal line — the long names live in the
-plan buffer, never here). Only the exact string \"yes\" authorizes."
+  "The SHORT question after the plan was reviewed (y in the plan
+buffer). It says what to type, and it is short enough that the question
+AND the typed yes fit one 40-column minibuffer line (the renderer cuts
+prompt+input to one terminal line — the long names live in the plan
+buffer, never here). Only the exact word \"yes\" authorizes; any other
+answer is refused with a message that says so."
   (read-from-minibuffer
-    (concat "Delete the " (number-to-string (length dired-pending-deletions)) " shown entries? ")
+    (concat "Delete " (number-to-string (length dired-pending-deletions)) " shown entries? Type yes: ")
     "no"
     "file-ops-history"
     "dired-execute-accept"))
@@ -469,7 +483,8 @@ missing entry is refused, never reinterpreted (a confirmed file that
 became a nonempty directory SURVIVES). Confirmed empty directories
 remove non-recursively (content added during the prompt survives);
 confirmed symlinks unlink; confirmed trees remove recursively. The
-summary keeps refusals and failures visible."
+summary keeps refusals and failures visible. Any other answer deletes
+nothing and says that the full word was needed."
   (let ((plan dired-pending-deletions)
         (dir dired-pending-dir)
         (dir-id dired-pending-dir-id))
@@ -521,9 +536,11 @@ summary keeps refusals and failures visible."
           (message (concat "Deleted " (number-to-string deleted)
             " entries (" (number-to-string refused) " refused, "
             (number-to-string failed) " failed)"))))
+      ;; Not the full word (y, yes with a typo, the default no, empty): say
+      ;; what was needed — "Cancelled" alone did not tell why nothing ran.
       (progn
         (dired-plan-cancel)
-        (message "Cancelled")))))
+        (message "Not confirmed (type the full word yes) — nothing deleted, the marks are kept")))))
 
 ;; ── file operations (delegate to the file-ops family) ─────────────────
 
