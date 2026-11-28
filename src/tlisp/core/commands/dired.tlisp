@@ -3,7 +3,8 @@
           dired-execute-deletions dired-quit dired-refresh dired-rename-entry
           dired-copy-entry dired-create-directory dired-next-entry dired-prev-entry
           dired-render dired-format-entry dired-execute-accept
-          dired-mkdir-accept dired-rename-accept dired-copy-accept)
+          dired-mkdir-accept dired-rename-accept dired-copy-accept
+          dired-execute-ask dired-plan-cancel)
 
 ;; dired.tlisp — directory editor, RFC-041 #360 PHASE 1 (minimum usable
 ;; dired). Vim-motion keymap (user-fixed): j/k entry motion, l descend/open,
@@ -318,15 +319,11 @@ captured HERE so a changed buffer cannot redirect the batch."
         (setq dired-pending-deletions plan)
         (setq dired-pending-dir dir)
         (setq dired-pending-dir-id (file-entry-id dir))
-        ;; The confirmation DESCRIBES the captured plan (coach r10 finding 2):
-        ;; every (escaped) name with its type; populated directories say so.
-        ;; Literal input: only the exact string "yes" authorizes.
-        (read-from-minibuffer
-          (concat "Delete " (number-to-string (length plan)) " marked entries — "
-            (dired-plan-describe plan) " ? Type yes to confirm: ")
-          "no"
-          "file-ops-history"
-          "dired-execute-accept")))))
+        ;; Round 14 blocker: the WHOLE plan must be readable before yes can
+        ;; delete anything. x opens a read-only *Dired-Delete-Plan* buffer
+        ;; (one line per entry, scrollable); y then asks ONE SHORT question
+        ;; that fits a 40-column minibuffer line.
+        (dired-show-delete-plan plan)))))
 
 (defun dired-entry-kind (path)
   "The entry's kind for the deletion plan: symlink, file, empty, tree,
@@ -381,23 +378,72 @@ truth, not the display)."
       (setq names (append names (list (hashmap-get r "name")))))
     names))
 
-(defun dired-plan-describe (plan)
-  "One reviewable line per plan entry (coach r10 finding 2): the
-escaped name and its captured type, populated directories explicitly
-recursive. No truncation."
-  (let ((parts (list)))
+(defun dired-plan-entry-line (e)
+  "One plan entry as one reviewable line (round 14): the escaped name
+and its captured type; populated directories explicitly recursive."
+  (let ((name (dired-encode-name (hashmap-get e "name")))
+        (kind (hashmap-get e "kind")))
+    (concat name " ("
+      (cond
+        ((string= kind "tree") "directory, deleted RECURSIVELY")
+        ((string= kind "empty") "empty directory")
+        ((string= kind "symlink") "symlink")
+        ((string= kind "unreadable") "UNREADABLE - will be refused")
+        (t "file"))
+      ")")))
+
+(defvar dired-plan-buffer-name "*Dired-Delete-Plan*"
+  "The read-only plan-review buffer opened by x (round 14).")
+
+(defun dired-show-delete-plan (plan)
+  "Open the read-only plan buffer: one line per entry, a trailing
+instruction line. The user scrolls it with the normal motions; y asks
+the SHORT question; q or Escape cancels."
+  (buffer-create dired-plan-buffer-name)
+  (buffer-switch dired-plan-buffer-name)
+  (let ((lines (list)))
     (dolist (e plan)
-      (let ((name (dired-encode-name (hashmap-get e "name")))
-            (kind (hashmap-get e "kind")))
-        (setq parts (append parts (list (concat name " ("
-          (cond
-            ((string= kind "tree") "directory, deleted RECURSIVELY")
-            ((string= kind "empty") "empty directory")
-            ((string= kind "symlink") "symlink")
-            ((string= kind "unreadable") "UNREADABLE - will be refused")
-            (t "file"))
-          ")"))))))
-    (dired-join-strings parts ", ")))
+      (setq lines (append lines (list (dired-plan-entry-line e)))))
+    (setq lines (append lines (list "")
+      (list "y — confirm in the minibuffer   n — cancel (marks are kept)")))
+    (dired-insert-lines lines))
+  (cursor-move 0 0)
+  (set-buffer-modified-p nil)
+  (buffer-set-read-only t)
+  (dired-ensure-plan-keymap))
+
+(defun dired-ensure-plan-keymap ()
+  "The plan buffer's BUFFER-LOCAL keymap (the dired-ensure-keymap
+mechanism — mode-scoped binds resolve last and would be shadowed)."
+  (let ((kmap (editor/keymaps/buffer-keymap dired-plan-buffer-name)))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "dired-delete-plan"))
+        (editor/keymaps/keymap-set-key kmap "y" "(editor/commands/dired/dired-execute-ask)")
+        ;; q and Escape cannot be used: the normal handler special-cases
+        ;; both (macro recording; prefix cancel) BEFORE the keymap lookup.
+        ;; n cancels (mnemonic: no). Plain letters shadow fine (y proves it).
+        (editor/keymaps/keymap-set-key kmap "n" "(editor/commands/dired/dired-plan-cancel)")
+        (editor/keymaps/buffer-set-keymap dired-plan-buffer-name kmap))))
+  t)
+
+(defun dired-plan-cancel ()
+  "Cancel the plan review: kill the plan buffer, return to the
+listing. Nothing is deleted; the marks are KEPT (a cancelled review is
+not an unmarking)."
+  (funcall "buffer-kill" dired-plan-buffer-name)
+  (funcall "switch-to-buffer" "*Dired*"))
+
+(defun dired-execute-ask ()
+  "The SHORT question after the plan was reviewed: short enough that
+prompt + the typed yes fit a 40-column minibuffer line (the renderer
+cuts prompt+input to one terminal line — the long names live in the
+plan buffer, never here). Only the exact string \"yes\" authorizes."
+  (read-from-minibuffer
+    (concat "Delete the " (number-to-string (length dired-pending-deletions)) " shown entries? ")
+    "no"
+    "file-ops-history"
+    "dired-execute-accept"))
 
 (defun dired-join-strings (parts sep)
   (if (null parts)
@@ -466,13 +512,18 @@ summary keeps refusals and failures visible."
                         (set! deleted (+ deleted 1))
                         (setq dired-marks (dired-records-remove dired-marks name)))
                       (set! failed (+ failed 1))))))))
-          (if (string= (buffer-current) "*Dired*")
-            (dired-refresh)
+          (if (not (string= (buffer-current) "*Dired*"))
+            (progn
+              (funcall "buffer-kill" dired-plan-buffer-name)
+              (funcall "switch-to-buffer" "*Dired*"))
             t)
+          (dired-refresh)
           (message (concat "Deleted " (number-to-string deleted)
             " entries (" (number-to-string refused) " refused, "
             (number-to-string failed) " failed)"))))
-      (message "Cancelled"))))
+      (progn
+        (dired-plan-cancel)
+        (message "Cancelled")))))
 
 ;; ── file operations (delegate to the file-ops family) ─────────────────
 

@@ -139,6 +139,7 @@ describe("#360 phase 1: dired operations", () => {
     executeTlisp(ed, `(cursor-move ${vLine} 0)`);
     await ed.handleKey("d");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     expect(ed.getState().mode).toBe("mx"); // the batch confirm is open
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
@@ -227,6 +228,7 @@ describe("#360 coach round 7: identity, typed deletion, results, paths, links", 
     executeTlisp(ed, `(cursor-move ${mLine} 0)`);
     await ed.handleKey("d");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "my file"))).toBe(false);
@@ -271,6 +273,7 @@ describe("#360 coach round 7: identity, typed deletion, results, paths, links", 
     executeTlisp(ed, `(cursor-move ${dLine} 0)`);
     await ed.handleKey("d");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(d)).toBe(false);
@@ -290,6 +293,7 @@ describe("#360 coach round 7: identity, typed deletion, results, paths, links", 
     executeTlisp(ed, `(cursor-move ${lLine} 0)`);
     await ed.handleKey("d");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "dir-link"))).toBe(false);
@@ -311,6 +315,7 @@ describe("#360 coach round 7: identity, typed deletion, results, paths, links", 
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "killme.txt"))).toBe(false);
@@ -332,6 +337,7 @@ describe("#360 coach round 7: identity, typed deletion, results, paths, links", 
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "no")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "spared-batch.txt"))).toBe(true);
@@ -408,6 +414,7 @@ describe("#360 coach round 7: identity, typed deletion, results, paths, links", 
     executeTlisp(ed, `(cursor-move ${dLine} 0)`);
     await ed.handleKey("d");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(lstatSync(join(vault, "dangling-link"), { throwIfNoEntry: false })).toBeUndefined();
@@ -437,8 +444,10 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
       }
     }
     await ed.handleKey("x");
-    // coach r10 supersedes the r8 wording: every entry + type, recursion explicit.
-    expect(ed.getState().minibufferView?.prompt).toContain("RECURSIVELY");
+    // round 14: the plan lives in the readable buffer; recursion explicit.
+    expect(tl(ed, "(buffer-current)")).toBe("*Dired-Delete-Plan*");
+    expect(tl(ed, "(buffer-text)")).toContain("RECURSIVELY");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "no")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
   });
@@ -456,6 +465,7 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     // swap the confirmed file for a NONEMPTY directory while the prompt is open
     rmSync(join(vault, "c8-swap.txt"));
     mkdirSync(join(vault, "c8-swap.txt", "kept"), { recursive: true });
@@ -480,6 +490,7 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     writeFileSync(join(d, "appeared.txt"), "x");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
@@ -502,6 +513,7 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     rmSync(d, { recursive: true });
     symlinkSync(target, join(vault, "c8-becomes-link"));
     executeTlisp(ed, '(minibuffer-set-input "yes")');
@@ -526,6 +538,7 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     chmodSync(d, 0o755);
@@ -549,6 +562,7 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
     for (let i = 0; i < rows2; i++) if (line(ed, i) === "D c8-keepmark.txt") still = true;
     expect(still).toBe(true);
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "c8-keepmark.txt"))).toBe(false);
@@ -589,6 +603,7 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
     executeTlisp(ed, `(cursor-move ${wLine} 0)`);
     await ed.handleKey("d");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "c8\nweird.txt"))).toBe(false); // the real-newline entry is gone
@@ -609,6 +624,7 @@ describe("#360 coach round 8: deletion plan, mark preservation, encoding, prefil
     executeTlisp(ed, `(cursor-move ${litLine} 0)`);
     await ed.handleKey("d");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "lit\\nname.txt"))).toBe(false);
@@ -651,6 +667,7 @@ describe("Enter on an empty dired batch confirmation cancels", () => {
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     expect(ed.getState().mode).toBe("mx");
     executeTlisp(ed, '(minibuffer-set-input "")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
@@ -686,6 +703,7 @@ describe("#360 coach round 10: mark-time identity, plan prompt, literal input", 
     mkdirSync(join(vault, "c10-swap.txt", "kept"), { recursive: true });
     writeFileSync(join(vault, "c10-swap.txt", "kept", "f"), "safe");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "c10-swap.txt", "kept", "f"))).toBe(true);
@@ -698,6 +716,7 @@ describe("#360 coach round 10: mark-time identity, plan prompt, literal input", 
     executeTlisp(ed, `(dired "${vault}")`);
     await markRow(ed, "c10-mid.txt");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     rmSync(join(vault, "c10-mid.txt"));
     writeFileSync(join(vault, "c10-mid.txt"), "replacement");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
@@ -728,9 +747,10 @@ describe("#360 coach round 10: mark-time identity, plan prompt, literal input", 
     await markRow(ed, "my c10 file");
     await markRow(ed, "plain-c10.txt");
     await ed.handleKey("x");
-    const prompt = ed.getState().minibufferView?.prompt ?? "";
-    expect(prompt).toContain("my c10 file");
-    expect(prompt).toContain("plain-c10.txt");
+    const planText = tl(ed, "(buffer-text)");
+    expect(planText).toContain("my c10 file");
+    expect(planText).toContain("plain-c10.txt");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "my c10 file"))).toBe(true);
@@ -756,6 +776,7 @@ describe("#360 coach round 10: mark-time identity, plan prompt, literal input", 
     expect(a).toBe(true);
     expect(b).toBe(false);
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "c10-a.txt"))).toBe(false);
@@ -767,6 +788,7 @@ describe("#360 coach round 10: mark-time identity, plan prompt, literal input", 
     executeTlisp(ed, `(dired "${vault}")`);
     await markRow(ed, "c10-lity.txt");
     await ed.handleKey("x");
+    await ed.handleKey("y");
     executeTlisp(ed, '(minibuffer-set-input "y")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(existsSync(join(vault, "c10-lity.txt"))).toBe(true);
@@ -864,6 +886,7 @@ describe("#360 coach round 11: R/C identity capture, fail-closed matching", () =
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     unlinkSync(join(vault, "c11-a.txt"));
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
@@ -886,6 +909,7 @@ describe("#360 coach round 11: R/C identity capture, fail-closed matching", () =
       }
     }
     await ed.handleKey("x");
+    await ed.handleKey("y");
     renameSync(sub, join(vault, "c11-subdir-aside"));
     executeTlisp(ed, '(minibuffer-set-input "yes")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
@@ -949,6 +973,7 @@ describe("#360 round 12: copy through a link, marks kept when navigation fails",
     expect(tl(ed, "(buffer-text)")).toContain("D r12-b.txt");
     // x still sees the marks — it must open the confirm, not say "No marked entries"
     await ed.handleKey("x");
+    await ed.handleKey("y");
     expect(ed.getState().mode).toBe("mx");
     executeTlisp(ed, '(minibuffer-set-input "no")');
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
@@ -1120,5 +1145,147 @@ describe("#360 round 14: dired R/C do not replace a destination link", () => {
     executeTlisp(ed, `(minibuffer-set-input "${join(vault, "r14-d-cdangling")}")`);
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(lstatSync(join(vault, "r14-d-cdangling"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+  });
+});
+
+describe("#360 round 14: a deletion plan the user can read in full", () => {
+  const PLAN = "*Dired-Delete-Plan*";
+
+  test("P-1: 30 marked entries — the plan buffer shows every name", async () => {
+    const names: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      const n = `p1-entry-${i}-${"x".repeat(i % 7)}.txt`;
+      names.push(n);
+      writeFileSync(join(vault, n), "x");
+    }
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (names.includes(n)) {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    expect(tl(ed, "(buffer-current)")).toBe(PLAN);
+    const text = tl(ed, "(buffer-text)");
+    for (const n of names) expect(text).toContain(n);
+    // cancel out
+    await ed.handleKey("n");
+    expect(tl(ed, "(buffer-current)")).toBe("*Dired*");
+  });
+
+  test("P-2: a 200-character name is fully readable in the plan", async () => {
+    const longName = "L".repeat(200) + ".txt";
+    writeFileSync(join(vault, longName), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === longName) {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+      }
+    }
+    await ed.handleKey("x");
+    await ed.handleKey("y");
+    expect(tl(ed, "(buffer-text)")).toContain(longName);
+    await ed.handleKey("n");
+  });
+
+  test("P-3: the short question fits at 40 columns; prompt and answer complete at 200", async () => {
+    writeFileSync(join(vault, "p3.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === "p3.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+      }
+    }
+    await ed.handleKey("x");
+    await ed.handleKey("y");
+    await ed.handleKey("y");
+    expect(ed.getState().mode).toBe("mx");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    const view = ed.getState().minibufferView!;
+    // (c): prompt + the typed answer fit a 40-column line.
+    expect(view.prompt.length + 3).toBeLessThanOrEqual(40);
+    expect(view.prompt).toContain("1 shown");
+    expect(view.input).toBe("yes");
+    executeTlisp(ed, '(minibuffer-dispatch-key "Escape")');
+    await ed.handleKey("n");
+  });
+
+  test("P-4: a populated directory's line says everything inside it is deleted", async () => {
+    const d = join(vault, "p4-dir");
+    mkdirSync(join(d, "s"), { recursive: true });
+    writeFileSync(join(d, "s", "f"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i).slice(2).replace(/\/$/, "") === "p4-dir") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+      }
+    }
+    await ed.handleKey("x");
+    await ed.handleKey("y");
+    const text = tl(ed, "(buffer-text)");
+    expect(text).toContain("p4-dir");
+    expect(text).toContain("RECURSIVELY");
+    await ed.handleKey("n");
+  });
+
+  test("P-5: cancel (q) deletes nothing, returns to the listing, marks KEPT", async () => {
+    writeFileSync(join(vault, "p5-keep.txt"), "x");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      if (line(ed, i) === "  p5-keep.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+      }
+    }
+    await ed.handleKey("x");
+    expect(tl(ed, "(buffer-current)")).toBe(PLAN);
+    await ed.handleKey("n");
+    expect(tl(ed, "(buffer-current)")).toBe("*Dired*");
+    expect(existsSync(join(vault, "p5-keep.txt"))).toBe(true);
+    expect(tl(ed, "(buffer-text)")).toContain("D p5-keep.txt"); // policy: marks kept
+  });
+
+  test("P-6: yes deletes exactly the shown entries; a replaced entry is refused", async () => {
+    writeFileSync(join(vault, "p6-a.txt"), "a");
+    writeFileSync(join(vault, "p6-b.txt"), "b");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(dired "${vault}")`);
+    const rows = Number(tl(ed, "(buffer-line-count)"));
+    for (let i = 0; i < rows; i++) {
+      const n = line(ed, i).slice(2).replace(/\/$/, "");
+      if (n === "p6-a.txt" || n === "p6-b.txt") {
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+        await ed.handleKey("d");
+        executeTlisp(ed, `(cursor-move ${i} 0)`);
+      }
+    }
+    await ed.handleKey("x");
+    await ed.handleKey("y");
+    // replace p6-a AFTER the plan was shown
+    rmSync(join(vault, "p6-a.txt"));
+    writeFileSync(join(vault, "p6-a.txt"), "replacement");
+    await ed.handleKey("y");
+    executeTlisp(ed, '(minibuffer-set-input "yes")');
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(existsSync(join(vault, "p6-b.txt"))).toBe(false); // shown & unchanged: deleted
+    expect(existsSync(join(vault, "p6-a.txt"))).toBe(true); // shown but replaced: refused
+    expect(tl(ed, "(buffer-current)")).toBe("*Dired*"); // back on the listing
+    expect(ed.getState().statusMessage).toContain("refused");
   });
 });
