@@ -224,6 +224,85 @@ describe("#375: when there is no earlier buffer", () => {
   });
 });
 
+describe("#375, grading round 3: the identity of a buffer", () => {
+  test("buffer-id is stable across edits, switches and a rename, and differs for a later buffer of the same name", async () => {
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, '(switch-to-buffer "*scratch*")');
+    executeTlisp(ed, '(buffer-create "origin")');
+    executeTlisp(ed, '(switch-to-buffer "origin")');
+    const first = str(ed, "(buffer-id)"); // the identity of the buffer shown
+    expect(first).not.toBe("nil");
+    executeTlisp(ed, '(buffer-insert "text")');
+    executeTlisp(ed, '(switch-to-buffer "*scratch*")');
+    executeTlisp(ed, '(switch-to-buffer "origin")');
+    expect(str(ed, "(buffer-id)")).toBe(first); // the same buffer
+    expect(str(ed, `(buffer-id-name ${first})`)).toBe("origin");
+    executeTlisp(ed, '(buffer-rename "renamed")');
+    expect(str(ed, "(buffer-id)")).toBe(first); // a rename keeps the identity
+    expect(str(ed, `(buffer-id-name ${first})`)).toBe("renamed"); // under its new name
+    executeTlisp(ed, '(buffer-kill "renamed")');
+    expect(executeTlisp(ed, `(buffer-id-name ${first})`).type).toBe("nil"); // gone
+    executeTlisp(ed, '(buffer-create "renamed")');
+    executeTlisp(ed, '(switch-to-buffer "renamed")');
+    expect(str(ed, "(buffer-id)")).not.toBe(first); // a later buffer, the same name
+    expect(executeTlisp(ed, `(buffer-id-name ${first})`).type).toBe("nil");
+    // Two live buffers never share an identity.
+    executeTlisp(ed, '(switch-to-buffer "*scratch*")');
+    const scratch = str(ed, "(buffer-id)");
+    executeTlisp(ed, '(switch-to-buffer "renamed")');
+    expect(str(ed, "(buffer-id)")).not.toBe(scratch);
+    expect(str(ed, `(buffer-id-name ${scratch})`)).toBe("*scratch*");
+  });
+});
+
+describe("#375, grading round 3: the return buffer is a buffer, not a name", () => {
+  const readers: [string, string][] = [
+    ["help", "(describe-mode)"],
+    ["info", "(info)"],
+    ["man", '(man "ls")'],
+  ];
+
+  for (const [name, open] of readers) {
+    test(`${name}: the origin was killed and a DIFFERENT buffer has its name: q shows *scratch* (red first)`, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, '(switch-to-buffer "*scratch*")');
+      executeTlisp(ed, '(buffer-create "origin")');
+      executeTlisp(ed, '(switch-to-buffer "origin")');
+      executeTlisp(ed, '(buffer-insert "the first origin")');
+      executeTlisp(ed, open);
+      executeTlisp(ed, '(buffer-kill "origin")');
+      executeTlisp(ed, '(buffer-create "origin")'); // a new buffer under the old name
+      executeTlisp(ed, '(switch-to-buffer "origin")');
+      executeTlisp(ed, '(buffer-insert "the replacement")');
+      expect(str(ed, "(buffer-text)")).toBe("the replacement");
+      executeTlisp(ed, `(switch-to-buffer "${name === "help" ? "*Help*" : name === "info" ? "*Info*" : "*Man*"}")`);
+      await ed.handleKey("q");
+      expect(str(ed, "(buffer-current)")).toBe("*scratch*"); // not the replacement
+      expect(str(ed, '(switch-to-buffer "origin")')).toBe("origin");
+      expect(str(ed, "(buffer-text)")).toBe("the replacement"); // and it was not touched
+    });
+
+    test(`${name}: the origin was RENAMED while the reader was open: q returns to it under its new name (red first)`, async () => {
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, '(switch-to-buffer "*scratch*")');
+      executeTlisp(ed, '(buffer-create "origin")');
+      executeTlisp(ed, '(switch-to-buffer "origin")');
+      executeTlisp(ed, '(buffer-insert "l1\nl2\nl3\nl4")');
+      executeTlisp(ed, "(cursor-move 2 1)");
+      executeTlisp(ed, open);
+      const reader = str(ed, "(buffer-current)");
+      executeTlisp(ed, '(switch-to-buffer "origin")');
+      executeTlisp(ed, '(buffer-rename "renamed")'); // buffer-rename renames the current buffer
+      executeTlisp(ed, '(buffer-create "origin")'); // and a new buffer takes the old name
+      executeTlisp(ed, `(switch-to-buffer "${reader}")`);
+      await ed.handleKey("q");
+      expect(str(ed, "(buffer-current)")).toBe("renamed"); // the original, under its new name
+      expect(str(ed, "(cursor-line)")).toBe("2"); // with its cursor
+      expect(str(ed, "(cursor-column)")).toBe("1");
+    });
+  }
+});
+
 describe("#375: the state after q", () => {
   test("the help buffer is at the end of the buffer order", async () => {
     const ed = await fileEditor();

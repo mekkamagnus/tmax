@@ -1,3 +1,5 @@
+# #375 (grading round 3): 448 -> 450 — buffer-id + buffer-id-name (the identity of a
+# buffer: the buffer q returns to is a buffer, not whichever buffer has its name).
 # Refrozen 432->433 (issue #318 landing rebase): +confirmation-token-revoke (the
 # #360 coach r10: 447 -> 448 — file-entry-id (lstat identity for mark records).
 # #360 coach r8: 444 -> 447 — dired-encode-name/-decode-name (reversible display encoding) + dired-mark-rows (identity-preserved marks).
@@ -55,6 +57,8 @@ buffer-get-char-at-position
 buffer-get-line
 buffer-get-line-indent
 buffer-get-range
+buffer-id
+buffer-id-name
 buffer-insert
 buffer-insert-at-position
 buffer-kill

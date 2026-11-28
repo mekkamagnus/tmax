@@ -68,7 +68,10 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // #360 p1: 443 → 444 — dired-insert-lines (pre-formatted listing write).
     // #360 coach r8: 444 → 447 — encode/decode-name + mark-rows.
     // #360 coach r10: 447 → 448 — file-entry-id (lstat identity).
-    expect(live.length).toBe(448);
+    // #375 (grading round 3): 448 -> 450 — buffer-id + buffer-id-name (the
+    // identity of a buffer: q returns to the buffer that was shown, not to
+    // whichever buffer has its name by then).
+    expect(live.length).toBe(450);
     expect(live).toEqual(expected);
   });
 

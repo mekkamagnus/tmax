@@ -384,6 +384,24 @@ const DOCUMENTATION_DATABASE: DocumentationEntry[] = [
     related: ['buffer-kill', 'buffer-rename', 'buffer-switch'],
     type: 'function'
   },
+  {
+    name: 'buffer-id',
+    category: 'buffer',
+    signature: '(buffer-id)',
+    description: 'Return the identity of the current buffer: a number that lives as long as that buffer does. It follows the buffer through edits and switches and a rename, and it is not given to a buffer created later under the same name.',
+    examples: ['(buffer-id)'],
+    related: ['buffer-id-name', 'buffer-current', 'buffer-rename', 'buffer-kill'],
+    type: 'function'
+  },
+  {
+    name: 'buffer-id-name',
+    category: 'buffer',
+    signature: '(buffer-id-name id)',
+    description: 'Return the name the buffer with the identity ID has now (it may have been renamed), or nil when that buffer was killed.',
+    examples: ['(buffer-id-name (buffer-id))'],
+    related: ['buffer-id', 'buffer-current', 'buffer-list'],
+    type: 'function'
+  },
   // ── SPEC-074: comment commands ────────────────────────────────────────
   {
     name: 'comment-dwim',

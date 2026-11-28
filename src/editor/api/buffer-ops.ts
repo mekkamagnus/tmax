@@ -66,6 +66,35 @@ export function createBufferOps(
   const api = new Map<string, TLispFunctionImpl>();
   const readonly = readonlyBuffers ?? new Set<string>();
 
+  // The identity of a buffer (#375). A buffer's OBJECT is replaced on edits
+  // and switches, so the object cannot be the identity; a NAME can be taken
+  // by a later buffer (kill, then create under the same name). The identity
+  // is a number per LIVE NAME: it follows the name through edits and
+  // switches, moves with a rename, and dies with a kill or with a
+  // buffer-create under that name (which replaces the buffer). TS answers
+  // "which buffer is this?" and "what is its name now?"; what to do with the
+  // answer (where q returns to, *scratch* as the fallback) is T-Lisp.
+  const bufferIdByName = new Map<string, number>();
+  let nextBufferId = 1;
+  /** A name that left the buffer map lost its buffer; a name new there is a new buffer. */
+  const reconcileBufferIds = (): void => {
+    for (const name of [...bufferIdByName.keys()]) {
+      if (!buffers.has(name)) bufferIdByName.delete(name);
+    }
+    for (const name of buffers.keys()) {
+      if (!bufferIdByName.has(name)) {
+        bufferIdByName.set(name, nextBufferId);
+        nextBufferId += 1;
+      }
+    }
+  };
+  /** The buffer OLD moves to NEW (a rename): same buffer, new name. */
+  const moveBufferId = (oldName: string, newName: string): void => {
+    const moved = bufferIdByName.get(oldName);
+    bufferIdByName.delete(oldName);
+    if (moved !== undefined) bufferIdByName.set(newName, moved);
+  };
+
   function isReadonly(): boolean {
     for (const [name, buf] of buffers) {
       if (buf === getCurrentBuffer() && readonly.has(name)) return true;
@@ -88,6 +117,9 @@ export function createBufferOps(
     const name = nameArg.value as string;
     const buffer = TextBufferImpl.create("");
     buffers.set(name, buffer);
+    // A new buffer under NAME, also when NAME was in use: a new identity
+    // (given at the next reconcile).
+    bufferIdByName.delete(name);
 
     return Either.right(createString(name));
   });
@@ -156,6 +188,49 @@ export function createBufferOps(
       }
     }
 
+    return Either.right(createNil());
+  });
+
+  api.set("buffer-id", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "buffer-id");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    reconcileBufferIds();
+    const currentBuffer = getCurrentBuffer();
+    if (!currentBuffer) {
+      return Either.right(createNil());
+    }
+    for (const [name, buffer] of buffers) {
+      if (buffer === currentBuffer) {
+        const id = bufferIdByName.get(name);
+        return Either.right(id === undefined ? createNil() : createNumber(id));
+      }
+    }
+    return Either.right(createNil());
+  });
+
+  api.set("buffer-id-name", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-id-name");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const idArg = args[0]!;
+    if (idArg.type === "nil") {
+      return Either.right(createNil());
+    }
+    const typeValidation = validateArgType(idArg, "number", 0, "buffer-id-name");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+    reconcileBufferIds();
+    const wantedId = idArg.value as number;
+    for (const [name, id] of bufferIdByName) {
+      if (id === wantedId) {
+        return Either.right(createString(name));
+      }
+    }
+    // The buffer with that identity is gone.
     return Either.right(createNil());
   });
 
@@ -983,12 +1058,16 @@ export function createBufferOps(
           `buffer-kill: buffer "${name}" not found`
         ));
       }
+      // The identity dies here, so that a buffer created under the same
+      // name later is a different buffer.
+      bufferIdByName.delete(name);
       return Either.right(createString(killed));
     }
 
     // Local fallback: remove from this closure's Map and switch current to an
     // insertion-order survivor (or leave current if it is not the killed one).
     buffers.delete(name);
+    bufferIdByName.delete(name);
     if (buffers.size === 0) {
       return Either.right(createString(name));
     }
@@ -1077,12 +1156,15 @@ export function createBufferOps(
           `buffer-rename: failed to rename current buffer to "${newName}"`
         ));
       }
+      // The same buffer under a new name keeps its identity.
+      moveBufferId(oldName, newName);
       return Either.right(createString(result));
     }
 
     // Local fallback: re-key only the buffers Map (no metadata to preserve).
     buffers.delete(oldName);
     buffers.set(newName, currentBuffer);
+    moveBufferId(oldName, newName);
     return Either.right(createString(newName));
   });
 
