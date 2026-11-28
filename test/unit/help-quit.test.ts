@@ -106,6 +106,46 @@ describe("#375: q returns to the buffer that was on screen", () => {
   });
 });
 
+describe("#375: q returns to the buffer where the user was", () => {
+  const cases: [string, string, string[]][] = [
+    ["help", "(describe-mode)", []],
+    ["info", "(info)", ["n", "t"]],
+    ["man", '(man "ls")', ["}", "{"]],
+  ];
+  for (const [name, open, keys] of cases) {
+    test(`${name}: the cursor of the returned buffer is where it was (red first)`, async () => {
+      const path = join(dir, "cursor.md");
+      writeFileSync(path, "l1\nl2\nl3\nl4\nl5\n");
+      const ed = await createStartedEditor("");
+      executeTlisp(ed, `(find-file-open "${path}")`);
+      executeTlisp(ed, "(cursor-move 3 1)");
+      expect(str(ed, "(cursor-line)")).toBe("3");
+      executeTlisp(ed, open);
+      for (const key of keys) await ed.handleKey(key);
+      await ed.handleKey("q");
+      expect(str(ed, "(buffer-current)")).toBe(path);
+      // switch-to-buffer alone puts the cursor at the top of the buffer.
+      expect(str(ed, "(cursor-line)")).toBe("3");
+      expect(str(ed, "(cursor-column)")).toBe("1");
+    });
+  }
+
+  test("a cursor position that no longer exists (the line was removed meanwhile) is clamped, not an error (guard after the fix)", async () => {
+    const path = join(dir, "cursor-short.md");
+    writeFileSync(path, "l1\nl2\nl3\nl4\nl5\n");
+    const ed = await createStartedEditor("");
+    executeTlisp(ed, `(find-file-open "${path}")`);
+    executeTlisp(ed, "(cursor-move 4 0)");
+    executeTlisp(ed, "(describe-mode)");
+    executeTlisp(ed, `(switch-to-buffer "${path}")`);
+    executeTlisp(ed, '(buffer-delete-range 2 0 5 0)'); // the file is shorter now
+    executeTlisp(ed, '(switch-to-buffer "*Help*")');
+    await ed.handleKey("q");
+    expect(str(ed, "(buffer-current)")).toBe(path);
+    expect(Number(str(ed, "(cursor-line)"))).toBeLessThan(4);
+  });
+});
+
 describe("#375: help opened from help returns to the buffer before the first page", () => {
   test("two help pages, then q: the file buffer", async () => {
     const ed = await fileEditor();

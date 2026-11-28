@@ -13,6 +13,9 @@
 (defvar man-return-buffer nil
   "The buffer that was shown when *Man* was opened (#375). q (man-quit)
 buries *Man* and shows this buffer again. nil while *Man* is closed.")
+(defvar man-return-cursor nil
+  "The (line column) the cursor had in man-return-buffer when *Man* was
+opened (#375): q puts it back.")
 
 ;; Parse an input string into (topic . section-or-nil). Accepts "topic",
 ;; "topic(sec)", and "sec topic".
@@ -45,7 +48,8 @@ page onto man-history. Returns the buffer name, or nil if the page is missing."
             ;; #375: remember where *Man* was entered from. A page opened
             ;; from *Man* itself keeps the FIRST buffer.
             (unless (string= (buffer-current) man-buffer-name)
-              (setq man-return-buffer (buffer-current)))
+              (setq man-return-buffer (buffer-current))
+              (setq man-return-cursor (list (cursor-line) (cursor-column))))
             (buffer-switch man-buffer-name)
             (buffer-set-read-only nil man-buffer-name)
             (let ((lines (buffer-line-count)))
@@ -126,9 +130,11 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 was shown when the man page was opened, or *scratch* when that buffer is
 gone. Returns the buried name."
   (interactive)
-  (let ((return-buffer man-return-buffer))
+  (let ((return-buffer man-return-buffer)
+        (position man-return-cursor))
     (setq man-return-buffer nil)
-    (funcall "bury-buffer-and-switch" man-buffer-name return-buffer)
+    (setq man-return-cursor nil)
+    (funcall "bury-buffer-and-switch" man-buffer-name return-buffer position)
     (editor-set-mode "normal")))
 
 ;; ── man-mode ───────────────────────────────────────────────────────────

@@ -25,6 +25,9 @@ so it can be killed and is recreated on the next describe call.")
   "The buffer that was shown when this help session was opened (#375). q
 (help-bury) buries *Help* and shows this buffer again. nil while no help
 session is open.")
+(defvar help-return-cursor nil
+  "The (line column) the cursor had in help-return-buffer when this help
+session was opened (#375): q puts it back.")
 
 ;; ── Shared renderer ───────────────────────────────────────────────────
 (defun describe-to-help (title body)
@@ -36,7 +39,8 @@ consistent."
     ;; #375: remember where this help session was opened from. A page opened
     ;; from *Help* itself keeps the FIRST buffer, so q leaves help entirely.
     (unless (string= (buffer-current) help-buffer-name)
-      (setq help-return-buffer (buffer-current)))
+      (setq help-return-buffer (buffer-current))
+      (setq help-return-cursor (list (cursor-line) (cursor-column))))
     ;; Push current page onto help history before rendering the new one.
     (help-history-push title body)
     (unless (member help-buffer-name (buffer-list))
@@ -409,9 +413,11 @@ that was shown when this help session was opened — the buffer before the
 first page when help was opened from help, or *scratch* when that buffer
 is gone. Returns the buried name."
   (interactive)
-  (let ((return-buffer help-return-buffer))
+  (let ((return-buffer help-return-buffer)
+        (position help-return-cursor))
     (setq help-return-buffer nil)
-    (funcall "bury-buffer-and-switch" help-buffer-name return-buffer)))
+    (setq help-return-cursor nil)
+    (funcall "bury-buffer-and-switch" help-buffer-name return-buffer position)))
 
 (major-mode-register "help" '() nil)
 (major-mode-doc "help" "Read-only navigation mode for *Help* — RET follows references, TAB cycles, l/r history, q buries")
@@ -471,6 +477,9 @@ helpgrep results (major-mode 'helpgrep')."
 (defvar info-return-buffer nil
   "The buffer that was shown when *Info* was opened (#375). q (info-bury)
 buries *Info* and shows this buffer again. nil while *Info* is closed.")
+(defvar info-return-cursor nil
+  "The (line column) the cursor had in info-return-buffer when *Info* was
+opened (#375): q puts it back.")
 (defvar info-buffer-name "*Info*")
 
 (defun info--render-node (node-name)
@@ -485,7 +494,8 @@ buries *Info* and shows this buffer again. nil while *Info* is closed.")
         ;; #375: remember where *Info* was entered from. A node opened
         ;; from *Info* itself keeps the FIRST buffer.
         (unless (string= (buffer-current) info-buffer-name)
-          (setq info-return-buffer (buffer-current)))
+          (setq info-return-buffer (buffer-current))
+          (setq info-return-cursor (list (cursor-line) (cursor-column))))
         (buffer-switch info-buffer-name)
         (buffer-set-read-only nil info-buffer-name)
         (let ((lines (buffer-line-count)))
@@ -538,9 +548,11 @@ buries *Info* and shows this buffer again. nil while *Info* is closed.")
 was shown when the manual was opened, or *scratch* when that buffer is
 gone. Returns the buried name."
   (interactive)
-  (let ((return-buffer info-return-buffer))
+  (let ((return-buffer info-return-buffer)
+        (position info-return-cursor))
     (setq info-return-buffer nil)
-    (funcall "bury-buffer-and-switch" info-buffer-name return-buffer)))
+    (setq info-return-cursor nil)
+    (funcall "bury-buffer-and-switch" info-buffer-name return-buffer position)))
 
 (defun info-menu-links ()
   "The menu items of the current node as (display target) lists, in menu

@@ -308,21 +308,26 @@ M-x discoverable via this docstring."
       (message (concat "Buried " buried))
       buried)))
 
-(defun bury-buffer-and-switch (name return-buffer)
+(defun bury-buffer-and-switch (name return-buffer position)
   "Bury buffer NAME and show RETURN-BUFFER in its place (the Emacs
 quit-window, #375). RETURN-BUFFER is shown only when it is a live buffer
-other than NAME; otherwise *scratch* is shown. The status line is cleared,
-so the shown buffer carries no message of the buried one. Returns the
-buried name."
-  (let ((target (if (and return-buffer
-                        (not (string= return-buffer name))
-                        (member return-buffer (buffer-list)))
-                   return-buffer
-                   "*scratch*")))
-    (buffer-bury name)
-    (switch-to-buffer target)
-    (editor-set-status "")
-    name))
+other than NAME; otherwise *scratch* is shown. POSITION is a (line
+column) list, the cursor the user had in RETURN-BUFFER when NAME was
+opened: switch-to-buffer alone puts the cursor at the top, so it is put
+back (only when RETURN-BUFFER is the buffer shown). The status line is
+cleared, so the shown buffer carries no message of the buried one.
+Returns the buried name."
+  (let ((shown (and return-buffer
+                    (not (string= return-buffer name))
+                    (member return-buffer (buffer-list)))))
+    (let ((target (if shown return-buffer "*scratch*")))
+      (buffer-bury name)
+      (switch-to-buffer target)
+      (if (and shown position)
+        (cursor-move (nth 0 position) (nth 1 position))
+        nil)
+      (editor-set-status "")
+      name)))
 
 ;; SPEC-073 / SPEC-084: SPC-led bindings (C-x is reserved by SPEC-067 for the
 ;; vim decrement-number prefix). SPC x r/z live in this buffer group.
