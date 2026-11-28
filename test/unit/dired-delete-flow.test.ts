@@ -202,7 +202,9 @@ describe("#372 part 3: no stale status message", () => {
     for (let i = 0; i < rows; i++) if (str(ed, `(buffer-line ${i})`) === "  alpha.txt") row = i;
     executeTlisp(ed, `(cursor-move ${row} 0)`);
     await ed.handleKey("C");
-    executeTlisp(ed, '(minibuffer-set-input "copy-of-alpha.txt")');
+    // An ABSOLUTE destination: a bare one counts from the daemon's working
+    // folder, not from the listed folder, until #374 lands.
+    executeTlisp(ed, `(minibuffer-set-input "${join(vault, "copy-of-alpha.txt")}")`);
     executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(ed.getState().statusMessage ?? "").toContain("Copied"); // the copy reported
     // The deletion flow starts now.
