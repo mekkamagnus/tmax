@@ -249,6 +249,19 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     return;
   }
 
+  // A key the current major mode binds itself ("normal" + this major mode)
+  // wins over the global T-Lisp keymap, so modes like info/help/man can use
+  // keys that vim also binds (n, p, u, i, q, ...). Global bindings still
+  // apply to every key the major mode does not bind.
+  if (majorMode && majorMode !== "fundamental") {
+    const own = lookupOwnMajorModeBinding(editor, lookupKey, majorMode);
+    if (own) {
+      clearWhichKey(editor, wk);
+      await executeCommand(editor, own.command);
+      return;
+    }
+  }
+
   // Keymap binding lookup → execute command
   const cmdResult = exec(`(keymap-ref (current-keymap) "${escape(lookupKey)}")`);
   const cmdRight = isRight(cmdResult) ? cmdResult.right : null;
@@ -330,6 +343,21 @@ function lookupMajorModeBinding(editor: EditorDispatchPort, lookupKey: string, m
       const mapping = resolveMapping(mappings, "normal", majorMode);
       if (mapping) return mapping;
     }
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a binding that the major mode defines itself for `lookupKey`
+ * (mapping.majorMode === majorMode). Global and mode-only mappings are
+ * ignored, so they keep going through the T-Lisp keymap.
+ */
+function lookupOwnMajorModeBinding(editor: EditorDispatchPort, lookupKey: string, majorMode: string) {
+  for (const form of majorModeLookupKeys(lookupKey)) {
+    const mappings = editor.getKeyMappings().get(form);
+    if (!mappings) continue;
+    const own = mappings.filter(m => m.majorMode === majorMode && (m.mode === "normal" || !m.mode));
+    if (own.length > 0) return resolveMapping(own, "normal", majorMode);
   }
   return undefined;
 }
