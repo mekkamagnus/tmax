@@ -1349,7 +1349,9 @@ export class Editor {
       const text = args[0]!.value as string;
       const links: TLispValue[] = [];
       // Menu items: * Name::  or  * Name: Node.  or  * Name: (file)Node.
-      const menuRe = /^\*\s+([^:]+)(?:::|:\s*([^\.\n]+))/gm;
+      // The target stays on the item's own line: with `\s*` here the "* Menu:"
+      // heading swallowed the first item as its "target" (FIX ORDER 2, item 5).
+      const menuRe = /^\*\s+([^:]+)(?:::|:[ \t]*([^\.\n]+))/gm;
       let m;
       while ((m = menuRe.exec(text)) !== null) {
         const displayName = m[1]!.replace(/::$/, "").replace(/:\s*.*/, "").trim();

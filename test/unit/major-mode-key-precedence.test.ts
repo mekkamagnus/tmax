@@ -161,8 +161,13 @@ describe("#368 a: the keys work in the real editor (commands executed)", () => {
     expect(node()).toBe("Node: Top");
     expect(truthy(ed, "(vim-find-pending-p)")).toBe(false);
     await ed.handleKey("i");
-    expect(ed.getState().mode).toBe("normal"); // not vim's insert mode
+    // The node prompt of the reader (FIX ORDER 2, item 5), not vim's
+    // insert mode; Enter alone opens the Index.
+    expect(ed.getState().mode).toBe("mx");
+    expect(ed.getState().minibufferView?.prompt).toContain("node");
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
     expect(node()).toBe("Node: Index");
+    expect(ed.getState().mode).toBe("normal");
     await ed.handleKey("t");
     await ed.handleKey("m");
     expect(ed.getState().mode).toBe("mx"); // the menu prompt, not vim's mark

@@ -87,11 +87,15 @@ test('info-parse-links finds menu items in Top node text', async () => {
   } finally { try { await server.shutdown(); } catch {} }
 }, 30_000);
 
-test('(info-goto-node) opens the Index node', async () => {
+test('(info-goto-node) prompts for a node; Enter alone opens the Index node', async () => {
+  // FIX ORDER 2, item 5: i is a prompt for a node now (it jumped to the
+  // Index without a prompt before).
   const { editor, server } = await startedEditor();
   try {
     editor.executeCommand('(info)');
     editor.executeCommand('(info-goto-node)');
+    expect(editor.getState().mode).toBe('mx');
+    editor.executeCommand('(minibuffer-dispatch-key "Enter")');
     editor.executeCommand('(buffer-switch "*Info*")');
     expect(evalStr(editor, '(buffer-text)')).toContain('Node: Index');
   } finally { try { await server.shutdown(); } catch {} }

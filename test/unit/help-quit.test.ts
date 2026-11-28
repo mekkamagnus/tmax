@@ -131,7 +131,9 @@ describe("#375: help opened from help returns to the buffer before the first pag
     executeTlisp(ed, "(info)");
     await ed.handleKey("n");
     await ed.handleKey("t");
-    await ed.handleKey("i");
+    await ed.handleKey("i"); // the node prompt; Enter alone opens the Index
+    executeTlisp(ed, '(minibuffer-dispatch-key "Enter")');
+    expect(str(ed, "(buffer-current)")).toBe("*Info*");
     await ed.handleKey("q");
     expect(str(ed, "(buffer-current)")).toBe(file);
   });
